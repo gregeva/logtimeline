@@ -262,6 +262,50 @@ full setup safe to re-run was the alternative, set aside because every install
 step on every host (Homebrew's upgrade-on-install, WinGet, cpanm) would have
 to become a guaranteed no-op, each a separate promise to keep and test.
 
+### Phase 4: the one rule every script follows
+
+With the environment established by setup and asserted by the check, a script
+takes `perl`, `bash` and `python3` from `PATH` and nothing else:
+
+- First lines are `#!/usr/bin/env perl`, `#!/usr/bin/env bash`,
+  `#!/usr/bin/env python3`; a script starts another interpreter by its bare
+  name. No absolute interpreter path, no `brew --prefix`, no change to `PATH`.
+- A harness's `PERL` override stays as an override and defaults to `perl`.
+- **Exceptions, each a sealed environment that builds its own `PATH`:** the
+  setup scripts (they establish it), and the two container builds
+  (`build/ubuntu-package.sh` inside `ubuntu:20.04`, `build/windows-package.sh`
+  naming Strawberry Perl inside its Wine container).
+- `tests/lib/require-bash.sh` stays: it guards a harness started from any
+  shell, inside a session or not. Its message names the host's setup and its
+  `--validate`, not Homebrew.
+
+What the rule removes or rewrites, against the inventory in § The class of
+fault:
+
+| Occurrence | Becomes |
+|---|---|
+| `ltl` line 1 `#!/opt/homebrew/bin/perl` | `#!/usr/bin/env perl` |
+| the Windows shim at Git's `/opt/homebrew/bin/perl` | no longer written; full setup removes one left by an earlier run |
+| `PERL="${PERL:-/opt/homebrew/bin/perl}"` in 15 harnesses | `PERL="${PERL:-perl}"`, and the per-harness fallback line goes |
+| `PATH` set from `brew --prefix` in the two notice-surface prototype scripts | removed |
+| `#!/usr/bin/perl` in five prototype scripts, `/opt/homebrew/bin/perl` in `prototype/426-asbuilt-run.sh` | `env perl`, bare `perl` |
+| the example in `tests/profile/checks/README.md` | bare `perl` |
+| the `export PATH="$(brew --prefix)..."` lines in `CLAUDE.md` and `README.md` | the host's setup, and its `--validate` |
+| `require-bash.sh`'s Homebrew hint | names the host's setup and `--validate` |
+| historical records (`tests/profile/results/*`, `releases/*`, past investigations) | untouched: they record the interpreter of their time |
+
+### Phase 4: investigation stages, one per environment
+
+Each stage runs on the host it is for, tries the setup and the check there, and
+records what it finds here before the next.
+
+| Stage | Host | What it establishes |
+|---|---|---|
+| 1 | macOS development host | the check script, the session-start hook, `build/macos-setup.sh` with `--repair` and `--validate`, the rule applied to every script; the harness suite passes |
+| 2 | Linux development host | a new Linux setup script (the distribution's Perl, `local::lib`), the check's Linux column, the screenshot tools on Linux; the harness suite passes |
+| 3 | Windows development host | `build/windows-setup.ps1` with `--repair` and `--validate`, the check under Git Bash, `./ltl` through `env perl` with no shim, the hooks, the profiler with `-DevDeps` |
+| 4 | the container builds | `build/windows-package.sh` (Wine) and `build/ubuntu-package.sh` build as before, with the develop block in `build/cpanfile.windows` |
+
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
 
 From https://code.claude.com/docs/en/hooks.md and
