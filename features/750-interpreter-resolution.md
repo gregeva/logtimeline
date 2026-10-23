@@ -900,6 +900,15 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   (`build/macos-package.sh arm64`, which runs `perl -S pp`), and see which
   `pp` it starts and whether the binary runs. The keg line becomes a second
   piece of the shell step only if this shows it is needed.
+  Attempted 2026-10-23, with the architect's go-ahead: `perl -S cpanm
+  --notest PAR::Packer` under Homebrew Perl 5.44 installed nothing. The
+  network's web proxy answered the `Archive-Zip-1.68.tar.gz` download with an
+  HTML block page ("Not allowed to upload/download encrypted or
+  password-protected archive files"), so `Archive::Zip`, then `PAR`, then
+  PAR::Packer bailed out. Read, not measured: `/usr/bin/pp`, which `perl -S`
+  finds without the keg line, is the four lines `use strict; use warnings;
+  use pp; pp->go();`, so under Homebrew Perl it would load Homebrew Perl's own
+  `pp.pm`.
 - **CI:** `.github/workflows/release-build.yml` runs
   `./build/macos-setup.sh --package`. Verified by a manual run of that
   workflow on the issue branch (its release job runs on tags only), asked of
