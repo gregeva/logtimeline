@@ -9,8 +9,9 @@ Status: specification reworked on the issue branch `750-interpreter-resolution`
 environment and setup never overwrites the user's shell configuration (D12,
 D6 as changed, D13, condition 8 retired); stage 1 (the macOS development
 host) planned in § Stage 1 implementation plan; steps 0 (the `before`
-benchmark) and 1 (`process/check-environment.pl`) done, next step 2 (the
-session-start hook). Open, measured in stage 1: what still needs the
+benchmark), 1 (`process/check-environment.pl`) and 2 (the session-start
+hook) done, AC8's budget with the architect; next step 3
+(`build/macos-setup.sh`). Open, measured in stage 1: what still needs the
 Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
 provides on macOS). What is in
 place today is recorded as found, not as the contract: most of it was put in
@@ -455,6 +456,9 @@ https://code.claude.com/docs/en/hooks-guide.md:
 - **Languages:** the examples are shell with `jq`, PowerShell for Windows, and
   Node for exec form; there is no section on writing hooks for several
   platforms.
+- **Several hooks for one event** (read 2026-10-23): "When an event fires,
+  its matching hooks run in parallel." "When several hooks return
+  `additionalContext` for the same event, Claude receives all of the values."
 - **SessionStart:** plain stdout, or `additionalContext`, goes into the
   model's context; `systemMessage` is shown to the user; exit 2 shows stderr
   as a hook error notice and the session proceeds. Default timeout 600 s; the
@@ -638,6 +642,12 @@ scripts, put first on `PATH` to change what one name resolves to.
       Pass when: it prints that no Perl was found, the `PATH` it saw and the
       pointer to condition 1's entry, and exits so that the session proceeds.
       M L W.
+      - M, 2026-10-23, pass: with only `sh` (macOS's, which is `/bin/bash`)
+        linked into the stand-in directory, the command read from
+        `.claude/settings.json` printed valid SessionStart JSON: a
+        `systemMessage` naming condition 1 with its pointer, and an
+        `additionalContext` saying no `perl` was on `PATH`, the `PATH` it saw
+        and the pointer; exit 0, nothing on stderr.
 - [ ] **AC7. A session started on a wrong environment.** From the checkout,
       start Claude Code as `PATH="/usr/bin:/bin:$PATH" claude` (on Windows,
       Git's `/usr/bin` first from Git Bash).
@@ -649,6 +659,17 @@ scripts, put first on `PATH` to change what one name resolves to.
       set-up host, `time sh -c '<command>'`, five runs.
       Pass when: the median is within the budget the architect sets from the
       stage 1 measurement. M L W; unknown until measured.
+      - M, 2026-10-23, measured: the hook's command, five runs, 0.28 to
+        0.30 s, median 0.29 s. Each condition alone (`--condition N`, five
+        runs, medians): startup and condition 1 0.02 s; condition 3, the
+        twenty runtime modules, 0.07 s; condition 7, the NumPy and SciPy
+        import, 0.11 s; condition 8, three clean zsh starts, the `-lic` one
+        reading the architect's `~/.zshrc`, 0.10 s; the others 0.02 to
+        0.03 s. The outstanding-state sweep of
+        `process/claude-hooks/session-start.sh`, the other SessionStart
+        entry, five runs: 3.27 to 4.06 s, median 3.40 s. The two run in
+        parallel (§ How Claude Code runs a hook), so the check adds nothing to
+        how long a session takes to start on this host.
 
 **Setup (R4, R5)**
 
