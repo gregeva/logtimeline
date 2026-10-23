@@ -43,7 +43,9 @@ one per environment). What stage 1 leaves to them:
   tool is started, for stage 3 to adapt to Strawberry Perl. Condition 7's
   `modules` test (D15) exists for macOS only; stages 2 and 3 give their host
   entries in `%place` theirs, once their setups say where NumPy and SciPy
-  are installed.
+  are installed, and each reproduces its host's column of § Phase 4:
+  investigation stages, the scenarios of one tool installed two ways, under
+  AC4a and AC10b.
 - `README.md`'s Linux and Windows instructions, and `docs/toolchain-guidance.md`
   § Windows development host (trap 3, the shim at Git's
   `/opt/homebrew/bin/perl`, now unused by `./ltl`), are stages 2 and 3's to
@@ -501,6 +503,24 @@ records what it finds here before the next.
 | 3 | Windows development host | `build/windows-setup.ps1` with `--repair` and `--validate`, the check under Git Bash, `./ltl` through `env perl` with no shim, the hooks, the profiler with `--dev-deps`, the option set parsed by PowerShell |
 | 4 | the container builds | `build/windows-package.sh` (Wine) and `build/ubuntu-package.sh` build as before, with the develop block in `build/cpanfile.windows` |
 
+**Scenarios each stage reproduces: one tool or module installed two ways.**
+Found on a second macOS host whose Python was set up by hand (§ Step 5, the
+second host): a check that a tool runs and a module imports passes while the
+copy that wins is not the setup's. Each stage reproduces its host's forms of
+this, on that host, in a throwaway home or a stand-in directory where it can,
+and records under AC4a and AC10b what the check and the setup do. The forms
+below for Linux and Windows are read, not measured; the stage confirms or
+replaces them. Stage 4's containers run no harness and install into a fresh
+image, so none of these forms arises there.
+
+| Form | macOS (stage 1, measured) | Linux (stage 2) | Windows (stage 3) |
+|---|---|---|---|
+| the setup's interpreter is installed but another comes first | Homebrew's Python present only as a versioned formula another formula needs, so no `python3` link, and `/usr/bin/python3` first | a `python3` from pyenv, conda or Homebrew on Linux ahead of the distribution's | the Microsoft Store stub, or another Python, ahead of the WinGet Python; a Python that provides `python` and `py` but no `python3` |
+| a module installed outside the setup's install shadows the setup's | `pip` into Homebrew Python's `site-packages`, ahead of the formula's (SciPy 1.17.1 over 1.18.1) | `pip install --user` into `~/.local/lib/python3.X/site-packages`, or `sudo pip` into `/usr/local/lib/python3.X/dist-packages`, ahead of the distribution's packages | `pip install --user` into the user's `site-packages` under `%APPDATA%\Python`, ahead of the install's own |
+| the setup's package is installed but not in effect | a formula installed but not linked, its paths held by files put there another way | a `pip` copy of a module the distribution's package also provides | a module installed for one Python version while `PATH` reaches another |
+| the setup's default moved past what is installed | Homebrew's `python` alias names 3.15 while the modules were on 3.14 | a distribution upgrade changing `python3`'s minor version under `--user` installs | WinGet upgrading Python to a new minor version, leaving `pip` modules on the old one |
+| the same for Perl (condition 3 judges loading, not where from) | a Homebrew Perl upgrade across a minor version leaving the modules in the old keg (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism) | a module in `~/perl5` (`local::lib`) and the distribution's `lib*-perl` package at different versions | Strawberry Perl reinstalled or upgraded, its `site\lib` modules from the earlier one |
+
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
 
 From https://code.claude.com/docs/en/hooks.md and
@@ -697,9 +717,12 @@ scripts, put first on `PATH` to change what one name resolves to.
       with `pip` in its `site-packages`: `ln -s <Homebrew python3.x>
       "$D/python3"; PATH="$D:$PATH" perl process/check-environment.pl
       --condition 7`, then the same with `PYTHONPATH` set to the formula's
-      own `site-packages` in its Cellar. Pass when: the first run fails
-      condition 7 naming the file the module loads from, with its pointer;
-      the second passes. M.
+      own `site-packages` in its Cellar. Linux and Windows: the same, with
+      the module installed by `pip install --user` over the setup's, then
+      with it removed. Each host also runs the table's other Python forms
+      (§ Phase 4: investigation stages, the scenarios). Pass when: the first
+      run fails condition 7 naming the file the module loads from, with its
+      pointer; the second passes. M L W.
       - M, 2026-10-23, pass, on a second macOS development host (§ Step 5,
         the second host): the first run failed, found `<D>/python3 ->
         …/Cellar/python@3.14/…/python3.14; SciPy loads from
@@ -798,10 +821,16 @@ scripts, put first on `PATH` to change what one name resolves to.
 - [x] **AC10b. Setup links what it installs, and leaves files it did not put
       there.** macOS, on a host with a formula installed but not linked
       because a `pip` install holds its paths: `./build/macos-setup.sh`.
-      Pass when: it exits 1 naming each colliding directory with its file
-      count and the pointer, every formula already linked is left as it is,
-      and `find` lists nothing newer than a mark made before the run in the
-      Python `site-packages` directories. M.
+      Linux and Windows: each host's full setup with a `pip install --user`
+      copy of NumPy or SciPy in place, and with Python's or Perl's modules
+      left on an earlier minor version (the scenarios' table). Pass when: it
+      exits 1 naming each colliding directory with its file count and the
+      pointer, every formula already linked is left as it is, and `find`
+      lists nothing newer than a mark made before the run in the Python
+      `site-packages` directories; on Linux and Windows, setup either brings
+      the setup's copy into effect without removing the developer's files,
+      or stops naming them, and the check passes only in the first case.
+      M L W.
       - M, 2026-10-23, pass, on a second macOS development host (§ Step 5,
         the second host): exit 1, "scipy is installed but cannot link",
         `1289 /opt/homebrew/lib/python3.14/site-packages/scipy` (the count
