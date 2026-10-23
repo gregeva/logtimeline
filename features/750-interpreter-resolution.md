@@ -1337,6 +1337,35 @@ this host; AC16's macOS result is recorded there. Linux setup, the Windows
 setup's options and modes, the shim's removal, and the container builds
 belong to stages 2 to 4.
 
+## Stage 2: the Linux development host
+
+### The check on this host, as found (2026-10-23)
+
+Ubuntu 26.04.1 LTS, the distribution's Perl 5.40.1 at `/usr/bin/perl`, bash
+at `/usr/bin/bash`, Python 3.14 at `/usr/bin/python3`; `PATH` the
+distribution's default with `~/.local/bin` first. `perl
+process/check-environment.pl` took 0.46 s and exited 1: 4 pass, 4 FAIL, 1
+note, 2 n/a.
+
+| # | Result | Found |
+|---|---|---|
+| 1, 2, 6, 9 | pass | `perl`, `bash` (4 or later) and `tmux` on `PATH`, the distribution's |
+| 3 | FAIL | 7 of 20 runtime modules do not load: Devel::Size, Text::CSV, Text::CSV_PP, YAML::PP and its three schema modules |
+| 4 | note | Devel::NYTProf does not load |
+| 5 | FAIL | `PERL5LIB` not set; no `~/perl5` |
+| 7 | FAIL | `/usr/bin/python3` imports neither NumPy nor SciPy |
+| 8 | FAIL | every shell mode (`-lc`, `-lic`, `-c`) resolves the same three tools as the check's own `PATH`; fails on condition 7's Python only |
+| 10 | n/a | the Linux screenshot tools are not yet named; this stage establishes them |
+| 11 | n/a | Windows only, by the conditions table |
+
+Nothing of ltl's is installed on this host: no `~/perl5`, no `local::lib`, no
+`cpanm`, no `lib*-perl` package for the cpanfile's modules, no NumPy or SciPy,
+and no `logs/` corpus in the checkout. `perl -c ltl` fails at its first
+non-core `use` (Devel::Size). The report matches the host: each FAIL names a
+piece that is absent, and the three tools resolve the same in every shell
+mode. The host is a clean start for the Linux setup script that stage 2
+writes.
+
 ## Troubleshooting a failed condition
 
 The entries live in `docs/development-environment.md` § Troubleshooting a
