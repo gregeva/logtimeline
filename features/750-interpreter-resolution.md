@@ -166,6 +166,32 @@ Not yet locked; the shape the design is being worked toward.
   `python3` on `PATH` imports NumPy and SciPy, and the host-limited tools
   (tmux, the screenshot tools) are present where they are expected.
 
+### How Claude Code runs a hook (documentation, read 2026-10-23)
+
+From https://code.claude.com/docs/en/hooks.md and
+https://code.claude.com/docs/en/hooks-guide.md:
+
+- **Shell form** (no `args`): "The `command` string is passed to a shell:
+  `sh -c` on macOS and Linux, Git Bash on Windows, or PowerShell when Git Bash
+  isn't installed." A per-hook `shell` field chooses `bash` or `powershell`.
+- **Exec form** (`args` present): "Claude Code resolves `command` as an
+  executable on `PATH` and spawns it directly with `args` as the argument
+  vector. There is no shell". On Windows it needs a real executable (a
+  `.exe`), and the documentation names "the `node` plus script-path pattern"
+  as the one that "works on every platform because `node.exe` is a real
+  binary". `perl` with a script path is the same pattern.
+- **Environment:** "A hook process inherits the parent environment", the
+  environment of the Claude Code process, not the Bash tool's snapshot.
+- **Languages:** the examples are shell with `jq`, PowerShell for Windows, and
+  Node for exec form; there is no section on writing hooks for several
+  platforms.
+- **SessionStart:** plain stdout, or `additionalContext`, goes into the
+  model's context; `systemMessage` is shown to the user; exit 2 shows stderr
+  as a hook error notice and the session proceeds. Default timeout 600 s; the
+  documentation asks for these hooks to be fast.
+- **Paths:** exec form is preferred for any hook that names
+  `$CLAUDE_PROJECT_DIR`; in shell form the placeholder is double-quoted.
+
 ## Records found
 
 `./process/find-records.sh --issues 'brew --prefix' 'opt/homebrew' 'require-bash' 'shebang' 'Homebrew bash' 'Homebrew Perl' 'macos-setup' 'windows-setup'`
