@@ -770,6 +770,9 @@ scripts, put first on `PATH` to change what one name resolves to.
       Pass when: `find` lists nothing and `git status` is as it was before
       the run. M L W.
       - M, 2026-10-23, pass: `find` listed nothing, `git status` unchanged.
+      - M, 2026-10-23, pass, on a second macOS development host after D15 and
+        D16 (Python and Perl started to judge where each module loads from):
+        `find` listed nothing, `git status` unchanged.
 
 **The session-start check (R3)**
 
@@ -808,6 +811,10 @@ scripts, put first on `PATH` to change what one name resolves to.
         entry, five runs: 3.27 to 4.06 s, median 3.40 s. The two run in
         parallel (§ How Claude Code runs a hook), so the check adds nothing to
         how long a session takes to start on this host.
+      - M, 2026-10-23, pass, on a second macOS development host after D15 and
+        D16, `CLAUDE_PROJECT_DIR` set to the checkout: the hook's command,
+        five runs, 0.35 to 0.37 s, median 0.36 s; the outstanding-state
+        sweep, five runs, median 4.28 s.
 
 **Setup (R4, R5)**
 
