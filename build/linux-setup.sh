@@ -104,9 +104,11 @@ fi
 # developer owns puts them first, and the check's report shows which.
 shell_step() {
     echo "[shell] Does a login shell find the tools? (environment check, condition 8)"
-    if perl "$CHECK" --condition 8; then
-        echo "[shell] Nothing to add."
+    local report
+    if report="$(perl "$CHECK" --condition 8)"; then
+        echo "[shell] Yes. Nothing to add."
     else
+        printf '%s\n' "$report"
         echo "[shell] Nothing added: the distribution's tools are on its default PATH, so a line in the shell configuration puts other tools first; the report above shows what a login shell resolves."
     fi
 }
@@ -127,7 +129,7 @@ echo "Linux development host setup"
 echo "=========================================="
 
 echo "[1/4] Generating cpanfile..."
-"$SCRIPT_DIR/generate-cpanfile.sh"
+"$SCRIPT_DIR/generate-cpanfile.sh" >/dev/null
 
 # The cpanfile's runtime modules, and with --dev-deps those of its develop block.
 modules=$(perl -ne '
@@ -155,8 +157,8 @@ echo "[2/4] Installing the distribution's packages..."
 [ "$dev_deps" = 1 ] || echo "[info] --dev-deps also installs the development-only profiling tools."
 [ "$package" = 1 ] || echo "[info] --package also installs PAR::Packer, for building the static binary."
 echo "[info] sudo apt-get install ${packages[*]}"
-sudo apt-get update -q
-sudo apt-get install -y -q "${packages[@]}"
+sudo apt-get update -qq
+sudo apt-get install -y -qq "${packages[@]}"
 
 echo "[3/4] Modules from Perl's own install..."
 missing=()
