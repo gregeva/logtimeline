@@ -252,8 +252,34 @@ macOS development host, 2026-10-23:
 `.zshenv` alone loses every login shell, because `/etc/zprofile` runs
 `path_helper` after it and puts `/usr/bin` back in front; `.zprofile` alone
 misses every shell that is not a login shell. Only the block in both files
-meets condition 9 in every mode, so macOS setup writes its managed block into
-both `~/.zshenv` and `~/.zprofile`.
+resolves Homebrew's tools in every mode.
+
+**Decided by the architect (2026-10-23): the tools must resolve in every login
+shell, as Homebrew advises; on macOS the place is `~/.zprofile` alone.**
+Homebrew's installer puts its line in `~/.zprofile`, so a developer who
+followed it already passes and nothing of ltl's is added. Login shells cover
+every new terminal tab and what descends from it (Claude Code, its Bash tool,
+its hooks, the harnesses), `ssh host command`, and a script's `zsh -l`. Not
+covered, and not required: an application's plain `zsh -c`, which reads only
+`~/.zshenv`. A copy in `~/.zshenv` was set aside because it adds to the
+user's configuration beyond what Homebrew asks for, runs `brew shellenv` in
+every zsh (about 20 ms measured, including each agent command), and still
+misses the `sh` and `bash` children of applications, such as git hooks run
+by a graphical client, which read no zsh file at all.
+
+This host, each mode started from a clean environment (2026-10-23), with the
+developer's Homebrew lines in `~/.zshrc` and no `~/.zprofile`:
+
+| Mode | `perl` | `bash` | `python3` |
+|---|---|---|---|
+| `-c` | `/usr/bin/perl` | `/bin/bash` | `/usr/bin/python3` |
+| `-lc` | `/usr/bin/perl` | `/bin/bash` | `/usr/bin/python3` |
+| `-ic` | `/opt/homebrew/opt/perl/bin/perl` | `/opt/homebrew/bin/bash` | `/opt/homebrew/bin/python3` |
+| `-lic` | `/opt/homebrew/opt/perl/bin/perl` | `/opt/homebrew/bin/bash` | `/opt/homebrew/bin/python3` |
+
+Every terminal tab is right, and every non-interactive login shell runs the
+system tools; under this decision the clean login shell condition fails here
+until Homebrew's line is in `~/.zprofile`.
 
 ### Phase 4: what Homebrew's own configuration already provides on macOS (measured)
 
@@ -521,7 +547,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D4 | Setup modes: full, `--repair`, `--validate` | architect |
 | D9 | One option set on every setup script: `--dev-deps`, `--package`, `--repair`, `--validate`, `-h`/`--help`; CI's macOS step runs `--package`; 544 D6's environment variable goes | architect |
 | D5 | Profiling on every host; 544 D5a amended | architect |
-| D6 | macOS writes its block into both `~/.zshenv` and `~/.zprofile` | delegated, from the measurement |
+| D6 | The development tools must resolve in every login shell, as Homebrew advises; on macOS the place is `~/.zprofile` alone, and a plain non-login `zsh -c` is not required to resolve them (first taken, delegated, as both `~/.zshenv` and `~/.zprofile`; changed under D12) | architect |
 | D7 | The one rule and its exceptions; `require-bash.sh` stays as a guard with a host-neutral message | delegated |
 | D8 | The environment check is its own SessionStart hook entry | delegated |
 | D10 | No harness for this work. The acceptance criteria are test cases written out in this document; the developer runs each one by hand on the hosts it names, at that host's stage, and records the result under it | architect |
@@ -622,12 +648,12 @@ scripts, put first on `PATH` to change what one name resolves to.
       unchanged, the check passes, and the only addition is one delimited
       piece for what the check reported missing; after the second run `cmp`
       reports no difference. M L W.
-- [ ] **AC11. Every shell mode resolves the same tools.** After AC10a's first
-      run, for each mode `-c`, `-lc`, `-ic`, `-lic`:
+- [ ] **AC11. Every login shell resolves the same tools.** After AC10a's first
+      run, for each login mode `-lc` and `-lic`:
       `env -i HOME="$T" ZDOTDIR="$T" zsh <mode> 'command -v perl bash python3'`
       (bash on Linux; on Windows the Git Bash modes stage 3 establishes).
-      Pass when: every mode prints the paths conditions 2, 6 and 7 expect.
-      M L W.
+      Pass when: each login mode prints the paths conditions 2, 6 and 7
+      expect, and AC10a added nothing to `.zshenv`. M L W.
 - [ ] **AC12. The Linux setup works without root for Perl modules.** On a
       Linux host carrying only the distribution's packages, run the Linux
       setup, then `--validate`.
