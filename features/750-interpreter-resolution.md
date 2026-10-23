@@ -34,21 +34,24 @@ environment): `build/windows-package.sh` (Strawberry Perl under Wine) and
 part). The standing description of the check, the setup per host and the
 troubleshooting entries is `docs/development-environment.md`.
 
-Not run on macOS or Linux since stage 3 changed the files all hosts share:
+Not run on Linux since stage 3 changed the files all hosts share:
 `process/check-environment.pl` (the Windows launcher, `run_capture_windows`,
 condition 7's interpreter line, `%tool_severity`, the message's handling of a
-missing tool), `tests/profile/profiling-preflight.sh` (the script directories
+missing tool, condition 9 failing under D20), `tests/profile/profiling-preflight.sh` (the script directories
 searched, the cpanfile named) and `process/claude-hooks/guard-write.sh` (paths
-in forward-slash form). Each keeps its macOS and Linux behaviour by
-construction; the next session on each host runs `--validate` and a profiling
-preflight before anything else.
+in forward-slash form). Each keeps its Linux behaviour by
+construction; the next session on Linux runs `--validate` and a profiling
+preflight before anything else. On macOS both ran on 2026-10-24 (§ Stage 4:
+the container builds).
 
-The completion gate runs once, after stage 4, on the macOS development host
-where the `before` benchmark was captured (`docs/process/workflow.md` § 3): the
-`after` benchmark (`./tests/baseline/run-benchmark.sh
-single-day-access-log-standard --label 750-after`) from a worktree beside the
-`release/0.20.0` one, so both sides run from the same kind of checkout,
-compared with `750-before.tsv`; then the full harness suite (AC16).
+The completion gate runs once, after stage 4, on one macOS development host
+(`docs/process/workflow.md` § 3): the `before` benchmark and the `after` side
+are captured on the same machine, each from a worktree, side by side: `before`
+at the base commit `7d0b57f8`, `after` at the branch tip
+(`./tests/baseline/run-benchmark.sh single-day-access-log-standard --label
+750-before`, then `--label 750-after`), compared; then the full harness suite
+(AC16). A `750-before.tsv` captured on another host is not compared with an
+`after` from this one.
 
 State outside the repository, on the Windows development host: `BASH_ENV`
 set to `~/.bashrc` as a user environment variable (D17); the wrapper at
@@ -59,11 +62,14 @@ State outside the repository, on the first macOS development host only (the
 one the keg measurement was parked from):
 
 - `tests/baseline/results/750-before.tsv`, untracked, in the `release/0.20.0`
-  worktree (`.claude/worktrees/release-0.20.0`), captured at `7d0b57f8`. The
-  `after` side needs this machine.
+  worktree (`.claude/worktrees/release-0.20.0`), captured at `7d0b57f8`; compared
+  only with an `after` captured on that machine.
 - `~/.zprofile`, created by `--repair` in step 5, holding the one marked
   Homebrew block.
 - PAR::Packer is not installed for Homebrew Perl 5.44.
+
+State outside the repository, on the second macOS development host: tmux 3.8
+installed by the full setup (D20); Rancher Desktop's engine started for stage 4.
 
 ## The architect's framing (2026-10-23)
 
@@ -272,7 +278,7 @@ by trusting the Perl the check runs under.
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
 | 7 | `python3` on `PATH` imports NumPy and SciPy, each from the setup's install (D15) | Homebrew's, not `/usr/bin/python3`; each module's file resolves into its own formula's Cellar; on every host, neither module from the user's `site-packages` nor installed more than once | the distribution's; NumPy and SciPy from its packages, in `/usr/lib/python3/dist-packages` (D3) | the WinGet Python; the modules' place established in the Windows stage | fail where the harnesses run, note on Windows |
 | 8 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7; the report also shows, for context, what a new terminal tab (an interactive login shell) and a plain non-login shell resolve | `zsh -lc`; `~/.zprofile` (D6) | a login bash | a Git Bash login shell | fail |
-| 9 | `tmux` is on `PATH` | expected | expected | not expected | note |
+| 9 | `tmux` is on `PATH` | expected | expected | not expected | fail (D20) |
 | 10 | the screenshot tools are present | `swiftc` (Xcode command line tools) | not expected: the PNG is drawn by WebKit on macOS (`features/598-screenshot-capture.md` D23) | not expected | note |
 | 11 | the repository checks files out with LF endings | n/a | n/a | `core.autocrlf=false` | fail |
 
@@ -655,6 +661,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D17 | Windows setup sets `BASH_ENV` to `~/.bashrc` as a user environment variable, so the plain Git Bash shell Claude Code runs its hooks in reads the managed block that puts Strawberry Perl first; and the check's session-start message has a Windows story of its own for every failure, rather than falling to the branches written for macOS and Linux. Decided by the architect 2026-10-24, from § Stage 3, the check on this host as found | architect |
 | D18 | Condition 8 reports each tool's fault at the severity of the condition that owns it: 2 for perl, 6 for bash, 7 for python3. A Python fault in a login shell is therefore a note on Windows, as condition 7 is there, and a failure on macOS and Linux, as before. Decided by the architect 2026-10-24, from stage 3's AC10b run, where the full setup exited 1 on condition 8 over a stray NumPy that condition 7 reported as a note | architect |
 | D19 | On Windows the check may leave the `~/.bash_profile` that Git for Windows' `/etc/profile.d/bash_profile.sh` writes from a login shell, when `~/.bashrc` exists and none of `~/.bash_profile`, `~/.bash_login` and `~/.profile` does; AC5 records it as the one exception to the check writing nothing. Condition 8 keeps judging a real login shell, which the developer's first Git Bash terminal would make write the same file. Decided by the architect 2026-10-24, from stage 3's AC5 run | architect |
+| D20 | tmux is required on macOS and Linux: condition 9 fails when it is missing there, as the full harness suite, which the completion gate runs, needs it for the terminal-interface navigation tests; `build/macos-setup.sh` installs it, as `build/linux-setup.sh` already did. Decided by the architect 2026-10-24, at the start of stage 4, on a macOS host whose check had reported a missing tmux only as a note | architect |
 
 ## Acceptance criteria
 
@@ -1774,6 +1781,40 @@ forward-slashed, lower-case drive), a released baseline TSV and
 `docs/test-logs.md` allowed after a backslashed `Read` of it in the
 transcript, blocked with none. 32 of 32 as expected; the committed guard let
 20 of them through.
+
+## Stage 4: the container builds
+
+### The check on this host, as found (2026-10-24)
+
+A second macOS development host (Homebrew Perl 5.44.0 with PAR::Packer, a
+`~/.zprofile` holding Homebrew's own line; not the host holding
+`750-before.tsv`). The first runs since stage 3 changed the files all hosts
+share: `./build/macos-setup.sh --validate`, 8 pass, 0 FAIL, 1 note (no
+`tmux`), 1 `n/a`, exit 0; `tests/profile/profiling-preflight.sh` found
+`/opt/homebrew/bin/perl`, Devel::NYTProf 6.15 and `nytprofhtml` in Homebrew
+Perl's own `bin`, exit 0. Docker is Rancher Desktop's, engine 29.1.3, aarch64.
+
+### tmux is required on macOS and Linux (D20)
+
+`build/macos-setup.sh` never installed tmux, while condition 9 expects it on
+macOS and `build/linux-setup.sh` installs it; a missing tmux was a note, so a
+host that cannot run the full suite passed its check. Now the full macOS
+setup installs and links the `tmux` formula with cpanminus (step 4), and
+`test_on_path` reports a missing tool as `FAIL`. The session-start message
+gains a story for condition 9: "Environment check: no tmux on PATH, so the
+terminal-interface navigation tests cannot run.", the setup not run or tmux
+removed as the likely cause, and the full setup as the fix.
+
+Run on this host, 2026-10-24, before installing tmux: `perl
+process/check-environment.pl --condition 9` reported `9  FAIL  tmux is on
+PATH`, found "no tmux on PATH", exit 1; `--hook` showed the three lines above
+with "Fix: run ./build/macos-setup.sh.". Then `./build/macos-setup.sh`
+installed tmux 3.8 with its dependencies libevent, utf8proc and jemalloc, the
+shell step added nothing, and the final check read 9 pass, 0 FAIL, 0 note,
+1 `n/a`, exit 0. Not run on Linux: there the full setup already installs
+tmux, and the condition's change is the severity alone. GitHub's macOS
+runner now installs tmux in `--package`'s full setup before the check that
+ends it.
 
 ## Troubleshooting a failed condition
 

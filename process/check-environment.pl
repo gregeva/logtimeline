@@ -485,7 +485,7 @@ sub test_clean_login_shell {
 sub test_on_path {
     my ( $name, $why ) = @_;
     my $found = tool($name);
-    return $found ? passed( found => $found->{path} ) : missing_tool( $name, 'note', "$name on PATH ($why)" );
+    return $found ? passed( found => $found->{path} ) : missing_tool( $name, 'FAIL', "$name on PATH ($why)" );
 }
 
 sub test_swift_compiler {
@@ -639,6 +639,10 @@ sub user_message {
             push @lines, 'Likely cause: a copy installed outside the setup is found first.',
                 'Fix: remove that copy (a pip install, or the PERL5LIB entry that adds it), then start Claude Code again.';
         }
+    }
+    if ( $fails->(9) ) {
+        push @lines, 'Environment check: no tmux on PATH, so the terminal-interface navigation tests cannot run.',
+            'Likely cause: the setup has not run on this host, or tmux was removed.', 'Fix: ' . $run->($full) . '.';
     }
     if ( $fails->(11) && $result->{11}{found} !~ /^no git/ ) {
         push @lines, 'Environment check: this clone checks files out with CRLF line endings.',

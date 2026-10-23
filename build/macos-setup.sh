@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 # macOS development host setup: installs Homebrew Perl, Homebrew bash,
-# Homebrew Python with NumPy and SciPy, cpanminus and the project's Perl
-# modules, adds to the shell configuration only what a login shell is missing,
+# Homebrew Python with NumPy and SciPy, cpanminus, tmux and the project's
+# Perl modules, adds to the shell configuration only what a login shell is missing,
 # and runs the environment check (process/check-environment.pl).
 #
 # Requirements:
@@ -36,9 +36,9 @@ Usage: build/macos-setup.sh [--dev-deps] [--package]
 Sets up a macOS host for working on ltl. Requires Homebrew.
 
   (no option)   full setup: install Homebrew Perl, bash, Python with NumPy
-                and SciPy, cpanminus and the project's Perl modules; add to
-                the shell configuration what a login shell is missing; run
-                the environment check
+                and SciPy, cpanminus, tmux and the project's Perl modules;
+                add to the shell configuration what a login shell is
+                missing; run the environment check
   --dev-deps    full setup, plus the development-only modules (the profiler)
   --package     full setup, plus PAR::Packer, for building the static binary
   --repair      install nothing: add to the shell configuration only what
@@ -222,9 +222,10 @@ echo "[3/7] Installing Homebrew Python with NumPy and SciPy..."
 # SciPy; with Homebrew first on PATH, python3 is Homebrew's.
 brew install python numpy scipy
 
-echo "[4/7] Installing cpanminus..."
-brew install cpanminus
-link_formulae perl bash python numpy scipy cpanminus
+echo "[4/7] Installing cpanminus and tmux..."
+# tmux drives the terminal-interface navigation tests.
+brew install cpanminus tmux
+link_formulae perl bash python numpy scipy cpanminus tmux
 
 if [ "$package" = 1 ]; then
     echo "[5/7] Installing PAR::Packer..."
