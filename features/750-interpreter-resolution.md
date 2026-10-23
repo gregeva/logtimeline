@@ -169,6 +169,13 @@ Not yet locked; the shape the design is being worked toward.
   https://code.claude.com/docs/en/setup.md), so Node is not a runtime the
   hook can count on. A Windows host without Git Bash, where Claude Code
   falls back to PowerShell, is treated as not set up.
+- **Linux's expected Perl (agreed as the starting point, not a hard
+  requirement):** the distribution's Perl, with the project's modules
+  installed under the developer's home through `local::lib` (`~/perl5`,
+  `PERL5LIB` in the shell configuration): no root, and the same Perl the CI
+  Linux build uses. The Linux investigation stage tries it on a Linux host
+  and settles what Linux ends up with; where it does not work out, it is
+  changed, not forced.
 - **Setup makes the shell configuration right without reinstalling
   anything:** the step that writes it is idempotent, or setup has a fix mode
   that repairs the configuration alone.
