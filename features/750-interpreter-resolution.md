@@ -141,6 +141,31 @@ Cases on record, found by searching issues and commit messages for
 | A script whose first line names the system Perl | `#!/usr/bin/perl` in five prototype scripts (`prototype/426-revalidate-v6.pl`, `-v7.pl`, `-v8-rebless.pl`, `prototype/heatmap-mini.pl`, `prototype/heatmap-test.pl`) | run by their path, they start `/usr/bin/perl` whatever `PATH` holds; no recorded failure |
 | A shell context that does not read `~/.zshrc` | phase 1, measured | system Perl, bash 3.2 and system Python |
 
+### Direction (architect, 2026-10-23)
+
+Not yet locked; the shape the design is being worked toward.
+
+- **One environment check, read-only, in one script**, holding one list of
+  expectations shared by every host. Where hosts differ (Homebrew Perl on
+  macOS, Strawberry Perl on Windows), an expectation carries a per-host
+  alternative inside the same list, not a separate list per host.
+- **The check runs before setup has run**, on all three operating systems, so
+  it cannot count on bash, PowerShell or the right Perl. It is written in
+  Perl: a developer of a Perl application has some Perl, even the wrong one,
+  on every host.
+- **Each setup script has a `--validate` mode** that installs and changes
+  nothing and runs the check; a full setup ends by running it.
+- **A session-start check** runs it when a Claude Code session starts, so a
+  wrong environment is reported before work begins. CI runs outside Claude
+  Code and has no session start; it is out of scope for this check.
+- **Setup makes the shell configuration right without reinstalling
+  anything:** the step that writes it is idempotent, or setup has a fix mode
+  that repairs the configuration alone.
+- What the check tests is the requirement, not a location: the `perl` on
+  `PATH` loads the project's modules, `bash` on `PATH` is 4 or later,
+  `python3` on `PATH` imports NumPy and SciPy, and the host-limited tools
+  (tmux, the screenshot tools) are present where they are expected.
+
 ## Records found
 
 `./process/find-records.sh --issues 'brew --prefix' 'opt/homebrew' 'require-bash' 'shebang' 'Homebrew bash' 'Homebrew Perl' 'macos-setup' 'windows-setup'`
