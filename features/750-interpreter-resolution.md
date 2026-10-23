@@ -248,6 +248,20 @@ its CPAN modules behind (544 § Machine state and mechanism). The architect's
 condition is that setup never reinstalls anything to put the configuration
 right.
 
+**Decided by the architect (2026-10-23): each setup script has three modes.**
+
+| Mode | Installs | Writes the shell configuration | Runs the check |
+|---|---|---|---|
+| full setup (no switch) | yes | yes | yes, last |
+| `--repair` | no | yes, the managed blocks only | yes, after writing |
+| `--validate` | no | no | yes |
+
+`--repair` cannot install or upgrade anything by construction; it is what the
+check names when a condition about the shell configuration fails. Making the
+full setup safe to re-run was the alternative, set aside because every install
+step on every host (Homebrew's upgrade-on-install, WinGet, cpanm) would have
+to become a guaranteed no-op, each a separate promise to keep and test.
+
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
 
 From https://code.claude.com/docs/en/hooks.md and
