@@ -1460,6 +1460,51 @@ AC16's Linux part (every harness starts) and AC14 passed.
 
 Stage 2 complete, 2026-10-23: every Linux test case passes.
 
+## Stage 3: the Windows development host
+
+### The check on this host, as found (2026-10-24)
+
+Windows 11 on ARM64, Git for Windows (`/clangarm64`), Strawberry Perl 5.42.3
+at `C:\Strawberry\perl\bin`, Git's own Perl 5.42.2 at `/usr/bin/perl`. Setup's
+managed block in `~/.bashrc` prepends Strawberry Perl, and `~/.bash_profile`
+sources `~/.bashrc`. Claude Code was started from a `cmd.exe` window.
+
+The session-start hook reported 5 pass, 3 FAIL, 0 note, 2 n/a:
+
+| # | Result | Found |
+|---|---|---|
+| 1, 6, 7, 11 | pass | |
+| 2 | FAIL | `/usr/bin/perl` (5.42.2), Git's own |
+| 3 | FAIL | 8 of 21 runtime modules do not load under Git's Perl |
+| 4 | FAIL | "build/cpanfile.windows lists no modules, or cannot be read": the file has no develop block, and the empty develop list is reported as a FAIL, where the conditions table makes condition 4 a note |
+| 8 | pass | login (`-lc`) and new tab (`-lic`) resolve Strawberry Perl; plain (`-c`) resolves `/usr/bin/perl` |
+
+The message shown to the developer read "Likely cause: Claude Code was
+started with a PATH that differs from a new terminal's … Fix: quit Claude
+Code, open a new terminal, and start it there." On Windows that fix cannot
+work. Measured by starting Git's `bin\bash.exe -c 'command -v perl'` from
+PowerShell:
+
+| Environment | `perl` resolved |
+|---|---|
+| Claude Code's own `PATH` | `/usr/bin/perl` |
+| Strawberry Perl first in the inherited Windows `PATH` | `/usr/bin/perl`: the launcher puts `/clangarm64/bin:/usr/bin:~/bin` in front of whatever `PATH` it inherits |
+| `BASH_ENV` set to `~/.bashrc` | `/c/Strawberry/perl/bin/perl`, Git's `/usr/bin` second |
+
+Claude Code runs its hooks in that plain shell, which reads no startup file,
+so the managed block never applies to them, whatever terminal Claude Code was
+started from. `user_message` in the check has no Windows case: with
+condition 8 passing it falls to the branch written for macOS and Linux.
+`BASH_ENV` was set as a Windows user variable on this host (`setx`), with the
+architect's approval; Windows setup does not set it.
+
+With `BASH_ENV` in effect, the check runs under Strawberry Perl and cannot
+start any tool: `run_capture`'s `open( $fh, '-|' )` is not supported there,
+and `cmd.exe` reports "'-' is not recognized as an internal or external
+command" once per tool. The report then reads 2 pass, 5 FAIL (3, 4, 6, 8, 11),
+each from a tool that was never started. This is the adaptation of
+`run_capture` that § Resuming hands to this stage.
+
 ## Troubleshooting a failed condition
 
 The entries live in `docs/development-environment.md` § Troubleshooting a
