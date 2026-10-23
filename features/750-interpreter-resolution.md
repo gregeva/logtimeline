@@ -834,6 +834,14 @@ scripts, put first on `PATH` to change what one name resolves to.
         and the `CLAUDE.md` session-start item now say a failed check is the
         host's, never related to an issue or branch; the check's output
         carries no issue reference. To be rerun.
+      - M, 2026-10-23, pass, rerun by the architect from a new session on the
+        broken `PATH`: the user saw the message; the agent's first reply
+        opened with the verdict that the failures come from the machine's
+        setup, not the repository, named no issue or branch, tabled what the
+        session and a clean login shell resolve for conditions 2, 3, 6 and 7,
+        named the cause (the tab's `PATH` changed by hand, `/usr/bin:/bin` in
+        front, condition 8 passing) and the fix (a new terminal tab, nothing to
+        install, no `--repair`).
 - [ ] **AC8. The hook is fast enough to run at every session start.** On a
       set-up host, `time sh -c '<command>'`, five runs.
       Pass when: the median is within the median of five timed runs of the
