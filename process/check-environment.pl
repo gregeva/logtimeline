@@ -390,10 +390,14 @@ if ($help) {
     exit 0;
 }
 
+# Some Perls give $^X as the bare name they were started by; the shell found
+# that name on PATH, and so does this.
+my $ran_under = File::Spec->file_name_is_absolute($^X) ? $^X : find_on_path($^X) // $^X;
+
 my @lines = (
     'Environment check (process/check-environment.pl)',
     'host:   ' . ( $host_name{$^O} // $^O ),
-    "perl:   ran under $^X ($^V)",
+    "perl:   ran under $ran_under ($^V)",
     'PATH:   ' . ( $ENV{PATH} // '' ),
     '',
 );
