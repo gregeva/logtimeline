@@ -196,7 +196,7 @@ by trusting the Perl the check runs under.
 | 1 | a `perl` is on `PATH` | | | | fail |
 | 2 | it is the development Perl, not another on the host | Homebrew's, not `/usr/bin` or `/System` | the distribution's | Strawberry Perl's, not Git's own `/usr/bin/perl` | fail |
 | 3 | it loads every runtime module the cpanfile requires | `build/cpanfile` | `build/cpanfile` | `build/cpanfile.windows` | fail |
-| 4 | it loads the development-only modules (the profiler) | when installed | when installed | not installable today: `build/cpanfile.windows` carries no develop block (544 D5a, "there is no profiling on the Windows path"), against the architect's framing that profiling works on Windows too | note |
+| 4 | it loads the development-only modules (the profiler) | when installed | when installed | when installed (`-DevDeps`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
 | 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
 | 7 | `python3` on `PATH` imports NumPy and SciPy | Homebrew's, not `/usr/bin/python3` | the distribution's | the WinGet Python | fail where the harnesses run, note on Windows |
@@ -205,6 +205,17 @@ by trusting the Perl the check runs under.
 | 10 | `tmux` is on `PATH` | expected | expected | not expected | note |
 | 11 | the screenshot tools are present | `swiftc` (Xcode command line tools) | established in the Linux stage | not expected | note |
 | 12 | the repository checks files out with LF endings | n/a | n/a | `core.autocrlf=false` | fail |
+
+**Profiling on Windows (architect, 2026-10-23):** profiling works on Windows
+too; 544 D5a is amended so that `build/cpanfile.windows` carries the develop
+block. Finding, read from the code: `build/windows-setup.ps1 -DevDeps` adds
+`--with-develop` to `cpanm --cpanfile cpanfile.windows --installdeps .`, and
+`generate_windows_cpanfile()` in `build/generate-cpanfile.sh` writes that
+file without the develop block, so the switch installs nothing beyond the
+runtime modules, while `docs/toolchain-guidance.md` § Windows development
+host states "`-DevDeps` adds the profiler" and the script's own help says
+"Also install the development-only Perl modules (the profiler)". Not yet run
+on a Windows host.
 
 Condition 9 is the measured fault of phase 1: the Homebrew interpreters were
 set up only in `~/.zshrc`, read by interactive shells alone.

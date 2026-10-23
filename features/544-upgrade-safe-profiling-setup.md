@@ -196,8 +196,18 @@ on 'develop' => sub {
   invocation, which is true of both packagers today; adding an inclusion flag to either
   would need this restated.
 
-**D5a (delegated): `build/cpanfile.windows` does not carry the develop block.**
-*Rationale:* there is no profiling on the Windows path. `build/windows-package.sh` builds
+**D5a (amended by the architect, 2026-10-23, in `features/750-interpreter-resolution.md`):
+`build/cpanfile.windows` carries the develop block, as `build/cpanfile` does.**
+Profiling works on Windows too: a Windows development host (set up by
+`build/windows-setup.ps1`, whose `-DevDeps` switch asks for the development-only modules)
+profiles as macOS and Linux do. The Windows build is unaffected, because cpanm resolves the
+develop phase only when passed `--with-develop`, which `build/windows-package.sh` does not
+pass. The change is made under #750 (scripts find bash and Perl from the environment the
+setup prepared).
+
+*The decision as first taken (delegated), superseded by the amendment above:*
+`build/cpanfile.windows` does not carry the develop block.
+*Its rationale:* there is no profiling on the Windows path. `build/windows-package.sh` builds
 inside a Docker plus Wine container that exists to produce a binary; nothing under
 `tests/profile/` is ever invoked there, and the profiler module is an XS build that would
 add a compile step for nothing. Keeping the block out of the Windows variant also keeps
