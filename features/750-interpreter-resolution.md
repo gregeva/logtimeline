@@ -44,7 +44,7 @@ one per environment). What stage 1 leaves to them:
   user-site and installed-twice tests (D15) run on every host; its `modules`
   place test exists for macOS only. Stages 2 and 3 run their host's column
   of § Phase 4: investigation stages, one tool or module installed two ways,
-  under AC4a and AC10b, and stage 3 closes the Windows gap named there (an
+  under AC3a, AC4a and AC10b, and stage 3 closes the Windows gap named there (an
   interpreter judged by its wrapper's path).
 - `README.md`'s Linux and Windows instructions, and `docs/toolchain-guidance.md`
   § Windows development host (trap 3, the shim at Git's
@@ -271,7 +271,7 @@ by trusting the Perl the check runs under.
 |---|---|---|---|---|---|
 | 1 | a `perl` is on `PATH` | | | | fail |
 | 2 | it is the development Perl, not another on the host | Homebrew's, not `/usr/bin` or `/System` | the distribution's | Strawberry Perl's, not Git's own `/usr/bin/perl` | fail |
-| 3 | it loads every runtime module the cpanfile requires | `build/cpanfile` | `build/cpanfile` | `build/cpanfile.windows` | fail |
+| 3 | it loads every runtime module the cpanfile requires, each from the Perl's own install or the setup's, once (D16) | `build/cpanfile` | `build/cpanfile` | `build/cpanfile.windows` | fail |
 | 4 | it loads the development-only modules (the profiler) | when installed (`--dev-deps`) | when installed (`--dev-deps`) | when installed (`--dev-deps`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
 | 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
@@ -509,9 +509,9 @@ second host): a check that a tool runs and a module imports passes while the
 copy that wins is not the setup's. The check detects the class on every host
 now, without waiting for a stage to find it there: for Python, a module from
 the user's `site-packages` and a module installed more than once fail
-condition 7 on every host (D15), and each host's place test adds what only
+condition 7 on every host (D15); for Perl, a module from outside the Perl's built-in `@INC` and the setup's directory, or with two copies outside the core, fails condition 3 on every host (D16); and each host's place test adds what only
 that host's layout can tell. The forms for Linux and Windows are read, not
-measured; stages 2 and 3 run them on their hosts under AC4a and AC10b. Stage
+measured; stages 2 and 3 run them on their hosts under AC3a, AC4a and AC10b. Stage
 4's containers run no harness and install into a fresh image, so none of
 these forms arises there.
 
@@ -522,7 +522,7 @@ these forms arises there.
 | a stale copy left beside the setup's | `pip`'s NumPy metadata left under Homebrew's files (measured) | a `pip` copy beside the distribution's package | a second copy after a reinstall | every host: a module installed more than once |
 | the setup's package installed but not in effect | a formula installed but not linked (measured) | the distribution's package present, another copy first | modules installed for one Python while `PATH` reaches another | every host: an import failing, or a module installed more than once; macOS setup's link step names the files in the way |
 | the setup's default moved past what is installed | Homebrew's `python` alias names 3.15 while the modules were on 3.14 (measured) | a distribution upgrade changing `python3`'s minor version | WinGet upgrading Python, leaving the modules on the old one | every host: an import failing on the Python now first |
-| the same for Perl | a Homebrew Perl upgrade across a minor version leaving the modules in the old keg (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism) | a module in `~/perl5` and the distribution's `lib*-perl` package at different versions | Strawberry Perl reinstalled, its `site\lib` from the earlier one | condition 3 when a module no longer loads. **Not detected:** a module that loads from a copy outside the setup's install; condition 3 judges loading, not where from |
+| the same for Perl | a Homebrew Perl upgrade across a minor version leaving the modules in the old keg (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism) | a module in `~/perl5` and the distribution's `lib*-perl` package at different versions | Strawberry Perl reinstalled, its `site\lib` from the earlier one | every host: condition 3 when a module no longer loads, loads from outside the Perl's built-in `@INC` and the setup's directory, or has two copies outside the core (D16) |
 
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
 
@@ -653,6 +653,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D13 | Homebrew is a requirement of the macOS development host: `build/macos-setup.sh` stops when it is absent, as today, and never installs it. The case in D12's first wording, setup adding Homebrew's line after installing Homebrew itself, therefore does not arise | architect |
 | D14 | AC8's budget: the session-start check finishes within the outstanding-state sweep's time on the same host. The two SessionStart entries run in parallel, so the check then never lengthens session start, and each host is judged against itself rather than against a figure measured on macOS (decided 2026-10-23 from the stage 1 measurement: check 0.29 s, sweep 3.40 s, medians of five) | architect |
 | D15 | Condition 7 also judges where NumPy and SciPy load from: each module's file must resolve into the setup's install (on macOS its own formula's Cellar), so a `pip` install shadowing the setup's fails it. Decided 2026-10-23 from a second macOS host, where a `python3` link to Homebrew's Python passed condition 7 while it loaded a pip-installed SciPy 1.17.1 over Homebrew's unlinked 1.18.1 (§ Step 5). Linux and Windows name their place in their stages. Directed by the architect the same day, so the class is detected on every host now rather than when a stage finds it: on every host a module loaded from the user's `site-packages` (where `pip --user` installs), or a module Python sees installed more than once on `sys.path`, fails condition 7 | architect |
+| D16 | Condition 3 (and 4, the profiler) also judges where each module loads from, on every host: a module whose file lies outside the Perl's built-in `@INC` (the one it was built with, without what `PERL5LIB` or `PERLLIB` add) and the setup's own directory (on Linux `~/perl5`, D3) fails, as does one with two copies on `@INC` outside the core directories. A dual-life module upgraded over its core copy counts once. Decided by the architect 2026-10-23, extending D15 to Perl | architect |
 
 ## Acceptance criteria
 
@@ -698,6 +699,21 @@ scripts, put first on `PATH` to change what one name resolves to.
       - M, 2026-10-23, pass (the AC2 run): condition 3 found "Devel::Size does
         not load; 3 of 20 do not: Devel::Size, Text::CSV, Text::CSV_PP", with
         its pointer.
+- [x] **AC3a. A Perl module from outside the setup's install is reported**
+      (D16). A copy of a runtime module from the Perl's own `site_perl`, and
+      one of a core module, in a stand-in directory put first with
+      `PERL5LIB`. Linux: the same with `PERL5LIB` keeping `~/perl5` as well,
+      and a module installed both by the distribution and into `~/perl5`.
+      Pass when: condition 3 fails naming each module loading from the
+      stand-in, the site copy also as installed twice, the core copy not;
+      with no `PERL5LIB`, condition 3 passes. M L W.
+      - M, 2026-10-23, pass, on a second macOS development host: Text::CSV
+        and Getopt::Long each "loads from <D>/…, outside this Perl's install
+        and the setup's"; "Text::CSV is installed 2 times", with both paths;
+        Getopt::Long not counted twice; without `PERL5LIB` both conditions 3
+        and 4 pass. The system Perl run (AC2) reads as before D16: Apple's
+        `/System/Library/Perl/Extras` is on that Perl's built-in `@INC`.
+        The full check took 0.35 s before and after (medians of five).
 - [x] **AC4. Old bash and the system Python are reported.** macOS:
       `ln -s /bin/bash "$D/bash"; PATH="$D:$PATH" perl
       process/check-environment.pl`, then the same with
@@ -1254,7 +1270,7 @@ Two things hold for every entry:
 |---|---|---|
 | 1 | no `perl` on the `PATH` the check saw | the host is not set up, or the process that started the check did not inherit the setup's `PATH` (a Windows host without Git Bash, where Claude Code falls back to PowerShell, is treated as not set up) |
 | 2 | another Perl comes first | `PATH` order: Homebrew's line, or setup's addition, missing from a file this context reads (condition 8 shows which shell modes resolve what), or a later line in a shell file, or `path_helper` on macOS, putting the system directories back in front; on Windows, Git's `/usr/bin` ahead of Strawberry Perl |
-| 3 | the right Perl lacks a runtime module | the Perl is right but its modules are not where it looks: on macOS, a Homebrew Perl upgrade across a minor version leaves the modules installed for the old one behind (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism); a cpanfile changed since setup ran; on Windows, `build/cpanfile.windows` differs from `build/cpanfile`. Installing is the full setup's job, not `--repair`'s |
+| 3 | the right Perl lacks a runtime module, or loads one from outside its install, or from two copies | a module from outside: a `PERL5LIB` or `PERLLIB` entry the setup did not make (on macOS any; on Linux any but `~/perl5`), named in the report; two copies: a module installed again outside the core, such as a `local::lib` copy beside the distribution's `lib*-perl` package, both listed. the Perl is right but its modules are not where it looks: on macOS, a Homebrew Perl upgrade across a minor version leaves the modules installed for the old one behind (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism); a cpanfile changed since setup ran; on Windows, `build/cpanfile.windows` differs from `build/cpanfile`. Installing is the full setup's job, not `--repair`'s |
 | 4 | note: the profiler is not installed | expected unless setup ran with `--dev-deps`; the same upgrade cause as 3 applies |
 | 5 | Linux: `PERL5LIB` does not carry `~/perl5` | the line that sets it missing from a file this context reads, as for 2 |
 | 6 | the first `bash` is older than 4 | the system's bash ahead of the setup's; macOS's `/bin/bash` is 3.2. Same `PATH` causes as 2 |

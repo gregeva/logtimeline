@@ -145,14 +145,45 @@ sub cpanfile_modules {
     return @modules;
 }
 
-# Load each module in the Perl on PATH; the modules that did not load, in
-# cpanfile order, or undef when that Perl could not be started.
-sub modules_not_loading {
+# Started with the perl on PATH for conditions 3 and 4: its first argument is a
+# directory the setup installs modules into beyond the Perl's own (empty for
+# none), the rest the modules. For each module, one tab-separated line: its
+# name, whether it loads, the file it loaded from, whether that file lies
+# outside the Perl's own @INC (the one it was built with, without what
+# PERL5LIB or PERLLIB add) and the setup's directory, and every copy of it on
+# @INC outside the core directories, joined by ";". The core directories are
+# Config's privlib and archlib and any built-in one holding strict.pm (Debian
+# splits its core into perl-base). A dual-life module upgraded over its core
+# copy is one copy; a module from anywhere else, or two copies outside the
+# core, did not come from the setup alone.
+my $perl_modules = <<'END_PERL';
+use Config; use Cwd ();
+my ( $extra, @modules ) = @ARGV;
+sub norm { my $p = Cwd::realpath( $_[0] ) // $_[0]; $p =~ tr{\\}{/}; $^O eq 'MSWin32' ? lc $p : $p }
+sub under { my ( $file, @roots ) = @_; scalar grep { index( $file, "$_/" ) == 0 } @roots }
+my %added = map { norm($_) => 1 } grep { length } map { split /\Q$Config{path_sep}\E/ } grep { defined } @ENV{qw(PERL5LIB PERLLIB)};
+my @builtin = grep { !$added{$_} } map { norm($_) } grep { !ref && $_ ne '.' && -d } @INC;
+my @core = ( ( map { norm($_) } grep { defined && length } @Config{qw(privlibexp archlibexp)} ), grep { -f "$_/strict.pm" } @builtin );
+my @own  = ( @builtin, length $extra ? norm($extra) : () );
+for my $m (@modules) {
+    ( my $f = "$m.pm" ) =~ s{::}{/}g;
+    my $loads = eval { require $f; 1 } ? 1 : 0;
+    my $file  = $loads && defined $INC{$f} && !ref $INC{$f} ? norm( $INC{$f} ) : '';
+    my %seen;
+    my @copies = grep { !$seen{$_}++ && !under( $_, @core ) }
+        map { norm("$_/$f") } grep { !ref && -f "$_/$f" } @INC;
+    print join( "\t", $m, $loads, $file, ( $file ne '' && !under( $file, @own ) ? 1 : 0 ), join( ';', @copies ) ), "\n";
+}
+END_PERL
+
+# Load each module in the Perl on PATH and judge where it loaded from: a hash
+# per module in cpanfile order, or undef when that Perl could not be started.
+sub modules_judged {
     my ( $perl, @modules ) = @_;
-    my ( $status, $out ) = run_capture( $perl->{path}, '-e',
-        'for my $m (@ARGV) { (my $f = "$m.pm") =~ s{::}{/}g; print "$m\n" unless eval { require $f; 1 } }', @modules );
+    my $extra = $host eq 'linux' ? "$ENV{HOME}/perl5/lib/perl5" : '';
+    my ( $status, $out ) = run_capture( $perl->{path}, '-e', $perl_modules, $extra, @modules );
     return undef if $status != 0;
-    return [ split /\n/, $out ];
+    return [ map { my %m; @m{qw(name loads file outside copies)} = split /\t/, $_, -1; \%m } split /\n/, $out ];
 }
 
 # Where this host's setup puts each development tool: the test its resolved
@@ -280,18 +311,21 @@ sub test_modules {
     return { result => 'FAIL', expected => $expected, found => "build/$cpanfile lists no modules, or cannot be read" }
         unless @modules;
     my $perl = tool('perl') or return missing_tool( 'perl', $severity, $expected );
-    my $failed = modules_not_loading( $perl, @modules );
+    my $judged = modules_judged( $perl, @modules );
     return { result => $severity, expected => $expected, found => "$perl->{path} could not be started" }
-        unless defined $failed;
-    return passed( found => scalar(@modules) . ' modules load' ) unless @$failed;
-    my $count = @$failed;
-    return {
-        result   => $severity,
-        expected => $expected,
-        found    => "$failed->[0] does not load"
-            . ( $count > 1 ? "; $count of " . scalar(@modules) . ' do not: ' . join( ', ', @$failed ) : '' )
-            . " (perl: $perl->{path})",
-    };
+        unless defined $judged;
+    my @failed = map { $_->{name} } grep { !$_->{loads} } @$judged;
+    my @wrong  = (
+        ( map { "$_->{name} loads from $_->{file}, outside this Perl's install and the setup's" } grep { $_->{outside} } @$judged ),
+        ( map { my @c = split /;/, $_->{copies}; @c > 1 ? "$_->{name} is installed " . scalar(@c) . ' times: ' . join( ', ', @c ) : () }
+            @$judged ),
+    );
+    return passed( found => scalar(@modules) . ' modules load' ) unless @failed || @wrong;
+    my $count = @failed;
+    my @found;
+    push @found, "$failed[0] does not load" . ( $count > 1 ? "; $count of " . scalar(@modules) . ' do not: ' . join( ', ', @failed ) : '' ) if @failed;
+    push @found, @wrong;
+    return { result => $severity, expected => "$expected, each from this Perl's own install or the setup's, once", found => join( '; ', @found ) . " (perl: $perl->{path})" };
 }
 
 sub test_home_modules_visible {
