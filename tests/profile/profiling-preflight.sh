@@ -39,7 +39,7 @@ PROFILER_MODULE="Devel::NYTProf::Data"
 HTML_TOOL="nytprofhtml"
 INSTALL_COMMAND="cd build && cpanm --notest --installdeps --with-develop ."
 CHECK_ENVIRONMENT="$SCRIPT_DIR/../../process/check-environment.pl"
-POINTER="see: features/750-interpreter-resolution.md § Troubleshooting a failed condition"
+POINTER="see: docs/development-environment.md § Troubleshooting a failed condition"
 case "$(uname -s)" in
     Darwin) SETUP_COMMAND="./build/macos-setup.sh --dev-deps" ;;   # installs cpanm and the profiler
     *)      SETUP_COMMAND="" ;;

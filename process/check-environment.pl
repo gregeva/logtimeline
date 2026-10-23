@@ -9,10 +9,11 @@
 # script runs under, so any Perl runs it, set up or not: core modules only, no
 # syntax newer than Perl 5.30. Read-only: it installs, writes and changes
 # nothing. It reports what it expected and what it found, and points each
-# condition that does not pass at its entry in the troubleshooting section of
-# the specification; it carries no remedies. Run by every setup script's
+# condition that does not pass at its entry in docs/development-environment.md
+# § Troubleshooting a failed condition. Run by every setup script's
 # --validate, at the end of a full setup, and at session start by the hook in
-# .claude/settings.json. Specification: features/750-interpreter-resolution.md.
+# .claude/settings.json, whose message to the developer names the likely
+# scenario and the command to run.
 use strict;
 use warnings;
 use Config;
@@ -25,7 +26,7 @@ use POSIX ();
 
 my $repo_root = abs_path( File::Spec->catdir( dirname( abs_path(__FILE__) ), '..' ) );
 
-use constant POINTER      => 'features/750-interpreter-resolution.md § Troubleshooting a failed condition';
+use constant POINTER      => 'docs/development-environment.md § Troubleshooting a failed condition';
 use constant TOOL_TIMEOUT => 20;    # seconds for any one tool this script starts
 
 my %host_name = ( darwin => 'macOS', linux => 'Linux', msys => 'Windows', cygwin => 'Windows', MSWin32 => 'Windows' );
@@ -572,6 +573,8 @@ if ($hook) {
         $out{hookSpecificOutput}{additionalContext} =
             "Act on this in your first reply, before anything else: for each FAIL read the entry its pointer names, "
             . "work out the cause on this host, and tell the user the cause and the step that fixes it. "
+            . "A failed check describes this host's environment: it is not a defect of the repository, "
+            . "and is never related to an issue, branch or piece of work in progress. "
             . "The user was shown:\n$out{systemMessage}\n\n$report";
     }
     print JSON::PP->new->canonical->encode( \%out ), "\n";

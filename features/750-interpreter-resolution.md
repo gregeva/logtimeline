@@ -581,7 +581,8 @@ Written in the specification stage; the architect closed the stage without a lin
   what it found (the path and version of the tool on `PATH`, the module that
   did not load), the context it ran in (the Perl it ran under, the `PATH` it
   saw), and, for every condition not passing, a pointer to that condition's
-  entry in § Troubleshooting a failed condition of this document. It does not
+  entry in `docs/development-environment.md` § Troubleshooting a failed
+  condition. It does not
   carry remedies: whoever reads the report, the developer or the agent, reads
   the entry and investigates the host it is on. It is read-only: it installs,
   writes and changes nothing.
@@ -648,7 +649,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D7 | The one rule and its exceptions; `require-bash.sh` stays as a guard with a host-neutral message | delegated |
 | D8 | The environment check is its own SessionStart hook entry | delegated |
 | D10 | No harness for this work. The acceptance criteria are test cases written out in this document; the developer runs each one by hand on the hosts it names, at that host's stage, and records the result under it | architect |
-| D11 | The check reports what it expected, what it found and the context it ran in, and points at the failed condition's entry in this document's § Troubleshooting a failed condition; it carries no remedies, and the agent or developer reading it works out the cause on the host from that entry. Amended by the architect 2026-10-23, after AC7: at session start the user is shown a short message naming what is wrong, the likely scenario and the command to run; the pointers go only to the agent, whose context tells it to diagnose the failure in its first reply | architect |
+| D11 | The check reports what it expected, what it found and the context it ran in, and points at the failed condition's entry in § Troubleshooting a failed condition (now `docs/development-environment.md`, so that nothing the check shows or points at names an issue: the agent's first reply on AC7's run framed the host's environment against this issue); it carries no remedies, and the agent or developer reading it works out the cause on the host from that entry. Amended by the architect 2026-10-23, after AC7: at session start the user is shown a short message naming what is wrong, the likely scenario and the command to run; the pointers go only to the agent, whose context tells it to diagnose the failure in its first reply | architect |
 | D12 | The check judges the environment, whatever configured it; setup never overwrites or duplicates the user's shell configuration, and adds a piece only when `--repair` (or the full setup's shell step) finds it missing | architect |
 | D13 | Homebrew is a requirement of the macOS development host: `build/macos-setup.sh` stops when it is absent, as today, and never installs it. The case in D12's first wording, setup adding Homebrew's line after installing Homebrew itself, therefore does not arise | architect |
 | D14 | AC8's budget: the session-start check finishes within the outstanding-state sweep's time on the same host. The two SessionStart entries run in parallel, so the check then never lengthens session start, and each host is judged against itself rather than against a figure measured on macOS (decided 2026-10-23 from the stage 1 measurement: check 0.29 s, sweep 3.40 s, medians of five) | architect |
@@ -819,6 +820,20 @@ scripts, put first on `PATH` to change what one name resolves to.
         clean login shell resolving Homebrew's three tools, so the shell
         files are right and the fault lies in how the session was started.
         What the user saw is the architect's to confirm.
+      - M, 2026-10-23, fail, rerun by the architect from a new session on the
+        broken `PATH`, after D11's amendment: the user saw the message naming
+        the three system tools, the scenario (Claude Code started with a
+        `PATH` that differs from a new terminal's) and the fix; the agent's
+        first reply, to "hi", found the cause (`/usr/bin:/bin` put in front in
+        the terminal tab before `claude` ran, condition 8 passing) and the
+        fix, but opened by saying the failure was not caused by this issue's
+        work, framing a host's environment against an issue. The pointers led
+        into this issue's document, and `CLAUDE.md` asks every reply to say
+        whether a problem was caused by the work in progress. The entries
+        moved to `docs/development-environment.md`; the agent's instruction
+        and the `CLAUDE.md` session-start item now say a failed check is the
+        host's, never related to an issue or branch; the check's output
+        carries no issue reference. To be rerun.
 - [ ] **AC8. The hook is fast enough to run at every session start.** On a
       set-up host, `time sh -c '<command>'`, five runs.
       Pass when: the median is within the median of five timed runs of the
@@ -1033,7 +1048,7 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
 - **Report** (R1, D11): a header with the host, the Perl it ran under (`$^X`,
   version) and the `PATH` it saw; then per condition its number, `pass`,
   `FAIL`, `note` or `n/a`, the title, and for every condition not passing the
-  expected and found lines and `see: features/750-interpreter-resolution.md
+  expected and found lines and `see: docs/development-environment.md
   § Troubleshooting a failed condition, <n>`; a last line counting each
   result. Exit 0 with no `FAIL`, 1 with any, 2 on a usage error.
 - **Options:** `--hook` prints the SessionStart JSON
@@ -1314,39 +1329,9 @@ belong to stages 2 to 4.
 
 ## Troubleshooting a failed condition
 
-The check points here (D11). It reports what it expected, what it found, the
-Perl it ran under and the `PATH` it saw; it does not say what to do. (At
-session start the user is shown a likely scenario and a command, D11 as
-amended; the agent works from this section.) Work out
-the cause on the host from what the report shows and what each entry below
-says, then fix the cause, not the symptom: no script is edited to name an
-interpreter, and no `PATH` line is added by hand outside setup's managed
-block.
-
-Two things hold for every entry:
-
-- **The check sees the environment of whatever started it.** At session start
-  that is Claude Code's own process, inherited from the shell Claude Code was
-  started from, not the agent's Bash tool snapshot and not a fresh terminal
-  (§ How Claude Code runs a hook). A condition can fail in the session and
-  pass in a new terminal, or the reverse; compare the `PATH` the report gives
-  with the one in a new terminal before concluding anything.
-- **Which shell files are read depends on how the shell was started.**
-  § Phase 1 lists the contexts measured on macOS and how each gets its
-  `PATH`; § Phase 4: where macOS setup writes its shell configuration shows
-  which file each zsh mode reads. A context that reads none of setup's files
-  resolves the system's tools.
-
-| # | What a failure means | Where it has come from, and where to look |
-|---|---|---|
-| 1 | no `perl` on the `PATH` the check saw | the host is not set up, or the process that started the check did not inherit the setup's `PATH` (a Windows host without Git Bash, where Claude Code falls back to PowerShell, is treated as not set up) |
-| 2 | another Perl comes first | `PATH` order: Homebrew's line, or setup's addition, missing from a file this context reads (condition 8 shows which shell modes resolve what), or a later line in a shell file, or `path_helper` on macOS, putting the system directories back in front; on Windows, Git's `/usr/bin` ahead of Strawberry Perl |
-| 3 | the right Perl lacks a runtime module, or loads one from outside its install, or from two copies | a module from outside: a `PERL5LIB` or `PERLLIB` entry the setup did not make (on macOS any; on Linux any but `~/perl5`), named in the report; two copies: a module installed again outside the core, such as a `local::lib` copy beside the distribution's `lib*-perl` package, both listed. the Perl is right but its modules are not where it looks: on macOS, a Homebrew Perl upgrade across a minor version leaves the modules installed for the old one behind (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism); a cpanfile changed since setup ran; on Windows, `build/cpanfile.windows` differs from `build/cpanfile`. Installing is the full setup's job, not `--repair`'s |
-| 4 | note: the profiler is not installed | expected unless setup ran with `--dev-deps`; the same upgrade cause as 3 applies |
-| 5 | Linux: `PERL5LIB` does not carry `~/perl5` | the line that sets it missing from a file this context reads, as for 2 |
-| 6 | the first `bash` is older than 4 | the system's bash ahead of the setup's; macOS's `/bin/bash` is 3.2. Same `PATH` causes as 2 |
-| 7 | `python3` does not import NumPy or SciPy, or loads one from outside the setup's install | on every host, a `pip install --user` copy (the report names the user's `site-packages`), or a second copy of a module (the report lists each with its version and metadata directory; on macOS a `pip` install overwritten by Homebrew's formula leaves `pip`'s metadata behind, and `pip uninstall` removes every path in that metadata's `RECORD`, which Homebrew's files now occupy: read, not run); another Python ahead of the setup's (macOS `/usr/bin/python3`; on Windows the Microsoft Store stub), or the modules installed for a different Python than the one on `PATH`; on macOS, Homebrew's Python present only as a versioned formula another formula depends on, which links `python3.x` and no `python3`, so `/usr/bin/python3` comes first; or a module installed with `pip` into Homebrew Python's `site-packages`, which shadows the formula's own and can leave the formula unlinked (the report names the file the module loads from; `brew link --dry-run <formula>` shows what is not linked) |
-| 8 | a login shell from a clean environment resolves different tools | the lines that put the tools first are in a file a login shell does not read (on macOS, `~/.zshrc` alone, which only an interactive shell reads: the report then shows a new tab right and a login shell wrong), or another file read after them reorders `PATH`; compare the modes as § Phase 4: where macOS setup writes its shell configuration did. `--repair` adds the missing piece to `~/.zprofile`. When every mode resolves the same tool as the `PATH` the check saw, the shell files are not the cause: the failure repeats condition 2's, 6's or 7's, and that entry applies |
-| 9 | note: no `tmux` | the terminal-interface navigation tests cannot run on this host |
-| 10 | note: no screenshot tools | screenshot capture cannot run on this host |
-| 11 | Windows: `core.autocrlf` is not `false` | the clone was made without `-c core.autocrlf=false`, or a global setting overrides the repository's; scripts check out with CRLF endings and fail in Git Bash |
+The entries live in `docs/development-environment.md` § Troubleshooting a
+failed condition, the standing document for setting up a development host
+and reading the environment check, where the check, the setup and the
+profiling preflight point. They name no issue: on AC7's run the session
+start's agent reply, reading pointers into this issue's document, framed a
+wrong `PATH` against the issue.

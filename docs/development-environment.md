@@ -1,0 +1,72 @@
+# Development environment
+
+Every consumer of a development host (the developer's shell, Claude Code and
+its hooks, the harnesses, profiling, benchmarks, builds) runs one Perl, one
+bash 4 or later and one Python: the ones the host's setup installs, with the
+modules the project needs. Which of them comes first on `PATH` is the setup's
+job; scripts take `perl`, `bash` and `python3` from `PATH` and never name one
+by where it is installed.
+
+## The environment check
+
+`process/check-environment.pl` judges whether the host is set up that way,
+whatever configured it. It is read-only, needs only Perl's core modules, and
+runs:
+
+- by hand, on any host: `perl process/check-environment.pl`;
+- through each host's setup: `./build/macos-setup.sh --validate`;
+- at the end of a full setup;
+- at every Claude Code session start, resume, clear and compaction, as a
+  hook in `.claude/settings.json`. When a condition fails, the developer is
+  shown what is wrong, the likely scenario and the command to run; the agent
+  receives the full report and diagnoses it from the entries below.
+
+It reports, per condition, `pass`, `FAIL`, `note` (something optional is
+missing) or `n/a` (not applicable on this host), with what it expected and
+what it found, the Perl it ran under and the `PATH` it saw. It exits 0 when
+nothing fails, 1 otherwise.
+
+| Host | Full setup | Add only what is missing from the shell configuration | Check only |
+|---|---|---|---|
+| macOS (Homebrew required) | `./build/macos-setup.sh` (`--dev-deps` adds the profiler, `--package` PAR::Packer) | `./build/macos-setup.sh --repair` | `./build/macos-setup.sh --validate` |
+| Windows | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1` | | `perl process/check-environment.pl` |
+| Linux | the install steps in `README.md` | | `perl process/check-environment.pl` |
+
+## Troubleshooting a failed condition
+
+Work out the cause on the host from what the report shows and the entry
+below, then fix the cause, not the symptom: no script is edited to name an
+interpreter, and no `PATH` line is added by hand outside setup's marked
+block. A failed check describes the host's environment; it is never a defect
+of the repository or of the work in progress.
+
+Two things hold for every entry:
+
+- **The check sees the environment of whatever started it.** At session start
+  that is Claude Code's own process, inherited from the shell Claude Code was
+  started from, not the agent's Bash tool and not a fresh terminal. A
+  condition can fail in the session and pass in a new terminal, or the
+  reverse; condition 8's report shows what a clean login shell and a new
+  terminal tab resolve, to compare with the `PATH` the check saw.
+- **Which shell files are read depends on how the shell was started.** On
+  macOS, a login zsh (every new terminal tab, and what is started from it)
+  reads `~/.zprofile`, after `/etc/zprofile` has run `path_helper`, which puts
+  the system directories in front; an interactive zsh reads `~/.zshrc`; a
+  plain `zsh -c` reads only `~/.zshenv`. Lines that put the tools first in
+  `~/.zshrc` alone reach a terminal tab but no login shell started by a
+  program. A context that reads none of these files resolves the system's
+  tools.
+
+| # | What a failure means | Where it has come from |
+|---|---|---|
+| 1 | no `perl` on the `PATH` the check saw | the host is not set up, or the process that started the check did not inherit the setup's `PATH` (a Windows host without Git Bash, where Claude Code falls back to PowerShell, is treated as not set up) |
+| 2 | another Perl comes first | `PATH` order: Homebrew's line, or setup's addition, missing from a file this context reads (condition 8 shows which shell modes resolve what), or a later line in a shell file, or `path_helper` on macOS, putting the system directories back in front; Claude Code started from a shell whose `PATH` was changed by hand; on Windows, Git's `/usr/bin` ahead of Strawberry Perl |
+| 3 | the right Perl lacks a runtime module, loads one from outside its install, or finds two copies | a module from outside: a `PERL5LIB` or `PERLLIB` entry the setup did not make (on macOS any; on Linux any but `~/perl5`), named in the report; two copies: a module installed again outside Perl's core, such as a `local::lib` copy beside the distribution's `lib*-perl` package, both listed. Missing: on macOS, a Homebrew Perl upgrade across a minor version leaves the modules installed for the old version in the old version's directory; the cpanfile changed since setup ran; on Windows, `build/cpanfile.windows` differs from `build/cpanfile`. Installing is the full setup's job, not `--repair`'s |
+| 4 | note: the profiler is not installed | expected unless setup ran with `--dev-deps`; the same upgrade cause as 3 applies |
+| 5 | Linux: `PERL5LIB` does not carry `~/perl5` | the line that sets it missing from a file this context reads, as for 2 |
+| 6 | the first `bash` is older than 4 | the system's bash ahead of the setup's; macOS's `/bin/bash` is 3.2. The same `PATH` causes as 2 |
+| 7 | `python3` does not import NumPy or SciPy, or loads one from outside the setup's install | on every host, a `pip install --user` copy (the report names the user's `site-packages`), or a second copy of a module (the report lists each with its version and metadata directory); another Python ahead of the setup's (macOS `/usr/bin/python3`; on Windows the Microsoft Store stub), or the modules installed for a different Python than the one on `PATH`. On macOS: Homebrew's Python present only as a versioned formula another formula depends on, which links `python3.x` and no `python3`, so `/usr/bin/python3` comes first; a module installed with `pip` into Homebrew Python's `site-packages`, which shadows the formula's own and can leave the formula unlinked (`brew link --dry-run <formula>` shows what is not linked; the full setup links it once the copy is removed); a `pip` install that Homebrew's formula later overwrote leaves `pip`'s metadata behind, and `pip uninstall` would remove every path in that metadata's `RECORD`, which Homebrew's files now occupy |
+| 8 | a login shell from a clean environment resolves different tools | the lines that put the tools first are in a file a login shell does not read (on macOS, `~/.zshrc` alone: the report then shows a new tab right and a login shell wrong), or another file read after them reorders `PATH`. `--repair` adds the missing piece to `~/.zprofile`. When every mode resolves the same tool as the `PATH` the check saw, the shell files are not the cause: the failure repeats condition 2's, 6's or 7's, and that entry applies |
+| 9 | note: no `tmux` | the terminal-interface navigation tests cannot run on this host |
+| 10 | note: no screenshot tools | screenshot capture cannot run on this host |
+| 11 | Windows: `core.autocrlf` is not `false` | the clone was made without `-c core.autocrlf=false`, or a global setting overrides the repository's; scripts check out with CRLF endings and fail in Git Bash |

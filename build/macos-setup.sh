@@ -17,8 +17,8 @@
 #
 # Runs under macOS's /bin/bash 3.2, since it runs before Homebrew bash exists.
 # The shell configuration belongs to the developer: this script never
-# rewrites, removes or duplicates a line in it. Specification:
-# features/750-interpreter-resolution.md.
+# rewrites, removes or duplicates a line in it. See
+# docs/development-environment.md.
 
 set -euo pipefail
 
@@ -179,7 +179,7 @@ link_formulae() {
         echo "[link] $formula is installed but cannot link: files already in place were not put there by Homebrew."
         echo "[link] They were installed another way, such as pip; setup leaves them. Files per directory:"
         printf '%s\n' "$state" | sed 's/^/         /'
-        echo "[link] See features/750-interpreter-resolution.md § Troubleshooting a failed condition, condition 7."
+        echo "[link] See docs/development-environment.md § Troubleshooting a failed condition, condition 7."
         exit 1
     done
 }

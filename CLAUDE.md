@@ -98,7 +98,8 @@ about anything else, these still hold.
 - [ ] A failed environment check in the session-start context is the first
       reply's subject, whatever the architect sent: read the troubleshooting
       entries its pointers name, find the cause on this host, and give the
-      cause and the step that fixes it.
+      cause and the step that fixes it. It describes the host, never the work
+      in progress: no issue or branch is named in that reply.
 - [ ] Reconstruct outstanding state before anything else: `gh pr list --state open`,
       `git branch -a --no-merged main`, `./process/issue-status.sh list`, uncommitted
       or unpushed work in every worktree. Everything found is potentially this
@@ -400,6 +401,7 @@ about anything else, these still hold.
 | How a surface behaves: components, keys, taking input, countdown, buttons, size, placement, padding, erasing, unattended runs and the test method per surface | `docs/terminal-interaction.md` |
 | Notices and choices: what a notice is, the surfaces, taking input, the data model, the `-V notices` section, the producer's contract | `docs/notice-surfaces.md` |
 | What any output to a terminal does per platform: encoding and code page, escape sequences, glyph width, terminal commands, checking output on Windows | `docs/terminal-output.md` |
+| Setting up a development host, or a failed environment check | `docs/development-environment.md` |
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
