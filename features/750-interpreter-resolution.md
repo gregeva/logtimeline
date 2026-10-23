@@ -655,6 +655,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D14 | AC8's budget: the session-start check finishes within the outstanding-state sweep's time on the same host. The two SessionStart entries run in parallel, so the check then never lengthens session start, and each host is judged against itself rather than against a figure measured on macOS (decided 2026-10-23 from the stage 1 measurement: check 0.29 s, sweep 3.40 s, medians of five) | architect |
 | D15 | Condition 7 also judges where NumPy and SciPy load from: each module's file must resolve into the setup's install (on macOS its own formula's Cellar), so a `pip` install shadowing the setup's fails it. Decided 2026-10-23 from a second macOS host, where a `python3` link to Homebrew's Python passed condition 7 while it loaded a pip-installed SciPy 1.17.1 over Homebrew's unlinked 1.18.1 (§ Step 5). Linux and Windows name their place in their stages. Directed by the architect the same day, so the class is detected on every host now rather than when a stage finds it: on every host a module loaded from the user's `site-packages` (where `pip --user` installs), or a module Python sees installed more than once on `sys.path`, fails condition 7 | architect |
 | D16 | Condition 3 (and 4, the profiler) also judges where each module loads from, on every host: a module whose file lies outside the Perl's built-in `@INC` (the one it was built with, without what `PERL5LIB` or `PERLLIB` add) and the setup's own directory (on Linux `~/perl5`, D3) fails, as does one with two copies on `@INC` outside the core directories. A dual-life module upgraded over its core copy counts once. Decided by the architect 2026-10-23, extending D15 to Perl | architect |
+| D17 | Windows setup sets `BASH_ENV` to `~/.bashrc` as a user environment variable, so the plain Git Bash shell Claude Code runs its hooks in reads the managed block that puts Strawberry Perl first; and the check's session-start message has a Windows story of its own for every failure, rather than falling to the branches written for macOS and Linux. Decided by the architect 2026-10-24, from § Stage 3, the check on this host as found | architect |
 
 ## Acceptance criteria
 
@@ -1504,6 +1505,11 @@ and `cmd.exe` reports "'-' is not recognized as an internal or external
 command" once per tool. The report then reads 2 pass, 5 FAIL (3, 4, 6, 8, 11),
 each from a tool that was never started. This is the adaptation of
 `run_capture` that § Resuming hands to this stage.
+
+The gap behind the wrong message (architect, 2026-10-24): `user_message` has
+no story for Windows. Every branch names a cause and a fix written for macOS
+and Linux (a new terminal, `--repair`), so on Windows the message can name
+neither the cause nor a fix that works. D17 gives Windows a story of its own.
 
 ## Troubleshooting a failed condition
 
