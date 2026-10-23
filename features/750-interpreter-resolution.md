@@ -4,9 +4,11 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: specification stage complete (2026-10-23); next, investigation stage 1
+Status: specification reopened on the issue branch `750-interpreter-resolution`
+(2026-10-23) for the architect's direction that setup never overwrites the
+user's shell configuration (§ The architect's framing); investigation stage 1
 (the macOS development host, § Phase 4: investigation stages, one per
-environment) on the issue branch `750-interpreter-resolution`. What is in
+environment) resumes once the reworked records are agreed. What is in
 place today is recorded as found, not as the contract: most of it was put in
 piecemeal to get past a problem at the time, and the analysis is expected to
 challenge it.
@@ -44,6 +46,14 @@ challenge it.
   about a host from another one.
 - The way forward is the cleanest, most coherent one the analysis finds, and
   it may change earlier decisions; nothing is locked up front.
+- **The check judges the environment; setup does not overwrite it**
+  (2026-10-23, at the start of stage 1). The point of the work is to check
+  that the environment is set up properly, whatever configured it. Homebrew is
+  not used by ltl alone: many developers use it all the time and already carry
+  its configuration in their shell files, so setup does not overwrite that
+  configuration or add a redundant copy of it. Adding a piece is legitimate
+  when `--repair` runs and the check has found that piece missing, or when
+  setup itself installed Homebrew.
 
 ## What it is for
 
@@ -245,6 +255,38 @@ misses every shell that is not a login shell. Only the block in both files
 meets condition 9 in every mode, so macOS setup writes its managed block into
 both `~/.zshenv` and `~/.zprofile`.
 
+### Phase 4: what Homebrew's own configuration already provides on macOS (measured)
+
+A login zsh started from a clean environment (`env -i HOME="$HOME" /bin/zsh
+-lc`) on the macOS development host, 2026-10-23, read-only: first with the
+developer's files as they are (no `~/.zprofile`; the Homebrew lines only in
+`~/.zshrc`), then with Homebrew's own line, `eval "$(/opt/homebrew/bin/brew
+shellenv)"`, run first in the same shell.
+
+| Tool | Files as they are | Homebrew's line alone |
+|---|---|---|
+| `perl` | `/usr/bin/perl` | `/opt/homebrew/bin/perl`, a link into the Cellar (5.44.0); `Text::CSV`, `YAML::PP`, `Term::ReadKey` and `Devel::Size` load |
+| `bash` | `/bin/bash` (3.2) | `/opt/homebrew/bin/bash` (5.3) |
+| `python3` | `/usr/bin/python3` | `/opt/homebrew/bin/python3`; NumPy and SciPy import |
+| `nytprofhtml` | not found | not found |
+| `pp` | `/usr/bin/pp`, the system Perl's script (`#!/usr/bin/perl`) | `/usr/bin/pp` |
+
+Homebrew's own line meets the Perl, bash and Python conditions. The Perl keg
+line that `~/.zshrc` adds (`$(brew --prefix)/opt/perl/bin` first) is ltl's only
+addition beyond it. The keg's `bin` holds the scripts cpanm installs for
+Homebrew Perl (`nytprofhtml` and the other profiler tools, `scandeps.pl`, the
+`yamlpp-*` tools), which Homebrew does not link. The profiling preflight finds
+`nytprofhtml` through the interpreter's own `installsitescript` (544 D7) and
+needs no `PATH` entry for it. `build/macos-package.sh` starts `perl -S pp`,
+which searches `PATH`; without the keg line it finds the system Perl's
+`/usr/bin/pp`. Whether that still packages correctly is not measured:
+PAR::Packer is not installed for Homebrew Perl 5.44 on this host, and measuring
+it means installing it.
+
+The condition this host fails today is the clean login shell (condition 9):
+the developer's Homebrew lines are in `~/.zshrc`, which only an interactive
+shell reads.
+
 ### Phase 4: re-running setup is not safe for the shell configuration
 
 `brew install --help`: "Unless $HOMEBREW_NO_INSTALL_UPGRADE is set, brew
@@ -259,13 +301,16 @@ right.
 
 | Mode | Installs | Writes the shell configuration | Runs the check |
 |---|---|---|---|
-| full setup (no switch) | yes | yes | yes, last |
-| `--repair` | no | yes, the managed blocks only | yes, after writing |
+| full setup (no switch) | yes | Homebrew's own line only when this run installed Homebrew; otherwise as `--repair` | yes, last |
+| `--repair` | no | only the pieces the check found missing, each added once | yes, before writing and after |
 | `--validate` | no | no | yes |
 
 `--repair` cannot install or upgrade anything by construction; it is what puts
 the shell configuration right once the cause of a failed condition is found
-to lie there. Making the
+to lie there. It never rewrites or duplicates a line the user already has
+(§ The architect's framing): it adds a piece only when the check reports that
+piece missing, delimited so that a later run recognises its own addition and
+adds nothing. Making the
 full setup safe to re-run was the alternative, set aside because every install
 step on every host (Homebrew's upgrade-on-install, WinGet, cpanm) would have
 to become a guaranteed no-op, each a separate promise to keep and test.
@@ -292,7 +337,7 @@ architect named the development option `--dev-deps`; it passes cpanm
 | (none) | full setup: install the runtime tools and modules, write the shell configuration, run the check | |
 | `--dev-deps` | full setup, plus the development-only modules (the profiler) | `LTL_INSTALL_DEV_DEPS=1` on macOS, `-DevDeps` on Windows |
 | `--package` | full setup, plus PAR::Packer, for building the static binary | `-Package` on Windows; on macOS PAR::Packer is installed unconditionally today |
-| `--repair` | write the shell configuration only, then run the check | |
+| `--repair` | run the check, add to the shell configuration only the pieces it found missing, then run the check again | |
 | `--validate` | run the check only | |
 | `-h`, `--help` | usage | |
 
@@ -435,12 +480,17 @@ Written in the specification stage; the architect closed the stage without a lin
   for the shell configuration). `--repair` and `--validate` install and
   upgrade nothing. The full setup ends by running the check. All three take
   the one option set of § Phase 4: one option set for every setup script.
-- **R5. Setup owns the shell configuration.** Each setup writes one managed
-  block, delimited so that rewriting it leaves everything else in the file
-  untouched: macOS into `~/.zshenv` and `~/.zprofile` (measured, § Phase 4:
-  where macOS setup writes its shell configuration), Linux into the files its
-  stage establishes, Windows into `~/.bashrc`, as today. Writing it again
-  changes nothing.
+- **R5. Setup adds only what is missing from the shell configuration.** The
+  check judges whether the shell configuration resolves the expected tools,
+  whoever wrote its lines. Setup never rewrites, removes or duplicates a line
+  the user already has. It adds a piece only when the check reports that piece
+  missing (`--repair`, and the full setup's shell step), or, for Homebrew's
+  own line, when the same run installed Homebrew. Each addition is delimited,
+  so that a later run recognises it and adds nothing. On macOS, Homebrew's
+  own line already meets the Perl, bash and Python conditions (§ Phase 4: what
+  Homebrew's own configuration already provides on macOS); the Perl keg line
+  is ltl's only addition beyond it, and is added only for what is measured to
+  need it.
 - **R6. One rule for every script** (§ Phase 4: the one rule every script
   follows): interpreters from `PATH`, by `env` first lines and bare names; no
   absolute interpreter path, no `brew --prefix`, no change to `PATH`, outside
@@ -476,6 +526,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D8 | The environment check is its own SessionStart hook entry | delegated |
 | D10 | No harness for this work. The acceptance criteria are test cases written out in this document; the developer runs each one by hand on the hosts it names, at that host's stage, and records the result under it | architect |
 | D11 | The check reports what it expected, what it found and the context it ran in, and points at the failed condition's entry in this document's § Troubleshooting a failed condition; it carries no remedies, and the agent or developer reading it works out the cause on the host from that entry | architect |
+| D12 | The check judges the environment, whatever configured it; setup never overwrites or duplicates the user's shell configuration, and adds a piece only when `--repair` (or the full setup's shell step) finds it missing, or Homebrew's own line when the same run installed Homebrew | architect |
 
 ## Acceptance criteria
 
@@ -555,14 +606,23 @@ scripts, put first on `PATH` to change what one name resolves to.
       same with `--repair`.
       Pass when: `$D/calls` holds no line other than `brew --prefix` and
       `brew shellenv`. M L W.
-- [ ] **AC10. `--repair` leaves the rest of a file alone and is idempotent.**
-      Seed the throwaway home's shell files (`.zshenv` and `.zprofile` on
-      macOS; the files stage 2 establishes on Linux; `.bashrc` on Windows) with
-      the line `export KEEP=1`. Run `HOME="$T" ZDOTDIR="$T" <setup> --repair`,
-      copy the files aside, run it again, `cmp` each file with its copy.
-      Pass when: after the first run each file holds `export KEEP=1` and one
-      managed block; after the second, `cmp` reports no difference. M L W.
-- [ ] **AC11. Every shell mode resolves the same tools.** After AC10's first
+- [ ] **AC10. `--repair` adds nothing to a configuration that already works.**
+      Seed the throwaway home's shell files with the line `export KEEP=1` and
+      the host's own configuration of its tools, as a developer who already
+      uses them carries it (macOS: Homebrew's `eval "$(<prefix>/bin/brew
+      shellenv)"` in `.zprofile`; Linux and Windows: what stages 2 and 3
+      establish), copy the files aside, run `HOME="$T" ZDOTDIR="$T" <setup>
+      --repair`, `cmp` each file with its copy.
+      Pass when: the check passes and `cmp` reports no difference. M L W.
+- [ ] **AC10a. `--repair` adds exactly the missing piece, once.** Seed the
+      throwaway home's shell files with `export KEEP=1` only. Run `HOME="$T"
+      ZDOTDIR="$T" <setup> --repair`, copy the files aside, run it again, `cmp`
+      each file with its copy.
+      Pass when: after the first run each file still holds `export KEEP=1`
+      unchanged, the check passes, and the only addition is one delimited
+      piece for what the check reported missing; after the second run `cmp`
+      reports no difference. M L W.
+- [ ] **AC11. Every shell mode resolves the same tools.** After AC10a's first
       run, for each mode `-c`, `-lc`, `-ic`, `-lic`:
       `env -i HOME="$T" ZDOTDIR="$T" zsh <mode> 'command -v perl bash python3'`
       (bash on Linux; on Windows the Git Bash modes stage 3 establishes).
