@@ -335,11 +335,18 @@ fault:
 | the Windows shim at Git's `/opt/homebrew/bin/perl` | no longer written; full setup removes one left by an earlier run |
 | `PERL="${PERL:-/opt/homebrew/bin/perl}"` in 15 harnesses | `PERL="${PERL:-perl}"`, and the per-harness fallback line goes |
 | `PATH` set from `brew --prefix` in the two notice-surface prototype scripts | removed |
-| `#!/usr/bin/perl` in five prototype scripts, `/opt/homebrew/bin/perl` in `prototype/426-asbuilt-run.sh` | `env perl`, bare `perl` |
+| `#!/usr/bin/perl` in seven prototype scripts (the five of phase 3, plus `prototype/colors` and `prototype/colors-256`), `/opt/homebrew/bin/perl` in `prototype/426-asbuilt-run.sh` | `env perl`, bare `perl` |
 | the example in `tests/profile/checks/README.md` | bare `perl` |
 | the `export PATH="$(brew --prefix)..."` lines in `CLAUDE.md` and `README.md` | the host's setup, and its `--validate` |
 | `require-bash.sh`'s Homebrew hint | names the host's setup and `--validate` |
-| historical records (`tests/profile/results/*`, `releases/*`, past investigations) | untouched: they record the interpreter of their time |
+| historical records (`tests/profile/results/*`, `releases/*`, past investigations, `build/packaging-notes`, the prototype reports that name the Perl they ran under) | untouched: they record the interpreter of their time |
+| `prototype/720-packed-generated-loop/pack-windows.sh`, which sets `PATH` to Strawberry Perl inside its Wine container | untouched: the container steps of `build/windows-package.sh`, a sealed environment |
+| `tests/validate-screenshot-capture.sh`, which runs the capture tool with `PATH` cut down to a directory without the tools | untouched: the test's own fixture for an absent tool |
+
+Stage 1 audit (2026-10-23): the AC13 search over the issue branch at
+`54b29fe2` printed 52 lines; beyond the inventory above it found
+`#!/usr/bin/perl` in `prototype/colors` and `prototype/colors-256`, added to the
+prototype row, and the three untouched rows just above.
 
 ### Phase 4: investigation stages, one per environment
 
