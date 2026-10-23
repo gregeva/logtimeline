@@ -7,9 +7,8 @@ the environment setup and fails where Homebrew is absent). Parent: #729
 Status: specification reworked on the issue branch `750-interpreter-resolution`
 (2026-10-23) for the architect's direction that the check judges the
 environment and setup never overwrites the user's shell configuration (D12,
-D6 as changed, D13, condition 8 retired); next, implementation planning for
-investigation stage 1 (the macOS development host, § Phase 4: investigation
-stages, one per environment). Open, measured in stage 1: what still needs the
+D6 as changed, D13, condition 8 retired); stage 1 (the macOS development
+host) planned in § Stage 1 implementation plan; next, its steps. Open, measured in stage 1: what still needs the
 Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
 provides on macOS). What is in
 place today is recorded as found, not as the contract: most of it was put in
@@ -708,6 +707,173 @@ scripts, put first on `PATH` to change what one name resolves to.
       docs/toolchain-guidance.md`, then read each host's setup instructions.
       Pass when: `git grep` finds nothing, and each host's instructions name
       its setup with `--repair` and `--validate`. M.
+
+## Stage 1 implementation plan (macOS development host)
+
+Written 2026-10-23 from the requirements, decisions and conditions above. One
+commit per step, pushed to `750-interpreter-resolution`; each test case's
+result is recorded under it, with host and date, as it is run. Stages 2 to 4
+(Linux, Windows, the container builds) are planned on their hosts.
+
+### Step 0: the `before` benchmark
+
+The diff will touch `tests/validate-*.sh` and `tests/lib/`, so the completion
+gate requires a before/after benchmark (`docs/process/workflow.md` § 3).
+`./tests/baseline/run-benchmark.sh single-day-access-log-standard --label
+750-before`, run in the background from the `release/0.20.0` worktree at
+`7d0b57f8`, the issue's base, a worktree beside the issue's own, so both sides
+run from the same kind of checkout.
+
+### Step 1: `process/check-environment.pl`
+
+- `#!/usr/bin/env perl`, `use strict; use warnings;`, core modules only
+  (`Config`, `Cwd`, `File::Spec`, `JSON::PP`), no syntax newer than the
+  oldest Perl it must run under (Ubuntu 20.04's 5.30), so the macOS system
+  Perl, Git for Windows' Perl and a distribution's Perl all run it (R2).
+- **Host** from `$^O`: `darwin` macOS, `linux` Linux, `msys`, `cygwin` and
+  `MSWin32` Windows.
+- **One list of conditions** (D1): an array of entries, each with its number,
+  title, severity, and one test per host or `n/a`. A test returns the result,
+  what it expected and what it found.
+- **Three helpers, used by every test:** `find_on_path(name)` (splits `PATH`
+  on `$Config{path_sep}`), `real(path)` (`Cwd::abs_path`, so a Homebrew link
+  resolves into its Cellar), and `run_capture(cmd...)`, the one place a tool
+  is started, so stage 3 adapts one sub for Strawberry Perl.
+- **The tests, macOS column** (Linux and Windows columns written from the
+  conditions table, validated in their stages):
+
+  | # | Test |
+  |---|---|
+  | 1 | `find_on_path('perl')` |
+  | 2 | `real()` of it contains `/Cellar/perl/` (Homebrew, whatever the prefix) |
+  | 3 | `build/cpanfile`'s `requires` lines outside the `on 'develop'` block; the Perl found on `PATH` requires each and prints those that fail; found names the first and the count |
+  | 4 | the same for the develop block; note |
+  | 5 | n/a (Linux: `PERL5LIB` carries `$HOME/perl5`) |
+  | 6 | `bash -c 'echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}'` is 4 or later, and `real()` of it is in a Cellar |
+  | 7 | `python3 -B -c 'import numpy, scipy'` succeeds (`-B` writes no bytecode), and `real()` of it is in a Cellar |
+  | 8 | `env -i HOME USER LOGNAME TERM` (and `ZDOTDIR` when set) `/bin/zsh -lc` printing `command -v` of `perl`, `bash`, `python3`; each `real()` equals that of conditions 2, 6 and 7. Also run, shown and not judged: `-lic` (a new tab) and `-c` (a plain shell) |
+  | 9 | `tmux` on `PATH`; note |
+  | 10 | `swiftc` on `PATH`; note |
+  | 11 | n/a (Windows: `git config core.autocrlf` is `false`) |
+
+- **Report** (R1, D11): a header with the host, the Perl it ran under (`$^X`,
+  version) and the `PATH` it saw; then per condition its number, `pass`,
+  `FAIL`, `note` or `n/a`, the title, and for every condition not passing the
+  expected and found lines and `see: features/750-interpreter-resolution.md
+  § Troubleshooting a failed condition, <n>`; a last line counting each
+  result. Exit 0 with no `FAIL`, 1 with any, 2 on a usage error.
+- **Options:** `--hook` prints the SessionStart JSON
+  (`hookSpecificOutput.additionalContext` carries the whole report; a
+  `systemMessage` lists each failed condition with its pointer, and is absent
+  when nothing fails) and exits 0; `--condition N[,N...]` runs only those
+  conditions, for the profiling preflight (step 4); `-h`, `--help`. An unknown
+  option prints usage to stderr and exits 2 having tested nothing.
+- **Proven by** AC2 (the wrong Perl first), AC3 (a Perl without the modules),
+  AC4 (old bash; the system Python), AC5 (writes nothing). AC1 waits for
+  step 3's `--validate`.
+
+### Step 2: the session-start hook
+
+- A second entry under `SessionStart` in `.claude/settings.json` (D8), with
+  the same matcher as the outstanding-state sweep (`startup|resume|clear|compact`,
+  so the report survives a cleared context) and a 60 s timeout. Its command,
+  in shell form (D2):
+  `command -v perl >/dev/null 2>&1 && exec perl
+  "$CLAUDE_PROJECT_DIR/process/check-environment.pl" --hook`, else a `printf`
+  of the SessionStart JSON saying no Perl was found, with the `PATH` it saw
+  and condition 1's pointer. A `PATH` holding a double quote or a backslash
+  makes that JSON invalid, and Claude Code then takes it as plain text into
+  the context; accepted, as no development host's `PATH` carries either.
+- **Proven by** AC6 (no Perl on `PATH`), and AC8: five timed runs, the
+  median brought to the architect to set the budget.
+
+### Step 3: `build/macos-setup.sh`
+
+- Stays `#!/bin/bash` and bash 3.2 compatible: it runs before Homebrew bash
+  exists. As a setup script it is one of the rule's exceptions.
+- **Options** (D9): `--dev-deps`, `--package`, `--repair`, `--validate`,
+  `-h`/`--help`. `--repair` and `--validate` take no other option; an unknown
+  option or a forbidden pair prints usage and exits 2 having done nothing.
+- **`--validate`:** runs `perl process/check-environment.pl` with the
+  caller's `PATH`, and exits with its status. No `brew` call.
+- **Homebrew is required** (D13): the full setup and `--repair` stop when
+  `brew` is not on `PATH`, as today.
+- **Full setup:** `brew install perl bash python numpy scipy cpanminus`;
+  PAR::Packer only under `--package`; `./generate-cpanfile.sh`; `cpanm
+  --notest --installdeps .`, with `--with-develop` under `--dev-deps`; the
+  `PATH` exports and `GITHUB_PATH` lines for its own run and CI as today; then
+  the shell step, then the check, exiting with its status.
+- **The shell step** (`--repair`, and the full setup's; D12, D6): run the
+  check; when condition 8 passes, add nothing. When it fails, read a clean
+  login shell's `PATH` (`env -i … /bin/zsh -lc 'echo $PATH'`): if
+  `$(brew --prefix)/bin` is absent from it, Homebrew's line is the missing
+  piece, and it is appended once to `${ZDOTDIR:-$HOME}/.zprofile` between the
+  markers the Windows setup already uses (`# >>> ltl homebrew >>>`,
+  `# <<< ltl homebrew <<<`), as `eval "$(<prefix>/bin/brew shellenv)"` with
+  the prefix written out. If the markers are already there, or Homebrew's
+  `bin` is on that `PATH` but behind other entries, nothing is added: the
+  cause lies in a line the user owns, and the check's report shows it. Then
+  run the check again.
+- **The Perl keg line:** with PAR::Packer installed for Homebrew Perl (this
+  host has none for 5.44; asked of the architect before installing), build the
+  binary from a clean login shell carrying only Homebrew's line
+  (`build/macos-package.sh arm64`, which runs `perl -S pp`), and see which
+  `pp` it starts and whether the binary runs. The keg line becomes a second
+  piece of the shell step only if this shows it is needed.
+- **CI:** `.github/workflows/release-build.yml` runs
+  `./build/macos-setup.sh --package`. Verified by a manual run of that
+  workflow on the issue branch (its release job runs on tags only), asked of
+  the architect first.
+- **Proven by** AC9 (`--validate` and `--repair` install nothing), AC10 (a
+  working configuration gains nothing), AC10a (the missing piece added once),
+  AC11 (both login modes resolve the tools), each in a throwaway home.
+
+### Step 4: the one rule, applied
+
+- `ltl` line 1 `#!/usr/bin/env perl`.
+- The 15 harnesses: `PERL="${PERL:-perl}"`, and the fallback line after it
+  removed; the comment in `tests/validate-section-layout.sh` that names
+  Homebrew Perl rewritten to the rule.
+- `prototype/`: the seven `#!/usr/bin/perl` first lines to `env perl`; bare
+  `perl` in `prototype/426-asbuilt-run.sh`; the `PATH` lines removed from the
+  two notice-surface scripts. `tests/profile/checks/README.md`: bare `perl`.
+- `tests/lib/require-bash.sh`: the remedy line names, by `uname -s`, the
+  host's setup with `--validate` (macOS: `build/macos-setup.sh --validate`;
+  elsewhere, until stage 2 names the Linux setup, `perl
+  process/check-environment.pl`); its header comment rewritten the same way.
+- `tests/profile/profiling-preflight.sh`: its check 1, a second test for
+  "not the system Perl" that names `/usr/bin` and so would fail on Linux,
+  where `/usr/bin/perl` is the expected Perl, becomes a call of
+  `process/check-environment.pl --condition 1,2`, keeping its exit code 1;
+  its remedy names the host's setup as `require-bash.sh` does. Its one
+  consumer, `tests/profile/run-profile.sh`, reads only the exit code.
+- Records (R10): `README.md` § Install Dependencies (macOS requires Homebrew;
+  the setup, `--repair`, `--validate`), § Test-harness dependencies (the
+  `export PATH` block gives way to `--validate`), the profiling subsection
+  (`--dev-deps` for `LTL_INSTALL_DEV_DEPS=1`); `CLAUDE.md` § Build and § Test
+  and benchmark; `tests/HARNESS-DESIGN.md`'s note on Homebrew bash; 544 D1 and
+  D7 restated against the requirement. `docs/toolchain-guidance.md` §
+  Windows development host waits for stage 3, which changes what it describes.
+- **Proven by** AC13 (the search for interpreters named by location), AC15
+  (`./ltl --version`), AC20 on `README.md` and `CLAUDE.md` (the Windows
+  section's line waits for stage 3); `perl -c` and `bash -n` on each changed
+  script; one scenario of a changed harness run before and after, with the
+  `perl` each one starts read from its output.
+
+### Step 5: this host
+
+- `build/macos-setup.sh --validate` on the architect's own home: condition 8
+  is expected to fail (§ Phase 4: what Homebrew's own configuration already
+  provides on macOS). Moving the `~/.zshrc` lines, or running `--repair`, is
+  the architect's choice; then AC1.
+- AC7, a session started on a wrong `PATH`, is run by the architect.
+
+### Not in stage 1
+
+The full harness suite runs once, at the completion gate after stage 4, on
+this host; AC16's macOS result is recorded there. Linux setup, the Windows
+setup's options and modes, the shim's removal, and the container builds
+belong to stages 2 to 4.
 
 ## Troubleshooting a failed condition
 
