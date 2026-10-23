@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # Mini Heatmap Demo - Compact output for quick viewing
 #

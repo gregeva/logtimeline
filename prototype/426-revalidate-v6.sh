@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # 426-revalidate-v6.sh — driver for the V6 aspect (display-geometry-bound
 # consumers under T, S and G).

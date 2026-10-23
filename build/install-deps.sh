@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # install-deps.sh : generate a CPAN package file (if not existing) and then install those package dependencies
 #

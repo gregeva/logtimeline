@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/perl
+#!/usr/bin/env perl
 
 # LogTimeLine (ltl) - command-line log analysis and time-bucket visualization
 #

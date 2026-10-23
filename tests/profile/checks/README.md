@@ -45,7 +45,7 @@ times in the output).
 ## Usage
 
 ```bash
-/opt/homebrew/bin/perl tests/profile/extract-profile.pl \
+perl tests/profile/extract-profile.pl \
     --file tests/profile/results/<label>/<sample>/nytprof.out \
     --verbose-file tests/profile/results/<label>/<sample>/verbose.txt \
     --checks-file tests/profile/checks/consolidation.tsv

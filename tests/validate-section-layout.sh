@@ -35,8 +35,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="${LTL:-$REPO_DIR/ltl}"
 CHECKER="$SCRIPT_DIR/section-layout/check-section-layout.pl"
-# Homebrew Perl only, never the system Perl (build/macos-setup.sh installs it).
-PERL="${PERL:-/opt/homebrew/bin/perl}"
+# perl from PATH; process/check-environment.pl asserts it is the development Perl.
+PERL="${PERL:-perl}"
 WIDTH=160
 
 # Invocation shape (tests/HARNESS-DESIGN.md § Invocation coherence): the report
@@ -72,7 +72,8 @@ source "$SCRIPT_DIR/lib/nondeterministic.sh"
 
 neutralize_colour_env
 
-for f in "$PERL" "$LTL" "$CHECKER" "$THREAD_LOG" "$SPREAD_LOG" "$NUMERIC_LOG" "$USERS_LOG" "$LEDGER_LOG" "$DIAG_LOG" "$UDM_LOG" "${MULTI_LOGS[@]}"; do
+command -v "$PERL" >/dev/null 2>&1 || { echo "ERROR: required interpreter not found: $PERL"; exit 1; }
+for f in "$LTL" "$CHECKER" "$THREAD_LOG" "$SPREAD_LOG" "$NUMERIC_LOG" "$USERS_LOG" "$LEDGER_LOG" "$DIAG_LOG" "$UDM_LOG" "${MULTI_LOGS[@]}"; do
     [[ -e "$f" ]] || { echo "ERROR: required file not found: $f"; exit 1; }
 done
 

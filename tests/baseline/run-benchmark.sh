@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # run-benchmark.sh — Run ltl benchmark test cases and capture results as TSV
 # Usage: ./run-benchmark.sh [target] [--label <name>] [--options "<ltl options>"]

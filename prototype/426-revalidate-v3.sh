@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Driver for prototype/426-revalidate-v3.pl — captures every run under
 # prototype/426-results/revalidate-v3-*.txt. Run from the repo root.
 #

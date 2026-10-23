@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # generate-cpanfile.sh : scan a Perl script for package dependencies, and build a CPAN file with those packages for easier project dependency management
 #

@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # 426-revalidate-v7.pl — V7 aspect of the #426 revalidation: the BUCKET-STATS
 # surface.

@@ -85,14 +85,14 @@ fi
 # Generator dependency preflight. Fail fast — never silently skip.
 if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: this harness requires python3 (not found on PATH)." >&2
-    echo "       macOS:  brew install python" >&2
-    echo "       Ubuntu: sudo apt-get install python3" >&2
+    echo "       The environment check shows why: perl process/check-environment.pl" >&2
+    echo "       Install steps per host: README.md, 'Test-harness dependencies'." >&2
     exit 1
 fi
 if ! python3 -c 'import numpy' >/dev/null 2>&1; then
-    echo "ERROR: the anchor generator requires numpy (not importable)." >&2
-    echo "       macOS:  pip3 install numpy" >&2
-    echo "       Ubuntu: sudo apt-get install python3-numpy" >&2
+    echo "ERROR: the anchor generator requires numpy (not importable under $(command -v python3))." >&2
+    echo "       The environment check shows why: perl process/check-environment.pl" >&2
+    echo "       Install steps per host: README.md, 'Test-harness dependencies'." >&2
     exit 1
 fi
 

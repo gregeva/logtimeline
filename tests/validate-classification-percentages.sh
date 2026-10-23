@@ -52,8 +52,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 LTL="${LTL:-$REPO_DIR/ltl}"
-PERL="${PERL:-/opt/homebrew/bin/perl}"
-command -v "$PERL" >/dev/null 2>&1 || PERL=perl
+PERL="${PERL:-perl}"
 export PERL
 
 ACCESS_FIXTURE="$REPO_DIR/tests/fixtures/access-classification-buckets.txt"

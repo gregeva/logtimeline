@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # 426-revalidate-v8-rebless.pl — N4: what a shared grid would do to the
 # committed statistics-drift baselines.

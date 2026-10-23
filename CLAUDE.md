@@ -466,7 +466,8 @@ Hidden: `--disable-progress`, `--terminal-width N`, `--debug-layout`,
 ### Build
 
 ```bash
-./build/macos-setup.sh                      # macOS: Homebrew Perl, never system Perl
+./build/macos-setup.sh                      # macOS (needs Homebrew): --dev-deps the profiler, --package PAR::Packer
+./build/macos-setup.sh --validate           # the environment check alone; --repair adds only what it finds missing
 sudo apt-get install build-essential perl perl-base perl-modules libperl-dev cpanminus \
   && cpanm PAR::Packer && cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1   # Windows dev host, AMD64 or ARM64 (docs/toolchain-guidance.md)
@@ -480,7 +481,7 @@ GitHub Actions builds all platforms on `v*` tags (`.github/workflows/release-bui
 ### Test and benchmark
 
 ```bash
-export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"  # harnesses need bash 4+ and Homebrew Perl
+perl process/check-environment.pl                   # the development Perl, bash 4+ and Python first on PATH, on any host
 perl -c ltl                                         # syntax check; the whole gate for a comment-only diff
 ./tests/validate-<name>.sh --list                   # its scenario names
 ./tests/validate-<name>.sh --scenario <a> --scenario <b>   # the scenarios the change needs, while iterating

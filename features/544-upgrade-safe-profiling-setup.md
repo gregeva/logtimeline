@@ -128,8 +128,15 @@ not ripple.
 
 ## Decisions
 
-**D1 (locked by the architect): upgrade safety means Homebrew Perl plus self-install, not
-a pinned interpreter.**
+**D1 (restated against the architect's requirement, 2026-10-23, in
+`features/750-interpreter-resolution.md` § The architect's framing): upgrade safety means
+the development Perl plus self-install, not a pinned interpreter.** The requirement is the
+one Perl that carries the modules the application and the development environment
+install, run by every consumer; Homebrew Perl is how macOS meets it, not the requirement,
+and it was pinned here because the agent was at times picking up the macOS system Perl.
+Profiling works on Linux and Windows as well, each on its own host's development Perl.
+
+*The decision as first taken (locked by the architect), restated above:*
 The development environment stays Homebrew Perl. No perlbrew, no plenv. After a Perl
 upgrade the profiler is restored without the developer having to know anything, because
 the profiling run installs it when missing.
@@ -239,7 +246,14 @@ macOS build step. A variable that defaults to off means that step is correct wit
 edited, and stays correct if the step is ever copied. The developer's documented command
 in `README.md` sets it inline, which reads as one command and cannot be half-applied.
 
-**D7 (delegated): tool resolution.**
+**D7 (restated, 2026-10-23, in `features/750-interpreter-resolution.md` § Stage 1
+implementation plan, step 4): tool resolution.** The interpreter is `perl` from PATH,
+put first by the host's setup. The preflight's check 1 runs
+`process/check-environment.pl --condition 1,2`, the same test on every host, in place of
+its own test for `/usr/bin` and `/System/`, which named the expected Perl of a Linux host
+as wrong. The HTML tool's resolution below is unchanged.
+
+*The decision as first taken (delegated), restated above:*
 
 - **The interpreter is `perl` from PATH.** On a documented setup this is already Homebrew
   Perl, because `build/macos-setup.sh` puts `$(brew --prefix)/opt/perl/bin` ahead of the

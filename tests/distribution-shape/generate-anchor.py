@@ -70,8 +70,8 @@ def main(argv):
         import numpy as np
     except ImportError:
         sys.stderr.write("ERROR: generate-anchor.py requires numpy.\n")
-        sys.stderr.write("       macOS:  brew install python && pip3 install numpy\n")
-        sys.stderr.write("       Ubuntu: sudo apt-get install python3-numpy\n")
+        sys.stderr.write("       The environment check shows why: perl process/check-environment.pl\n")
+        sys.stderr.write("       Install steps per host: README.md, 'Test-harness dependencies'.\n")
         return 1
 
     rng = np.random.default_rng(SEED)

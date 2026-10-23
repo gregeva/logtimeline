@@ -138,37 +138,15 @@ fi
 if [[ $L3_ENABLED -eq 1 ]]; then
     if ! command -v python3 >/dev/null 2>&1; then
         echo "ERROR: Layer 3 requires python3 (not found on PATH)." >&2
-        echo "       macOS:  brew install python" >&2
-        echo "       Ubuntu: sudo apt-get install python3 python3-pip" >&2
+        echo "       The environment check shows why: perl process/check-environment.pl" >&2
+        echo "       Install steps per host: README.md, 'Test-harness dependencies'." >&2
         echo "       Or pass --skip-l3 to run without external-oracle validation." >&2
         exit 1
     fi
     if ! python3 -c 'import numpy, scipy' >/dev/null 2>&1; then
-        PY=$(command -v python3)
-        echo "ERROR: Layer 3 requires NumPy and SciPy (one or both missing under $PY)." >&2
-        echo "       Install command depends on which Python this is:" >&2
-        case "$PY" in
-            /opt/homebrew/*|/usr/local/Cellar/*|/usr/local/opt/*)
-                echo "         $PY is Homebrew Python - PEP 668 blocks 'pip install --user'." >&2
-                echo "         Install via brew (numpy and scipy ship as brew formulas):" >&2
-                echo "           brew install numpy scipy" >&2
-                ;;
-            /Library/Developer/CommandLineTools/*|/usr/bin/*)
-                echo "         $PY is Apple Command-Line-Tools Python - pip --user works:" >&2
-                echo "           $PY -m pip install --user numpy scipy" >&2
-                ;;
-            *)
-                # Linux PEP-668 distros (Ubuntu 24.04+, Debian 12+, Fedora 38+) also block
-                # pip --user; older ones do not. Venv works everywhere.
-                echo "         Try pip --user (works on pre-PEP-668 distros):" >&2
-                echo "           $PY -m pip install --user numpy scipy" >&2
-                echo "         If PEP 668 blocks, use a venv (works everywhere):" >&2
-                echo "           $PY -m venv .venv && .venv/bin/python -m pip install numpy scipy" >&2
-                echo "           Then re-run the harness with: PATH=\$(pwd)/.venv/bin:\$PATH ./tests/validate-statistics.sh" >&2
-                ;;
-        esac
-        echo "       Verify: $PY -c 'import numpy, scipy'" >&2
-        echo "       See README.md 'Test-harness dependencies' for the venv alternative." >&2
+        echo "ERROR: Layer 3 requires NumPy and SciPy (one or both missing under $(command -v python3))." >&2
+        echo "       The environment check shows why: perl process/check-environment.pl" >&2
+        echo "       Install steps per host: README.md, 'Test-harness dependencies'." >&2
         echo "       Or pass --skip-l3 to run without external-oracle validation." >&2
         exit 1
     fi

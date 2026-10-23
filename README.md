@@ -42,8 +42,10 @@ A Full GC loop explored through zooming in on the specific time range, activatin
 ### Install Dependencies
 
 ```bash
-# macOS (uses Homebrew Perl — do NOT use macOS system Perl)
-./build/macos-setup.sh
+# macOS (requires Homebrew; installs Homebrew Perl, bash and Python, never the system ones)
+./build/macos-setup.sh               # full setup; --dev-deps adds the profiler, --package PAR::Packer
+./build/macos-setup.sh --validate    # run the environment check, change nothing
+./build/macos-setup.sh --repair      # install nothing; add to the shell configuration only what the check finds missing
 
 # Ubuntu/Linux
 sudo apt-get install build-essential perl perl-base perl-modules libperl-dev cpanminus
@@ -60,19 +62,20 @@ On Windows the script installs Git, GitHub CLI, jq, Python with NumPy and SciPy,
 
 #### Test-harness dependencies
 
-The test harnesses run under Homebrew Perl and Homebrew bash, never the macOS system versions. `./build/macos-setup.sh` installs both; the shell you run the harnesses from must then find them first on its PATH:
+The test harnesses, `ltl` and every other script take `perl`, `bash` and `python3` from PATH. Each host's setup installs the development versions of the three, never the system ones (on macOS, Homebrew's), and the environment check tests that they come first: on the PATH the check inherits, and in a login shell started from a clean environment. It reports each condition with what it expected and what it found, and changes nothing:
 
 ```bash
-export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"   # e.g. in ~/.zshrc
-bash -c 'echo $BASH_VERSION'   # 5.x, not 3.2
-perl -MText::CSV -e 1          # no "Can't locate" error
+./build/macos-setup.sh --validate      # macOS
+perl process/check-environment.pl      # any host; the same check
 ```
 
-A harness started under bash older than 4 stops at once and names the interpreter. macOS's `/bin/bash` 3.2 would let a harness that crashes partway through report success. The system Perl lacks the modules `ltl` and the harnesses load.
+On macOS, Homebrew's own `brew shellenv` line, which its installer asks you to add to `~/.zprofile`, is what puts its tools first in every login shell. If the check finds a login shell without it, `./build/macos-setup.sh --repair` adds it, once; it never rewrites a line already there.
 
-Some test harnesses require Python 3, NumPy, and SciPy. A harness that needs one of these fails fast with an install hint if it is missing — it does not silently skip the work that depends on it.
+A harness started under bash older than 4 stops at once, names the interpreter and points at the environment check. macOS's `/bin/bash` 3.2 would let a harness that crashes partway through report success. The system Perl lacks the modules `ltl` and the harnesses load.
 
-**macOS:** `./build/macos-setup.sh` installs Homebrew Python with NumPy and SciPy (`brew install python numpy scipy`; Homebrew's NumPy and SciPy do not pull in Homebrew Python themselves). With Homebrew first on PATH, as above, `python3` is that Python, not the system one.
+Some test harnesses require Python 3, NumPy, and SciPy. A harness that needs one of these fails fast if it is missing, pointing at the environment check and at this section — it does not silently skip the work that depends on it.
+
+**macOS:** `./build/macos-setup.sh` installs Homebrew Python with NumPy and SciPy (`brew install python numpy scipy`; Homebrew's NumPy and SciPy do not pull in Homebrew Python themselves). With Homebrew's line in the shell configuration, as above, `python3` is that Python, not the system one.
 
 **Windows:** `build\windows-setup.ps1` installs Python 3.13 through WinGet with NumPy and SciPy. Windows' own `python` is a Microsoft Store stub that installs nothing; open a new terminal after the script so the real one is first on PATH.
 
@@ -98,7 +101,7 @@ Verify the install landed in the right place by running, in the harness's shell 
 python3 -c "import numpy, scipy"
 ```
 
-If this still fails after installing, you have a PATH-mismatch case: a bare `pip3` (or even `python3` in your interactive shell) targeted a different interpreter than the one `python3` resolves to in the harness's non-interactive shell. Re-run the install using the **full path** that `which python3` reports — e.g. `/opt/homebrew/bin/python3 -m pip install …`. The PATH-resolution variation is the most common failure mode.
+If this still fails after installing, the `python3` the harness finds is not the one you installed into. The environment check shows which `python3` comes first on the harness's PATH and in a login shell.
 
 Do not use `--break-system-packages` unless you understand the consequence — it can break your system Python.
 

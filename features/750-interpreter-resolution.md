@@ -13,7 +13,8 @@ benchmark), 1 (`process/check-environment.pl`) and 2 (the session-start
 hook) done, AC8's budget set (D14); step 3 (`build/macos-setup.sh`) built
 and its throwaway-home cases passing, its CI run still to be asked; its Perl
 keg measurement parked for another host (PAR::Packer cannot be fetched
-through this network's proxy); next step 4 (the one rule, applied). Open,
+through this network's proxy); step 4 (the one rule, applied) done; next
+step 5 (this host). Open,
 measured in stage 1: what still needs the
 Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
 provides on macOS). What is in
@@ -403,8 +404,8 @@ takes `perl`, `bash` and `python3` from `PATH` and nothing else:
   (`build/ubuntu-package.sh` inside `ubuntu:20.04`, `build/windows-package.sh`
   naming Strawberry Perl inside its Wine container).
 - `tests/lib/require-bash.sh` stays: it guards a harness started from any
-  shell, inside a session or not. Its message names the host's setup and its
-  `--validate`, not Homebrew.
+  shell, inside a session or not. Its message points at the environment
+  check, the same line on every host, not at Homebrew.
 
 What the rule removes or rewrites, against the inventory in § The class of
 fault:
@@ -418,7 +419,10 @@ fault:
 | `#!/usr/bin/perl` in seven prototype scripts (the five of phase 3, plus `prototype/colors` and `prototype/colors-256`), `/opt/homebrew/bin/perl` in `prototype/426-asbuilt-run.sh` | `env perl`, bare `perl` |
 | the example in `tests/profile/checks/README.md` | bare `perl` |
 | the `export PATH="$(brew --prefix)..."` lines in `CLAUDE.md` and `README.md` | the host's setup, and its `--validate` |
-| `require-bash.sh`'s Homebrew hint | names the host's setup and `--validate` |
+| `require-bash.sh`'s Homebrew hint | points at the environment check: `perl process/check-environment.pl` |
+| `#!/bin/bash`, bash 3.2 on macOS, in 18 scripts: `build/generate-cpanfile.sh`, `build/install-deps.sh`, `build/macos-package.sh`, `tests/baseline/run-benchmark.sh`, `tests/baseline/compare-results.sh`, `tests/profile/run-profile.sh`, `tests/profile/profiling-preflight.sh`, and 11 prototype scripts | `#!/usr/bin/env bash`. `build/macos-setup.sh` and the two container builds keep it, as exceptions |
+| the Python install hints in `tests/validate-statistics.sh`, `tests/validate-profile.sh`, `tests/validate-distribution-shape.sh` and `tests/distribution-shape/generate-anchor.py`, which printed a macOS `brew` remedy on every host and advised installing into the command-line-tools Python or a `PATH` change | point at the environment check and at `README.md` § Test-harness dependencies, the same two lines on every host |
+| the macOS bullets of `tests/statistics-drift/README.md` § External dependencies, naming Homebrew's and the command-line-tools Python by path | the macOS setup and its `--validate` |
 | historical records (`tests/profile/results/*`, `releases/*`, past investigations, `build/packaging-notes`, the prototype reports that name the Perl they ran under) | untouched: they record the interpreter of their time |
 | `prototype/720-packed-generated-loop/pack-windows.sh`, which sets `PATH` to Strawberry Perl inside its Wine container | untouched: the container steps of `build/windows-package.sh`, a sealed environment |
 | `tests/validate-screenshot-capture.sh`, which runs the capture tool with `PATH` cut down to a directory without the tools | untouched: the test's own fixture for an absent tool |
@@ -427,6 +431,17 @@ Stage 1 audit (2026-10-23): the AC13 search over the issue branch at
 `54b29fe2` printed 52 lines; beyond the inventory above it found
 `#!/usr/bin/perl` in `prototype/colors` and `prototype/colors-256`, added to the
 prototype row, and the three untouched rows just above.
+
+Stage 1 step 4 (2026-10-23): a census of every tracked file's first line
+found `#!/bin/bash` in 22 scripts, which AC13's pattern did not search for:
+the 18 of the row above, the three exceptions, and one under
+`tests/profile/results/`, a historical record. AC13's pattern gains
+`^#!/bin/bash`. The rule already covered them (architect, 2026-10-23: more
+sites, the same decision). Also found: `#!/bin/zsh` in
+`prototype/426-revalidate-v2.sh` and `#!/bin/sh` in
+`prototype/426-revalidate-v5-run.sh`, left as they are: neither is one of the
+three interpreters the rule governs, and each names the only one of its kind
+on the host.
 
 ### Phase 4: investigation stages, one per environment
 
@@ -483,7 +498,7 @@ https://code.claude.com/docs/en/hooks-guide.md:
 | #751 (harnesses on Windows) | read: not planned; bounds what "validated on Windows" can cover |
 | `features/nytprof-profiling-workflow.md`, `tests/profile/profiling-preflight.sh` | read: already resolve through `perl` from `PATH` (544 D7) |
 | `features/227-binary-smoke-coverage.md`, `features/503-yaml-aggregate-export.md`, `features/189-histogram-bin-counter-primitives.md`, `features/342-redundant-logic-surfaces-audit-report.md`, `features/213-consolidation-regression-investigation.md`, `features/memory-tracking-improvements.md`, `releases/v0.12.2.md`, `tests/profile/results/*` | dismissed: records of past runs and past releases, which name the interpreter of their time |
-| `tests/distribution-shape/generate-anchor.py`, the Python hints in `tests/validate-statistics.sh`, `tests/validate-profile.sh`, `tests/validate-distribution-shape.sh` | dismissed: each hint is labelled with the platform it is for |
+| `tests/distribution-shape/generate-anchor.py`, the Python hints in `tests/validate-statistics.sh`, `tests/validate-profile.sh`, `tests/validate-distribution-shape.sh` | first dismissed, as labelled with the platform each is for; rewritten in stage 1 step 4 under R7 and R9 (§ Phase 4: the one rule every script follows) |
 | #106, #138, #328, #434, #541 | dismissed: closed, matched a term in passing |
 
 
@@ -733,12 +748,19 @@ scripts, put first on `PATH` to change what one name resolves to.
 
 **The rule (R6, R7, R9)**
 
-- [ ] **AC13. No interpreter named by location.** `git grep -nE 'brew
-      --prefix|/opt/homebrew|^#!/usr/bin/perl|(^|[;[:space:]])(export
+- [x] **AC13. No interpreter named by location.** `git grep -nE 'brew
+      --prefix|/opt/homebrew|^#!/usr/bin/perl|^#!/bin/bash|(^|[;[:space:]])(export
       +)?PATH=' -- ltl '*.sh' '*.pl' '*.py' build process prototype tests`.
       Pass when: every line it prints is in one of the exceptions or the
       historical records named in § Phase 4: the one rule every script
       follows. M.
+      - M, 2026-10-23, pass, at stage 1 step 4: 26 lines, every one in the
+        setup scripts (`build/macos-setup.sh`, `build/windows-setup.ps1`), the
+        container builds (`build/ubuntu-package.sh`, `build/windows-package.sh`,
+        `prototype/720-packed-generated-loop/pack-windows.sh`), the screenshot
+        test's own fixture (`tests/validate-screenshot-capture.sh`), or the
+        historical records (`build/packaging-notes`, three prototype reports,
+        `tests/profile/results/`).
 - [ ] **AC14. No message about Homebrew where there is none.** On Linux, run
       `prototype/412-notice-surfaces/check-tmux.sh`,
       `prototype/412-notice-surfaces/capture/specimens.sh` and the full harness
@@ -748,6 +770,8 @@ scripts, put first on `PATH` to change what one name resolves to.
       Windows `ls /opt/homebrew/bin/perl`.
       Pass when: `ltl` prints its version on every host, and on Windows `ls`
       reports no such file. M L W.
+      - M, 2026-10-23, pass: first line `#!/usr/bin/env perl`; `./ltl
+        --disable-progress --version` printed `0.20.0-750`.
 - [ ] **AC16. The harness suite passes.** The completion gate's full suite
       (`docs/process/workflow.md` § 3). Pass when: every harness passes. M L.
 
@@ -772,6 +796,12 @@ scripts, put first on `PATH` to change what one name resolves to.
       docs/toolchain-guidance.md`, then read each host's setup instructions.
       Pass when: `git grep` finds nothing, and each host's instructions name
       its setup with `--repair` and `--validate`. M.
+      - M, 2026-10-23, partial, at stage 1 step 4: the search finds nothing in
+        `README.md` or `CLAUDE.md`, and the macOS instructions name
+        `build/macos-setup.sh` with `--validate` and `--repair`. It still finds
+        `docs/toolchain-guidance.md` § Windows development host, trap 3 (the
+        shim), which stage 3 rewrites; the Linux and Windows instructions are
+        stages 2 and 3's.
 
 ## Stage 1 implementation plan (macOS development host)
 
@@ -931,16 +961,29 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
 - `prototype/`: the seven `#!/usr/bin/perl` first lines to `env perl`; bare
   `perl` in `prototype/426-asbuilt-run.sh`; the `PATH` lines removed from the
   two notice-surface scripts. `tests/profile/checks/README.md`: bare `perl`.
-- `tests/lib/require-bash.sh`: the remedy line names, by `uname -s`, the
-  host's setup with `--validate` (macOS: `build/macos-setup.sh --validate`;
-  elsewhere, until stage 2 names the Linux setup, `perl
-  process/check-environment.pl`); its header comment rewritten the same way.
+- `tests/lib/require-bash.sh`: the remedy line points at the environment
+  check, `perl process/check-environment.pl`, the same on every host; its
+  header comment rewritten the same way. First planned as the host's setup
+  chosen by `uname -s`; changed while building it, because `--validate` runs
+  exactly that check, the line is right on every host now and after stages
+  2 and 3 without another edit, and the check's report already points at the
+  troubleshooting entries that name the setup's modes. The Python hints
+  (§ Phase 4: the one rule every script follows) carry the same line, and a
+  second one naming `README.md` § Test-harness dependencies for the install
+  steps per host.
+- `tests/validate-section-layout.sh` tested that every input exists with
+  `[[ -e "$f" ]]`, `$PERL` among them, which a bare `perl` fails: `$PERL` left
+  that list for a `command -v` test of its own.
 - `tests/profile/profiling-preflight.sh`: its check 1, a second test for
   "not the system Perl" that names `/usr/bin` and so would fail on Linux,
   where `/usr/bin/perl` is the expected Perl, becomes a call of
-  `process/check-environment.pl --condition 1,2`, keeping its exit code 1;
-  its remedy names the host's setup as `require-bash.sh` does. Its one
-  consumer, `tests/profile/run-profile.sh`, reads only the exit code.
+  `process/check-environment.pl --condition 1,2`, keeping its exit code 1; on
+  a failure it prints that report, whose pointers name the troubleshooting
+  entries. With no `perl` at all, where the check cannot run, it prints
+  condition 1's pointer itself. Its remedy for a missing `cpanm` names
+  `./build/macos-setup.sh --dev-deps` on macOS and nothing elsewhere, until
+  stages 2 and 3 give those hosts a setup. Its one consumer,
+  `tests/profile/run-profile.sh`, reads only the exit code.
 - Records (R10): `README.md` § Install Dependencies (macOS requires Homebrew;
   the setup, `--repair`, `--validate`), § Test-harness dependencies (the
   `export PATH` block gives way to `--validate`), the profiling subsection
@@ -953,6 +996,27 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   section's line waits for stage 3); `perl -c` and `bash -n` on each changed
   script; one scenario of a changed harness run before and after, with the
   `perl` each one starts read from its output.
+- **Run on macOS, 2026-10-23:** `perl -c`, `bash -n` and `py_compile` clean on
+  every changed script. `tests/validate-value-display.sh --scenario
+  zero-duration` and `tests/validate-section-layout.sh --scenario
+  layout-baseline` under `bash -x`, before and after: both pass both times;
+  before, `PERL=/opt/homebrew/bin/perl`; after, `PERL=perl`, each check script
+  started as `perl <script>`. Each rewritten message made to fire: a harness
+  under `/bin/bash` (exit 2, pointing at the check); a `python3` that cannot
+  import NumPy first on `PATH` (`tests/validate-statistics.sh`,
+  `tests/validate-distribution-shape.sh`), no `python3` on `PATH`
+  (`tests/validate-profile.sh`), and the anchor generator under a Python
+  without NumPy, each exit 1 with the two lines; the profiling preflight on
+  this host (exit 0) and with the system Perl first (exit 1, the check's
+  report for conditions 1 and 2). `tests/baseline/compare-results.sh summary`
+  on two released TSVs under `/bin/bash` and under the new first line: the
+  same 347 lines. `build/generate-cpanfile.sh` under both: the same output,
+  the tracked cpanfiles unchanged. The benchmark records `ltl`'s own timings
+  (`-V benchmark-data`), so the runner's bash does not enter the before and
+  after comparison.
+- Found on the way, fixed in step 1's script: started by the bare name
+  `perl`, macOS's system Perl gives `$^X` as `perl`, and the header read "ran
+  under perl"; the header now finds the name on `PATH`, as the shell did.
 
 ### Step 5: this host
 

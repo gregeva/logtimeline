@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # profiling-preflight.sh — verify the environment can run a profiling session
 #
@@ -6,7 +6,8 @@
 #   ./tests/profile/profiling-preflight.sh
 #
 # Checks, in order:
-#   1. The interpreter on PATH is not macOS system Perl.
+#   1. The perl on PATH is the development Perl (process/check-environment.pl,
+#      conditions 1 and 2).
 #   2. The profiler module loads for that interpreter.
 #   3. The HTML report tool resolves to an executable path.
 #
@@ -21,7 +22,7 @@
 #
 # Exit codes:
 #   0  the interpreter is acceptable, the profiler loads, the HTML tool resolves
-#   1  macOS system Perl is on PATH
+#   1  the perl on PATH is not the development Perl, or there is none
 #   2  the profiler or the HTML tool is missing and could not be installed
 #   3  cpanm is not available
 #
@@ -37,26 +38,31 @@ BUILD_DIR="$(cd "$SCRIPT_DIR/../../build" && pwd)"   # the cpanfile and its deve
 PROFILER_MODULE="Devel::NYTProf::Data"
 HTML_TOOL="nytprofhtml"
 INSTALL_COMMAND="cd build && cpanm --notest --installdeps --with-develop ."
-SETUP_COMMAND="./build/macos-setup.sh"
+CHECK_ENVIRONMENT="$SCRIPT_DIR/../../process/check-environment.pl"
+POINTER="see: features/750-interpreter-resolution.md § Troubleshooting a failed condition"
+case "$(uname -s)" in
+    Darwin) SETUP_COMMAND="./build/macos-setup.sh --dev-deps" ;;   # installs cpanm and the profiler
+    *)      SETUP_COMMAND="" ;;
+esac
 
 RESOLVED_PERL=""
 RESOLVED_HTML_TOOL=""
 
-# --- Check 1: the interpreter is not macOS system Perl -----------------------
+# --- Check 1: the perl on PATH is the development Perl -----------------------
+# The environment check's conditions 1 and 2 decide it, the same on every host.
 check_interpreter() {
     if ! command -v perl >/dev/null 2>&1; then
         echo "[error] No perl found on PATH." >&2
-        echo "  $SETUP_COMMAND" >&2
+        echo "  $POINTER, condition 1" >&2
         return 1
     fi
     RESOLVED_PERL="$(command -v perl)"
-    case "$RESOLVED_PERL" in
-        /usr/bin/*|/System/*)
-            echo "[error] PATH resolves perl to macOS system Perl ($RESOLVED_PERL), which this repository does not support." >&2
-            echo "  $SETUP_COMMAND" >&2
-            return 1
-            ;;
-    esac
+    local report
+    if ! report="$(perl "$CHECK_ENVIRONMENT" --condition 1,2)"; then
+        echo "$report" >&2
+        echo "[error] The perl on PATH ($RESOLVED_PERL) is not the development Perl." >&2
+        return 1
+    fi
     return 0
 }
 
@@ -103,7 +109,7 @@ check_html_tool() {
 install_dev_dependencies() {
     if ! command -v cpanm >/dev/null 2>&1; then
         echo "[error] cpanm is not available, so the profiling tools cannot be installed." >&2
-        echo "  $SETUP_COMMAND" >&2
+        [ -z "$SETUP_COMMAND" ] || echo "  $SETUP_COMMAND" >&2
         return 3
     fi
     echo "[info] The profiling tools are missing for $RESOLVED_PERL. Installing the development-only dependencies."
