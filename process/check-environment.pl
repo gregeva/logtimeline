@@ -184,6 +184,9 @@ END_PERL
 sub modules_judged {
     my ( $perl, @modules ) = @_;
     my $extra = $host eq 'linux' ? "$ENV{HOME}/perl5/lib/perl5" : '';
+    # Loading the profiler starts it, and it writes nytprof.out into the
+    # current directory; start=no loads it without profiling.
+    local $ENV{NYTPROF} = 'start=no';
     my ( $status, $out ) = run_capture( $perl->{path}, '-e', $perl_modules, $extra, @modules );
     return undef if $status != 0;
     return [ map { my %m; @m{qw(name loads file outside copies)} = split /\t/, $_, -1; \%m } split /\n/, $out ];

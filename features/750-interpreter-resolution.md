@@ -768,12 +768,18 @@ scripts, put first on `PATH` to change what one name resolves to.
 - [ ] **AC5. The check writes nothing.** `T=$(mktemp -d)`, then, a second
       later, `M=$(mktemp)`; then `HOME="$T" ZDOTDIR="$T" perl
       process/check-environment.pl`, then `find "$T" -newer "$M"` and
-      `git status --porcelain`. The mark is made outside the throwaway home
+      `git status --porcelain`. Then `find . -maxdepth 1 -newer "$M"` in the directory the check ran
+      from, which `git status` does not see for an ignored file. The mark is made outside the throwaway home
       and after it: made inside it, it leaves the home's directory a few
       microseconds newer than itself, and `find` lists the home on every run
       (measured on macOS, three runs without the check, 2026-10-23).
       Pass when: `find` lists nothing and `git status` is as it was before
       the run. M L W.
+      - M, 2026-10-23, on a second macOS development host: the check left
+        `nytprof.out` in the directory it ran from whenever the profiler is
+        installed; see § Step 1, the profiler started by condition 4. After the
+        fix, the full check with Homebrew's Perl first: both `find` runs
+        listed nothing.
       - M, 2026-10-23, pass: `find` listed nothing, `git status` unchanged.
       - M, 2026-10-23, pass, on a second macOS development host after D15 and
         D16 (Python and Perl started to judge where each module loads from):
@@ -800,6 +806,18 @@ scripts, put first on `PATH` to change what one name resolves to.
       asked what the environment check reported, the agent answers from its
       context; and, asked to find the cause, it reads the entries the pointers
       name and identifies the `PATH` order as the cause. M L W.
+      - M, 2026-10-23, on a second macOS development host, the session
+        started by the architect on a broken `PATH` (Homebrew's `bin` after
+        `/usr/bin` and `/bin`, no Perl keg): the hook's report reached the
+        agent's context, 3 pass, 4 FAIL (2 `/usr/bin/perl` 5.34.1; 3 the
+        three modules that Perl lacks; 6 `/bin/bash` 3.2; 7 `/usr/bin/python3`),
+        each with its pointer. From entries 2, 6 and 7 and the entry's first
+        note (the check sees the environment of whatever started it), the
+        agent named the cause: the `PATH` Claude Code inherited puts the
+        system directories ahead of Homebrew's, while condition 8 shows a
+        clean login shell resolving Homebrew's three tools, so the shell
+        files are right and the fault lies in how the session was started.
+        What the user saw is the architect's to confirm.
 - [ ] **AC8. The hook is fast enough to run at every session start.** On a
       set-up host, `time sh -c '<command>'`, five runs.
       Pass when: the median is within the median of five timed runs of the
@@ -1040,6 +1058,18 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   line resolving all three tools, 8 pass; without one, 0.37 s and the same
   result; the hook's output unchanged. Only `-lic` touches the terminal, so
   only that context line, never a condition's result, was affected.
+- **The profiler started by condition 4** (found on a second macOS host,
+  2026-10-23): the session-start sweep reported a `nytprof.out` in the
+  repository root, 487 bytes, its header naming `-e` under Perl 5.44.0.
+  Loading `Devel::NYTProf` starts the profiler, which writes `nytprof.out`
+  into the current directory: from a scratch directory, with Homebrew's Perl
+  first, `--condition 3` left nothing and `--condition 4` left the file. The
+  session-start hook runs from the repository root, so every session on a
+  host with the profiler installed left one there. AC5 had not caught it:
+  `nytprof.out` is ignored by git, and its `find` looked only in the
+  throwaway home. The module test now runs with `NYTPROF=start=no`, which
+  loads the profiler without starting it; the full check then left the
+  directory empty. AC5 now also looks in the directory the check ran from.
 
 ### Step 2: the session-start hook
 
