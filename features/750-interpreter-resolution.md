@@ -854,6 +854,17 @@ scripts, put first on `PATH` to change what one name resolves to.
         named the cause (the tab's `PATH` changed by hand, `/usr/bin:/bin` in
         front, condition 8 passing) and the fix (a new terminal tab, nothing to
         install, no `--repair`).
+      - L, 2026-10-23, Ubuntu 26.04.1, pass, the session started by the
+        architect as `PATH="/tmp/ltl-ac7/bin:$PATH" claude`, the stand-in
+        directory holding a copy of `/usr/bin/perl`: the user saw "this
+        session finds perl /tmp/ltl-ac7/bin/perl (v5.40.1)", the scenario
+        (Claude Code started with a `PATH` that differs from a new
+        terminal's) and the fix; the check reported condition 2 failing, the
+        other seven applicable passing. The agent's first reply, to "hi",
+        read condition 2's entry, named the cause (the directory put in front
+        of `PATH` by hand in the shell that started `claude`, no shell file
+        adding it, condition 8 resolving `/usr/bin/perl` in every mode) and
+        the fix (a new terminal), and named no issue or branch.
 - [ ] **AC8. The hook is fast enough to run at every session start.** On a
       set-up host, `time sh -c '<command>'`, five runs.
       Pass when: the median is within the median of five timed runs of the
@@ -1432,8 +1443,9 @@ added or upgraded since it last ran" (shown with two modules hidden by an
 draws its PNG with WebKit on macOS (`features/598-screenshot-capture.md` D23).
 Each Linux test case's result is recorded under it.
 
-Open in stage 2: AC7 (a session started on a wrong `PATH`), the architect's
-to run; AC16 (the harness suite) and AC14's harness part, which need the
+AC7 (a session started on a wrong `PATH`) passed, run by the architect.
+
+Open in stage 2: AC16 (the harness suite) and AC14's harness part, which need the
 `logs/` corpus, absent from this checkout.
 
 ## Troubleshooting a failed condition
