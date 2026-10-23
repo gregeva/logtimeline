@@ -1511,6 +1511,26 @@ no story for Windows. Every branch names a cause and a fix written for macOS
 and Linux (a new terminal, `--repair`), so on Windows the message can name
 neither the cause nor a fix that works. D17 gives Windows a story of its own.
 
+### The Windows story (agreed by the architect, 2026-10-24, to be tried on this host)
+
+What the session-start message tells the developer on Windows, per failure:
+
+| What the check finds | Cause on Windows | Fix the message names |
+|---|---|---|
+| no `perl` on `PATH` (1) | Strawberry Perl not installed, or no Git Bash, so Claude Code fell back to PowerShell | run the Windows setup |
+| `perl` is Git's own `/usr/bin/perl`, a login shell finds Strawberry Perl (2) | `BASH_ENV` not set, so the plain shell the hooks run in never reads `~/.bashrc` | run the Windows setup, then quit Claude Code and every terminal window and start again: a new user variable reaches only processes started after it |
+| `perl` is Git's own, and so is a login shell's (2 and 8) | the `~/.bashrc` block missing, or a later line putting Git's directories back in front | run the Windows setup |
+| Strawberry Perl first, modules missing (3) | setup not run, Strawberry Perl reinstalled, or `build/cpanfile.windows` behind `build/cpanfile` | run the Windows setup |
+| a module from outside Strawberry Perl, or two copies (3) | a `PERL5LIB` entry, or a `cpanm` copy beside Strawberry Perl's own | remove that copy, then start again |
+| `python3` does not import NumPy or SciPy (7, a note) | the `~/bin/python3` wrapper missing, so the Microsoft Store stub answers, or the modules installed for another Python | run the Windows setup |
+| CRLF checkout (11) | as before | clone again with `core.autocrlf=false` |
+
+"Run the Windows setup" is the full setup until this stage writes its
+`--repair`. The story needs three changes to the check: tools started under
+Strawberry Perl; condition 8 on Windows judging the plain `bash -c` the hooks
+run in as well as the login shell, with `BASH_ENV` kept in its clean
+environment; and an empty develop block reported as condition 4's note.
+
 ## Troubleshooting a failed condition
 
 The entries live in `docs/development-environment.md` § Troubleshooting a
