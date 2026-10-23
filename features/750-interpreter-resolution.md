@@ -217,11 +217,10 @@ by trusting the Perl the check runs under.
 | 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
 | 7 | `python3` on `PATH` imports NumPy and SciPy | Homebrew's, not `/usr/bin/python3` | the distribution's | the WinGet Python | fail where the harnesses run, note on Windows |
-| 8 | the shell configuration carries the setup's managed block | the file every login zsh reads | the file every login bash reads | `~/.bashrc`, read by `~/.bash_profile` | fail |
-| 9 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7 | | | | fail |
-| 10 | `tmux` is on `PATH` | expected | expected | not expected | note |
-| 11 | the screenshot tools are present | `swiftc` (Xcode command line tools) | established in the Linux stage | not expected | note |
-| 12 | the repository checks files out with LF endings | n/a | n/a | `core.autocrlf=false` | fail |
+| 8 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7; the report also shows, for context, what a new terminal tab (an interactive login shell) and a plain non-login shell resolve | `zsh -lc`; `~/.zprofile` (D6) | a login bash | a Git Bash login shell | fail |
+| 9 | `tmux` is on `PATH` | expected | expected | not expected | note |
+| 10 | the screenshot tools are present | `swiftc` (Xcode command line tools) | established in the Linux stage | not expected | note |
+| 11 | the repository checks files out with LF endings | n/a | n/a | `core.autocrlf=false` | fail |
 
 **Profiling on Windows (architect, 2026-10-23):** profiling works on Windows
 too; 544 D5a is amended so that `build/cpanfile.windows` carries the develop
@@ -234,7 +233,7 @@ host states "`-DevDeps` adds the profiler" and the script's own help says
 "Also install the development-only Perl modules (the profiler)". Not yet run
 on a Windows host.
 
-Condition 9 is the measured fault of phase 1: the Homebrew interpreters were
+Condition 8 is the measured fault of phase 1: the Homebrew interpreters were
 set up only in `~/.zshrc`, read by interactive shells alone.
 
 ### Phase 4: where macOS setup writes its shell configuration (measured)
@@ -309,7 +308,7 @@ which searches `PATH`; without the keg line it finds the system Perl's
 PAR::Packer is not installed for Homebrew Perl 5.44 on this host, and measuring
 it means installing it.
 
-The condition this host fails today is the clean login shell (condition 9):
+The condition this host fails today is the clean login shell (condition 8):
 the developer's Homebrew lines are in `~/.zshrc`, which only an interactive
 shell reads.
 
@@ -479,7 +478,7 @@ https://code.claude.com/docs/en/hooks-guide.md:
 
 Written in the specification stage; the architect closed the stage without a line-by-line review (2026-10-23).
 
-- **R1. One environment check.** A single Perl script tests the twelve
+- **R1. One environment check.** A single Perl script tests the eleven
   conditions of § Phase 4: the expected conditions, and reports each one by
   number with its result (pass, fail, note), what it expected on this host,
   what it found (the path and version of the tool on `PATH`, the module that
@@ -541,7 +540,7 @@ Written in the specification stage; the architect closed the stage without a lin
 
 | | Decision | By |
 |---|---|---|
-| D1 | One read-only check, in Perl, one list of conditions with per-host alternatives; the twelve conditions as listed | architect |
+| D1 | One read-only check, in Perl, one list of conditions with per-host alternatives; the conditions as listed, twelve when decided, eleven once the one about setup's block was retired under D12 | architect |
 | D2 | The session-start hook: shell form, an `sh` launcher, the Perl check | architect |
 | D3 | Linux starts from the distribution's Perl with `local::lib`; not a hard requirement, settled in the Linux stage | architect |
 | D4 | Setup modes: full, `--repair`, `--validate` | architect |
@@ -572,7 +571,7 @@ scripts, put first on `PATH` to change what one name resolves to.
 **The check (R1, R2)**
 
 - [ ] **AC1. A set-up host passes.** Run `<setup> --validate`.
-      Pass when: all twelve conditions are reported by number, each one
+      Pass when: all eleven conditions are reported by number, each one
       applicable to the host passes or is a note, those not applicable are
       reported as such, and the exit status is 0. M L W.
 - [ ] **AC2. The wrong Perl first on `PATH` is reported, and the check still
@@ -729,14 +728,13 @@ Two things hold for every entry:
 | # | What a failure means | Where it has come from, and where to look |
 |---|---|---|
 | 1 | no `perl` on the `PATH` the check saw | the host is not set up, or the process that started the check did not inherit the setup's `PATH` (a Windows host without Git Bash, where Claude Code falls back to PowerShell, is treated as not set up) |
-| 2 | another Perl comes first | `PATH` order: the managed block missing from a file this context reads (conditions 8 and 9 say which), or a later line in a shell file, or `path_helper` on macOS, putting the system directories back in front; on Windows, Git's `/usr/bin` ahead of Strawberry Perl |
+| 2 | another Perl comes first | `PATH` order: Homebrew's line, or setup's addition, missing from a file this context reads (condition 8 shows which shell modes resolve what), or a later line in a shell file, or `path_helper` on macOS, putting the system directories back in front; on Windows, Git's `/usr/bin` ahead of Strawberry Perl |
 | 3 | the right Perl lacks a runtime module | the Perl is right but its modules are not where it looks: on macOS, a Homebrew Perl upgrade across a minor version leaves the modules installed for the old one behind (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism); a cpanfile changed since setup ran; on Windows, `build/cpanfile.windows` differs from `build/cpanfile`. Installing is the full setup's job, not `--repair`'s |
 | 4 | note: the profiler is not installed | expected unless setup ran with `--dev-deps`; the same upgrade cause as 3 applies |
-| 5 | Linux: `PERL5LIB` does not carry `~/perl5` | the managed block missing from a file this context reads, as for 2 |
+| 5 | Linux: `PERL5LIB` does not carry `~/perl5` | the line that sets it missing from a file this context reads, as for 2 |
 | 6 | the first `bash` is older than 4 | the system's bash ahead of the setup's; macOS's `/bin/bash` is 3.2. Same `PATH` causes as 2 |
 | 7 | `python3` does not import NumPy or SciPy | another Python ahead of the setup's (macOS `/usr/bin/python3`; on Windows the Microsoft Store stub), or the modules installed for a different Python than the one on `PATH` |
-| 8 | the managed block is missing or altered | setup never wrote it, it was edited, or the file was replaced; `--repair` rewrites it |
-| 9 | a login shell from a clean environment resolves different tools | the block is in some of the files that context reads and not others, or another file read after it reorders `PATH`; compare the modes as § Phase 4: where macOS setup writes its shell configuration did |
-| 10 | note: no `tmux` | the terminal-interface navigation tests cannot run on this host |
-| 11 | note: no screenshot tools | screenshot capture cannot run on this host |
-| 12 | Windows: `core.autocrlf` is not `false` | the clone was made without `-c core.autocrlf=false`, or a global setting overrides the repository's; scripts check out with CRLF endings and fail in Git Bash |
+| 8 | a login shell from a clean environment resolves different tools | the lines that put the tools first are in a file a login shell does not read (on macOS, `~/.zshrc` alone, which only an interactive shell reads: the report then shows a new tab right and a login shell wrong), or another file read after them reorders `PATH`; compare the modes as § Phase 4: where macOS setup writes its shell configuration did. `--repair` adds the missing piece to `~/.zprofile` |
+| 9 | note: no `tmux` | the terminal-interface navigation tests cannot run on this host |
+| 10 | note: no screenshot tools | screenshot capture cannot run on this host |
+| 11 | Windows: `core.autocrlf` is not `false` | the clone was made without `-c core.autocrlf=false`, or a global setting overrides the repository's; scripts check out with CRLF endings and fail in Git Bash |
