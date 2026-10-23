@@ -492,6 +492,7 @@ sub test_swift_compiler {
 }
 
 sub test_autocrlf {
+    tool('git') or return missing_tool( 'git', 'FAIL', 'core.autocrlf=false in this repository' );
     my ( $status, $out ) = run_capture( 'git', '-C', $repo_root, 'config', 'core.autocrlf' );
     chomp $out;
     my $found = $status == 0 ? "core.autocrlf=$out" : 'core.autocrlf is not set';
@@ -568,8 +569,8 @@ sub windows_path_scenario {
     return 'Likely cause: the shell configuration does not put the development tools first: the managed block in ~/.bashrc or ~/.bash_profile, '
         . "or setup's ~/bin/python3 wrapper, is missing, or a later line puts Git's directories back in front."
         if $shell || !$result->{8}{login_ok}{perl};
-    return defined $ENV{BASH_ENV}
-        ? "Likely cause: BASH_ENV is $ENV{BASH_ENV}, which does not put Strawberry Perl first in the plain Git Bash shell Claude Code runs its hooks in."
+    return length( $ENV{BASH_ENV} // '' )
+        ?"Likely cause: BASH_ENV is $ENV{BASH_ENV}, which does not put Strawberry Perl first in the plain Git Bash shell Claude Code runs its hooks in."
         : "Likely cause: BASH_ENV is not set, so the plain Git Bash shell Claude Code runs its hooks in never reads ~/.bashrc, and Git's own Perl comes first.";
 }
 
@@ -588,8 +589,11 @@ sub user_message {
     # alone.
     my $shell = $fails->(8) && ( @path || !@install );
     if ( @path || $shell ) {
-        my $what = @path
-            ? 'this session finds ' . join( '; ', map { "$tool{$_} $result->{$_}{found}" } @path )
+        # Condition 2 repeats condition 1's missing perl; a missing tool is
+        # named as the check found it.
+        my @named = grep { !( $_ == 2 && $fails->(1) ) } @path;
+        my $what  = @path
+            ? 'this session finds ' . join( '; ', map { $result->{$_}{found} =~ /^no / ? $result->{$_}{found} : "$tool{$_} $result->{$_}{found}" } @named )
             : 'this session finds the right tools, but a new terminal does not';
         push @lines, "Environment check: $what.";
         if ( $host eq 'windows' ) {
@@ -628,7 +632,7 @@ sub user_message {
                 'Fix: remove that copy (a pip install, or the PERL5LIB entry that adds it), then start Claude Code again.';
         }
     }
-    if ( $fails->(11) ) {
+    if ( $fails->(11) && $result->{11}{found} !~ /^no git/ ) {
         push @lines, 'Environment check: this clone checks files out with CRLF line endings.',
             'Fix: clone the repository again with git clone -c core.autocrlf=false.';
     }

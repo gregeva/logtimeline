@@ -690,6 +690,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         context showed a new terminal tab resolving nothing; see § Step 1,
         run from a terminal.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: after `./build/linux-setup.sh --dev-deps --package`, `--validate` reported 1 to 4 and 6 to 11, 8 pass and 2 `n/a` (10, the screenshot tools; 11, Windows' line endings), exit 0.
+      - W, 2026-10-24, Windows 11 ARM64, pass: `build\windows-setup.ps1 --validate` reported 1 to 4 and 6 to 11, 8 pass and 2 `n/a` (9, `tmux`; 10, the screenshot tools), exit 0.
 - [ ] **AC2. The wrong Perl first on `PATH` is reported, and the check still
       runs under it.** macOS: `PATH="/usr/bin:/bin:$PATH" /usr/bin/perl
       process/check-environment.pl`. Windows: `PATH="/usr/bin:$PATH"
@@ -701,6 +702,7 @@ scripts, put first on `PATH` to change what one name resolves to.
       - M, 2026-10-23, pass: ran under `/usr/bin/perl` (v5.34.1); condition 2
         expected Homebrew's Perl and found `/usr/bin/perl (v5.34.1)`; the
         header gave the Perl and the `PATH`; pointer on every failure; exit 1.
+      - W, 2026-10-24, pass: `PATH="/usr/bin:$PATH" /usr/bin/perl process/check-environment.pl` completed under Git's own Perl; condition 2 expected "Strawberry Perl's, not Git's own /usr/bin/perl" and found `/usr/bin/perl (v5.42.2)`; the header gave the Perl and the `PATH`; a pointer on every failure; exit 1.
 - [ ] **AC3. A Perl without the project's modules is reported by the module.**
       The run of AC2 on macOS and Windows; on Linux, where the distribution's
       Perl is the development Perl (D3), the modules are hidden from it: a
@@ -713,6 +715,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         not load; 3 of 20 do not: Devel::Size, Text::CSV, Text::CSV_PP", with
         its pointer.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: with `Devel/Size.pm` and `YAML/PP.pm` hidden by the `@INC` hook, condition 3 found "Devel::Size does not load; 2 of 20 do not: Devel::Size, YAML::PP", with its pointer; exit 1.
+      - W, 2026-10-24, pass: the run of AC2: condition 3 "Devel::Size does not load; 8 of 21 do not: Devel::Size, Text::CSV, Text::CSV_PP, Win32::API, YAML::PP, …", with its pointer.
 - [x] **AC3a. A Perl module from outside the setup's install is reported**
       (D16). A copy of a runtime module from the Perl's own `site_perl`, and
       one of a core module, in a stand-in directory put first with
@@ -730,6 +733,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         `/System/Library/Perl/Extras` is on that Perl's built-in `@INC`.
         The full check took 0.35 s before and after (medians of five).
       - L, 2026-10-23, Ubuntu 26.04.1, pass: copies of Text::CSV (from `/usr/share/perl5`) and Getopt::Long (core, from `perl-base`) in a stand-in directory on `PERL5LIB`: each "loads from <D>/…, outside this Perl's own install"; "Text::CSV is installed 2 times: <D>/Text/CSV.pm, /usr/share/perl5/Text/CSV.pm"; Getopt::Long not counted twice. Without `PERL5LIB` conditions 3 and 4 pass. The copy stands in for a `cpanm` install, as `cpanm` is not on this host; Debian's `perl-base` counted as core, as D16 read it.
+      - W, 2026-10-24, pass: `Text/CSV.pm` from Strawberry Perl's `vendor/lib` and `Getopt/Long.pm` from its core `lib`, copied into a stand-in on `PERL5LIB`: condition 3 named each "loads from <D>/…, outside this Perl's own install" and "Text::CSV is installed 2 times" with both paths; Getopt::Long not counted twice; without `PERL5LIB` conditions 3 and 4 pass.
 - [x] **AC4. Old bash and the system Python are reported.** macOS:
       `ln -s /bin/bash "$D/bash"; PATH="$D:$PATH" perl
       process/check-environment.pl`, then the same with
@@ -777,6 +781,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         0.35 s against 0.29 s before (medians of five, this host now
         starting Homebrew's Python 3.15), inside D14's budget.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: a copy of the distribution's NumPy in a scratch user `site-packages` (`PYTHONUSERBASE`) failed condition 7, "NumPy loads from the user's site-packages, …" and "NumPy is installed 2 times: 2.3.5 in <user>/numpy-2.3.5.dist-info, 2.3.5 in /usr/lib/python3/dist-packages/numpy-2.3.5.dist-info"; without it, pass. The other forms: a venv's `python3` first, without the modules, failed "NumPy or SciPy does not import"; a venv with `--system-site-packages` first passed, as it loads the distribution's modules from their place (the place test judges where the modules load from; the interpreter's path resolves to `/usr/bin/python3.14`).
+      - W, 2026-10-24, pass, with a stand-in for `pip install --user`: NumPy, its `.dist-info` and `numpy.libs` copied into a scratch user `site-packages` (`PYTHONUSERBASE`): condition 7 (a note on Windows) "NumPy loads from the user's site-packages, …" and "NumPy is installed 2 times", naming the WinGet Python the wrapper starts; without it, pass. A first copy without `numpy.libs` did not import, and the check said so.
 - [ ] **AC5. The check writes nothing.** `T=$(mktemp -d)`, then, a second
       later, `M=$(mktemp)`; then `HOME="$T" ZDOTDIR="$T" perl
       process/check-environment.pl`, then `find "$T" -newer "$M"` and
@@ -797,6 +802,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         D16 (Python and Perl started to judge where each module loads from):
         `find` listed nothing, `git status` unchanged.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: `find` in the throwaway home and in the checkout listed nothing; `git status` unchanged by the run.
+      - W, 2026-10-24, pass: `HOME` a fresh temporary directory, the mark made after it; the check exited 1 (condition 8, an empty home); both `find` runs listed nothing and `git status` was unchanged. Partial: with a home holding `.bashrc` alone, condition 8's login shells leave a `.bash_profile` there ("# generated by Git for Windows", reading `~/.profile` and `~/.bashrc`): Git for Windows' `/etc/profile.d/bash_profile.sh` writes it on any login shell when `~/.bashrc` exists and none of `~/.bash_profile`, `~/.bash_login` and `~/.profile` does, as a first Git Bash terminal would.
 
 **The session-start check (R3)**
 
@@ -813,6 +819,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         `additionalContext` saying no `perl` was on `PATH`, the `PATH` it saw
         and the pointer; exit 0, nothing on stderr.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: with only `sh` linked into the stand-in directory, the command from `.claude/settings.json` printed the SessionStart JSON naming condition 1 with its pointer and the `PATH` it saw; exit 0.
+      - W, 2026-10-24, pass: on Windows the launcher runs the check with Git's own `/usr/bin/perl`, so a `PATH` with no `perl` reaches the check rather than the launcher's own message. `env -i PATH="$D" /usr/bin/sh -c '<command>'`, `$D` holding only a stand-in `uname` reporting `MINGW64_NT`: valid SessionStart JSON, exit 0, nothing on stderr; the user's message "this session finds no perl on PATH; no bash on PATH", the cause (Strawberry Perl not installed, or no Git Bash) and the full setup; condition 1 with its pointer. The first run read "finds perl no perl on PATH; perl no perl on PATH" and blamed CRLF line endings with `git` absent; both fixed (§ Step 6).
 - [ ] **AC7. A session started on a wrong environment.** From the checkout,
       start Claude Code as `PATH="/usr/bin:/bin:$PATH" claude` (on Windows,
       Git's `/usr/bin` first from Git Bash).
@@ -889,6 +896,7 @@ scripts, put first on `PATH` to change what one name resolves to.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: the hook's command, five runs, 0.40 to 0.41 s, median 0.40 s; the outstanding-state sweep, five runs, 2.05 to 2.43 s, median 2.23 s.
 
 **Setup (R4, R5)**
+      - W, 2026-10-24, pass: the hook's command, five runs, 3.62 to 3.71 s, median 3.66 s; the outstanding-state sweep, five runs, 7.45 to 9.73 s, median 8.11 s.
 
 - [ ] **AC9. `--repair` and `--validate` install nothing.** In a stand-in
       directory, put a script for each of `brew`, `cpanm`, `apt-get` and
@@ -902,6 +910,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         `$D/calls` was empty (exit 1, condition 8 failing in the empty home);
         after `--repair` it held `brew --prefix` alone (exit 0).
       - L, 2026-10-23, Ubuntu 26.04.1, pass: stand-ins for `apt-get`, `apt`, `sudo`, `cpanm`, `brew`, `winget`, `pip` and `pip3`; after `--validate` and `--repair` (both exit 0) `$D/calls` was empty.
+      - W, 2026-10-24, pass: `winget.cmd` and `cpanm.cmd` stand-ins first on `PATH`, `HOME` an empty stand-in: `--validate` exit 1 (condition 8, the empty home), `--repair` exit 0; neither stand-in was called.
 - [ ] **AC10. `--repair` adds nothing to a configuration that already works.**
       Seed the throwaway home's shell files with the line `export KEEP=1` and
       the host's own configuration of its tools, as a developer who already
@@ -917,6 +926,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         step reported "Nothing to add", the check passed (exit 0), `cmp`
         reported no difference in any of the three.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: `.profile`, `.bash_profile` and `.bashrc` each `export KEEP=1`; `--repair` reported "Yes. Nothing to add.", the check passed (exit 0), `cmp` found no difference.
+      - W, 2026-10-24, pass: the stand-in home held the developer's own configuration: `.bashrc` with `export KEEP=1` and a line of its own putting Strawberry Perl first, `.bash_profile` with `export KEEP=1` and a line reading `~/.bashrc`, and `bin/python3`; `--repair` reported `~/bin/python3` present and "Nothing to add", the check passed (exit 0), and every file was byte for byte unchanged.
 - [ ] **AC10a. `--repair` adds exactly the missing piece, once.** Seed the
       throwaway home's shell files with `export KEEP=1` only. Run `HOME="$T"
       ZDOTDIR="$T" <setup> --repair`, copy the files aside, run it again, `cmp`
@@ -931,6 +941,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         `# <<< ltl homebrew <<<`; the check passed (exit 0). The second run
         reported "Nothing to add" and `cmp` found no difference.
       - L, 2026-10-23, Ubuntu 26.04.1, pass, the same run (D3: nothing is missing on Linux): nothing added; a second `--repair` exit 0, `cmp` found no difference in any of the three files.
+      - W, 2026-10-24, pass: `.bashrc` and `.bash_profile` with `export KEEP=1` only. The first `--repair` wrote `~/bin/python3`, found condition 8 failing, and appended one block to each file (`# >>> ltl perl >>>` with the Strawberry Perl line to `.bashrc`, `# >>> ltl bashrc >>>` reading `~/.bashrc` to `.bash_profile`), `export KEEP=1` kept; the check passed (exit 0). The second run: "Nothing to add", every file unchanged.
 - [x] **AC10b. Setup links what it installs, and leaves files it did not put
       there.** macOS, on a host with a formula installed but not linked
       because a `pip` install holds its paths: `./build/macos-setup.sh`.
@@ -953,6 +964,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         setup: "[link] Linking scipy", Homebrew reporting 2854 symlinks
         created, and the check passing condition 7 on Python 3.15.
       - L, 2026-10-23, Ubuntu 26.04.1, pass, the stop case: the full setup with a copy of NumPy in a scratch user `site-packages` exited 1, condition 7 naming the user copy's file; the shell step added nothing; `find` listed nothing newer than the mark in either `site-packages`. Its message first read "a line in the shell configuration puts other tools first", wrong for this cause; it now says the report and its troubleshooting entry show where the cause lies.
+      - W, 2026-10-24, pass (the stray-copy case), with a stand-in for `pip install --user`: NumPy copied into a scratch user `site-packages` (`PYTHONUSERBASE`), then the full setup: exit 1, neither `site-packages` directory touched (nothing newer than the mark); the check named "NumPy loads from the user's site-packages" under condition 7 (a note on Windows) and under condition 8 (a failure). The earlier-minor-version case was not run: it needs Strawberry Perl or the WinGet Python reinstalled.
 - [ ] **AC11. Every login shell resolves the same tools.** After AC10a's first
       run, for each login mode `-lc` and `-lic`:
       `env -i HOME="$T" ZDOTDIR="$T" zsh <mode> 'command -v perl bash python3'`
@@ -964,6 +976,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         `/opt/homebrew/bin/python3`, links into Homebrew's Cellar; `.zshenv`
         still `export KEEP=1` alone.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: after AC10a's run, `env -i HOME="$T" bash -lc` and `-lic` each printed `/usr/bin/perl /usr/bin/bash /usr/bin/python3`.
+      - W, 2026-10-24, pass: after AC10a's first run, `env -i HOME="$T" bash -lc` and `-lic`, Git Bash's `/usr/bin/bash`: both printed `/c/Strawberry/perl/bin/perl`, `/usr/bin/bash` and `$T/bin/python3`; nothing added beyond the two blocks.
 - [ ] **AC12. The Linux setup installs every module from the
       distribution's packages** (D3, settled in stage 2; first written for
       `local::lib`, modules under `~/perl5`). On a Debian or Ubuntu host, run
@@ -1708,6 +1721,36 @@ trap 3 rewritten (`env perl`, a wrapper in the Git install's `opt` removed),
 trap 4 with `BASH_ENV`, trap 6 with the wrapper. `build/windows-setup.ps1`'s
 own description no longer says the harnesses run. AC20 passes on Windows
 (recorded under it).
+
+### Step 6: the Windows test cases (2026-10-24)
+
+Each result is recorded under its test case: AC1, AC2, AC3, AC3a, AC4a,
+AC6, AC8, AC9, AC10, AC10a, AC10b and AC11 pass on Windows; AC5 passes on an
+empty home and is partial on a home holding `.bashrc` alone; AC7 needs a
+session started by the architect. Captured in the session's scratchpad.
+
+Changes to `process/check-environment.pl` the runs brought out:
+
+- On Windows the launcher runs the check whatever `PATH` holds, so the
+  message now meets a missing `perl`: it names a missing tool as the check
+  found it ("no perl on PATH"), and leaves out condition 2 beside condition
+  1, which read "finds perl no perl on PATH; perl no perl on PATH".
+- Condition 11 reports "no git on PATH" when `git` is absent, rather than
+  "core.autocrlf is not set", and the message names CRLF endings only when
+  `git` ran.
+- An empty `BASH_ENV`, which bash treats as unset, is reported as not set; it
+  read "BASH_ENV is , which does not put Strawberry Perl first".
+
+Observations, not changed:
+
+- **The same stray Python module is a note under condition 7 and a failure
+  under condition 8 on Windows.** Condition 7 is a note there (the conditions
+  table: "fail where the harnesses run, note on Windows"); condition 8 judges
+  the login shell's `python3` with condition 7's place and reports at its own
+  severity, a failure. AC10b's run: the full setup exited 1 on condition 8.
+- **Git for Windows writes `~/.bash_profile` from a login shell** when only
+  `~/.bashrc` exists (AC5, partial). Setup's own `.bash_profile` step then
+  finds a file reading `~/.bashrc` and adds nothing.
 
 ## Troubleshooting a failed condition
 
