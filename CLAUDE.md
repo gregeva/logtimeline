@@ -474,8 +474,7 @@ Hidden: `--disable-progress`, `--terminal-width N`, `--debug-layout`,
 ```bash
 ./build/macos-setup.sh                      # macOS (needs Homebrew): --dev-deps the profiler, --package PAR::Packer
 ./build/macos-setup.sh --validate           # the environment check alone; --repair adds only what it finds missing
-sudo apt-get install build-essential perl perl-base perl-modules libperl-dev cpanminus \
-  && cpanm PAR::Packer && cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
+./build/linux-setup.sh                      # Debian/Ubuntu: the distribution's packages; same options as macOS
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1   # Windows dev host, AMD64 or ARM64 (docs/toolchain-guidance.md)
 ./build/macos-package.sh arm64|x86_64       # static binaries
 ./build/ubuntu-package.sh amd64|arm64       # Docker

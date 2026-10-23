@@ -275,9 +275,9 @@ by trusting the Perl the check runs under.
 | 2 | it is the development Perl, not another on the host | Homebrew's, not `/usr/bin` or `/System` | the distribution's | Strawberry Perl's, not Git's own `/usr/bin/perl` | fail |
 | 3 | it loads every runtime module the cpanfile requires, each from the Perl's own install or the setup's, once (D16) | `build/cpanfile` | `build/cpanfile` | `build/cpanfile.windows` | fail |
 | 4 | it loads the development-only modules (the profiler) | when installed (`--dev-deps`) | when installed (`--dev-deps`) | when installed (`--dev-deps`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
-| 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
+| 5 | retired under D3 as settled in stage 2: no setup installs modules under the home | | | | |
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
-| 7 | `python3` on `PATH` imports NumPy and SciPy, each from the setup's install (D15) | Homebrew's, not `/usr/bin/python3`; each module's file resolves into its own formula's Cellar; on every host, neither module from the user's `site-packages` nor installed more than once | the distribution's; the modules' place established in the Linux stage | the WinGet Python; the modules' place established in the Windows stage | fail where the harnesses run, note on Windows |
+| 7 | `python3` on `PATH` imports NumPy and SciPy, each from the setup's install (D15) | Homebrew's, not `/usr/bin/python3`; each module's file resolves into its own formula's Cellar; on every host, neither module from the user's `site-packages` nor installed more than once | the distribution's; NumPy and SciPy from its packages, in `/usr/lib/python3/dist-packages` (D3) | the WinGet Python; the modules' place established in the Windows stage | fail where the harnesses run, note on Windows |
 | 8 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7; the report also shows, for context, what a new terminal tab (an interactive login shell) and a plain non-login shell resolve | `zsh -lc`; `~/.zprofile` (D6) | a login bash | a Git Bash login shell | fail |
 | 9 | `tmux` is on `PATH` | expected | expected | not expected | note |
 | 10 | the screenshot tools are present | `swiftc` (Xcode command line tools) | established in the Linux stage | not expected | note |
@@ -643,7 +643,7 @@ Written in the specification stage; the architect closed the stage without a lin
 |---|---|---|
 | D1 | One read-only check, in Perl, one list of conditions with per-host alternatives; the conditions as listed, twelve when decided, eleven once the one about setup's block was retired under D12 | architect |
 | D2 | The session-start hook: shell form, an `sh` launcher, the Perl check | architect |
-| D3 | Linux starts from the distribution's Perl with `local::lib`; not a hard requirement, settled in the Linux stage | architect |
+| D3 | Linux takes everything from the distribution's packages: its Perl, a `lib*-perl` package per cpanfile module, `python3-numpy` and `python3-scipy`; no `local::lib`, no `~/perl5`, no `PERL5LIB`, nothing added to the shell configuration. Condition 5 (`PERL5LIB` carries `~/perl5`) is retired, its number not reused; D16's setup directory is none on any host. Settled by the architect in stage 2 (2026-10-23), replacing the first wording (the distribution's Perl with `local::lib`) | architect |
 | D4 | Setup modes: full, `--repair`, `--validate` | architect |
 | D9 | One option set on every setup script: `--dev-deps`, `--package`, `--repair`, `--validate`, `-h`/`--help`; CI's macOS step runs `--package`; 544 D6's environment variable goes | architect |
 | D5 | Profiling on every host; 544 D5a amended | architect |
@@ -1365,6 +1365,46 @@ non-core `use` (Devel::Size). The report matches the host: each FAIL names a
 piece that is absent, and the three tools resolve the same in every shell
 mode. The host is a clean start for the Linux setup script that stage 2
 writes.
+
+### `build/linux-setup.sh` (D3: the distribution's packages)
+
+Debian and Ubuntu; stops without `apt-get`. The option set of D9 (`--dev-deps`,
+`--package`, `--repair`, `--validate`, `-h`/`--help`), parsed as
+`build/macos-setup.sh` parses it. The full setup generates the cpanfile, then
+installs with `sudo apt-get` the distribution's `perl`, `bash`, `tmux`,
+`python3`, `python3-numpy`, `python3-scipy`, and the package of each cpanfile
+module named in the script's module-to-package table (with `--dev-deps` the
+develop block's, with `--package` `libpar-packer-perl`). A cpanfile module not
+in the table must load from Perl's own install; the setup stops naming it
+otherwise, so a new module gets its package named before the setup passes.
+The shell step runs condition 8 and adds nothing: the distribution's tools are
+on its default `PATH`, so a login shell resolving others means a line the
+developer owns. `--repair` is that step and the check.
+
+Changes to `process/check-environment.pl` under D3: condition 5 removed; the
+module probe judges a module's place against the Perl's built-in `@INC` only
+(no setup directory on any host); condition 7's Linux place requires NumPy and
+SciPy under `/usr/lib/python3/dist-packages`; the session-start message names
+`./build/linux-setup.sh` and `--repair` on Linux. Records rewritten:
+`docs/development-environment.md` (the Debian/Ubuntu row, conditions 3 and 5),
+`README.md` § Install Dependencies and § Test-harness dependencies (the
+manual `cpanm` and `pip`/venv steps replaced), `CLAUDE.md` § Build.
+
+Runs on this host (Ubuntu 26.04.1), captured in the session's scratchpad:
+
+| Run | Result |
+|---|---|
+| `--validate` before setup | exit 1: 3 FAIL (conditions 3, 7, 8), 1 note (4); no condition 5 |
+| session-start message before setup | "Devel::Size does not load (2 more in the full report …) / Likely cause: modules were added or upgraded since the setup last ran / Fix: run ./build/linux-setup.sh." |
+| `--dev-deps --package` | exit 0; 12 cpanfile modules load from Perl's own install; check 8 pass, 2 n/a; `perl -c ltl` OK; `pp` at `/usr/bin/pp` |
+| full setup again | exit 0; apt: 0 newly installed; 8 pass |
+| `--repair` | exit 0; "Nothing to add."; 8 pass |
+| an unknown option | usage on stderr, exit 2 |
+
+Open in stage 2: the session-start message's "Likely cause" reads "modules
+were added or upgraded since the setup last ran" on a host where setup never
+ran; condition 10's Linux screenshot tools; the class of AC3a, AC4a and AC10b
+(one tool or module installed two ways) run on this host; the harness suite.
 
 ## Troubleshooting a failed condition
 

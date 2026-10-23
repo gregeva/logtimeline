@@ -149,26 +149,23 @@ sub cpanfile_modules {
     return @modules;
 }
 
-# Started with the perl on PATH for conditions 3 and 4: its first argument is a
-# directory the setup installs modules into beyond the Perl's own (empty for
-# none), the rest the modules. For each module, one tab-separated line: its
-# name, whether it loads, the file it loaded from, whether that file lies
-# outside the Perl's own @INC (the one it was built with, without what
-# PERL5LIB or PERLLIB add) and the setup's directory, and every copy of it on
-# @INC outside the core directories, joined by ";". The core directories are
-# Config's privlib and archlib and any built-in one holding strict.pm (Debian
-# splits its core into perl-base). A dual-life module upgraded over its core
-# copy is one copy; a module from anywhere else, or two copies outside the
-# core, did not come from the setup alone.
+# Started with the perl on PATH for conditions 3 and 4, with the modules as its
+# arguments. For each module, one tab-separated line: its name, whether it
+# loads, the file it loaded from, whether that file lies outside the Perl's own
+# @INC (the one it was built with, without what PERL5LIB or PERLLIB add), and
+# every copy of it on @INC outside the core directories, joined by ";". The core
+# directories are Config's privlib and archlib and any built-in one holding
+# strict.pm (Debian splits its core into perl-base). A dual-life module
+# upgraded over its core copy is one copy; a module from anywhere else, or two
+# copies outside the core, did not come from the setup alone.
 my $perl_modules = <<'END_PERL';
 use Config; use Cwd ();
-my ( $extra, @modules ) = @ARGV;
+my @modules = @ARGV;
 sub norm { my $p = Cwd::realpath( $_[0] ) // $_[0]; $p =~ tr{\\}{/}; $^O eq 'MSWin32' ? lc $p : $p }
 sub under { my ( $file, @roots ) = @_; scalar grep { index( $file, "$_/" ) == 0 } @roots }
 my %added = map { norm($_) => 1 } grep { length } map { split /\Q$Config{path_sep}\E/ } grep { defined } @ENV{qw(PERL5LIB PERLLIB)};
 my @builtin = grep { !$added{$_} } map { norm($_) } grep { !ref && $_ ne '.' && -d } @INC;
 my @core = ( ( map { norm($_) } grep { defined && length } @Config{qw(privlibexp archlibexp)} ), grep { -f "$_/strict.pm" } @builtin );
-my @own  = ( @builtin, length $extra ? norm($extra) : () );
 for my $m (@modules) {
     ( my $f = "$m.pm" ) =~ s{::}{/}g;
     my $loads = eval { require $f; 1 } ? 1 : 0;
@@ -176,7 +173,7 @@ for my $m (@modules) {
     my %seen;
     my @copies = grep { !$seen{$_}++ && !under( $_, @core ) }
         map { norm("$_/$f") } grep { !ref && -f "$_/$f" } @INC;
-    print join( "\t", $m, $loads, $file, ( $file ne '' && !under( $file, @own ) ? 1 : 0 ), join( ';', @copies ) ), "\n";
+    print join( "\t", $m, $loads, $file, ( $file ne '' && !under( $file, @builtin ) ? 1 : 0 ), join( ';', @copies ) ), "\n";
 }
 END_PERL
 
@@ -184,11 +181,10 @@ END_PERL
 # per module in cpanfile order, or undef when that Perl could not be started.
 sub modules_judged {
     my ( $perl, @modules ) = @_;
-    my $extra = $host eq 'linux' ? "$ENV{HOME}/perl5/lib/perl5" : '';
     # Loading the profiler starts it, and it writes nytprof.out into the
     # current directory; start=no loads it without profiling.
     local $ENV{NYTPROF} = 'start=no';
-    my ( $status, $out ) = run_capture( $perl->{path}, '-e', $perl_modules, $extra, @modules );
+    my ( $status, $out ) = run_capture( $perl->{path}, '-e', $perl_modules, @modules );
     return undef if $status != 0;
     return [ map { my %m; @m{qw(name loads file outside copies)} = split /\t/, $_, -1; \%m } split /\n/, $out ];
 }
@@ -210,7 +206,11 @@ my %place = (
     },
     linux => {
         perl    => { test => sub { $_[0] =~ m{^/(usr/)?bin/} }, text => "the distribution's, in /usr/bin" },
-        python3 => { test => sub { $_[0] =~ m{^/(usr/)?bin/} }, text => "the distribution's, in /usr/bin" },
+        python3 => {
+            test    => sub { $_[0] =~ m{^/(usr/)?bin/} },
+            text    => "the distribution's, in /usr/bin; NumPy and SciPy from its packages, in /usr/lib/python3/dist-packages, not a pip install",
+            modules => sub { my ( $module, $path ) = @_; $path =~ m{^/usr/lib/python3/dist-packages/} },
+        },
     },
     windows => {
         perl => { test => sub { $_[0] =~ /strawberry/i }, text => "Strawberry Perl's, not Git's own /usr/bin/perl" },
@@ -324,7 +324,7 @@ sub test_modules {
         unless defined $judged;
     my @failed = map { $_->{name} } grep { !$_->{loads} } @$judged;
     my @wrong  = (
-        ( map { "$_->{name} loads from $_->{file}, outside this Perl's install and the setup's" } grep { $_->{outside} } @$judged ),
+        ( map { "$_->{name} loads from $_->{file}, outside this Perl's own install" } grep { $_->{outside} } @$judged ),
         ( map { my @c = split /;/, $_->{copies}; @c > 1 ? "$_->{name} is installed " . scalar(@c) . ' times: ' . join( ', ', @c ) : () }
             @$judged ),
     );
@@ -333,14 +333,7 @@ sub test_modules {
     my @found;
     push @found, "$failed[0] does not load" . ( $count > 1 ? "; $count of " . scalar(@modules) . ' do not: ' . join( ', ', @failed ) : '' ) if @failed;
     push @found, @wrong;
-    return { result => $severity, expected => "$expected, each from this Perl's own install or the setup's, once", found => join( '; ', @found ) . " (perl: $perl->{path})" };
-}
-
-sub test_home_modules_visible {
-    my $expected = "PERL5LIB carries $ENV{HOME}/perl5";
-    my @entries  = split /\Q$Config{path_sep}\E/, $ENV{PERL5LIB} // '';
-    return passed( found => "PERL5LIB=$ENV{PERL5LIB}" ) if grep { index( $_, "$ENV{HOME}/perl5" ) == 0 } @entries;
-    return { result => 'FAIL', expected => $expected, found => defined $ENV{PERL5LIB} ? "PERL5LIB=$ENV{PERL5LIB}" : 'PERL5LIB is not set' };
+    return { result => $severity, expected => "$expected, each from this Perl's own install, once", found => join( '; ', @found ) . " (perl: $perl->{path})" };
 }
 
 # What a shell started from a clean environment resolves for each tool, as
@@ -422,8 +415,6 @@ my @conditions = (
           linux   => sub { test_modules( 'cpanfile', 1, 'note' ) },
           windows => sub { test_modules( 'cpanfile.windows', 1, 'note' ) },
       } },
-    { n => 5, title => 'modules installed under the home are visible to it',
-      tests => { linux => \&test_home_modules_visible } },
     { n => 6, title => 'bash on PATH is 4 or later',
       tests => { macos => sub { test_tool( 'bash', 'FAIL' ) }, linux => sub { test_tool( 'bash', 'FAIL' ) }, windows => sub { test_tool( 'bash', 'FAIL' ) } } },
     { n => 7, title => 'python3 on PATH imports NumPy and SciPy',
@@ -448,7 +439,7 @@ my @conditions = (
 # --- The message shown to the user at session start ------------------------
 #
 # What is wrong, the likely scenario, and the command to run, read from the
-# failed conditions. A wrong tool first on PATH (conditions 1, 2, 5, and 6 or
+# failed conditions. A wrong tool first on PATH (conditions 1, 2, and 6 or
 # 7 outside the setup's place) is this session's PATH when a clean login shell
 # finds the right ones (condition 8 passes), the shell configuration when it
 # does not. Otherwise, the right tool with modules missing or from elsewhere
@@ -457,6 +448,7 @@ my @conditions = (
 
 my %setup = (
     macos   => { full => './build/macos-setup.sh', repair => './build/macos-setup.sh --repair' },
+    linux   => { full => './build/linux-setup.sh', repair => './build/linux-setup.sh --repair' },
     windows => { full => 'powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1' },
 );
 
@@ -464,7 +456,7 @@ sub user_message {
     my ($result) = @_;
     my $fails = sub { ( $result->{ $_[0] }{result} // '' ) eq 'FAIL' };
     my %tool  = ( 1 => 'perl', 2 => 'perl', 6 => 'bash', 7 => 'python3' );
-    my @path    = grep { $fails->($_) && ( $_ == 1 || $_ == 2 || $_ == 5 || ( ( $_ == 6 || $_ == 7 ) && !$result->{$_}{in_place} ) ) } 1, 2, 5, 6, 7;
+    my @path    = grep { $fails->($_) && ( $_ == 1 || $_ == 2 || ( ( $_ == 6 || $_ == 7 ) && !$result->{$_}{in_place} ) ) } 1, 2, 6, 7;
     my @install = grep { $fails->($_) && ( $_ == 3 || ( ( $_ == 6 || $_ == 7 ) && $result->{$_}{in_place} ) ) } 3, 6, 7;
     my $full   = $setup{$host}{full};
     my $repair = $setup{$host}{repair} // $full;
@@ -476,7 +468,7 @@ sub user_message {
     my $shell = $fails->(8) && ( @path || !@install );
     if ( @path || $shell ) {
         my $what = @path
-            ? 'this session finds ' . join( '; ', map { $_ == 5 ? 'PERL5LIB without ~/perl5' : "$tool{$_} $result->{$_}{found}" } @path )
+            ? 'this session finds ' . join( '; ', map { "$tool{$_} $result->{$_}{found}" } @path )
             : 'this session finds the right tools, but a new terminal does not';
         push @lines, "Environment check: $what.";
         if ($shell) {

@@ -47,10 +47,9 @@ A Full GC loop explored through zooming in on the specific time range, activatin
 ./build/macos-setup.sh --validate    # run the environment check, change nothing
 ./build/macos-setup.sh --repair      # install nothing; add to the shell configuration only what the check finds missing
 
-# Ubuntu/Linux
-sudo apt-get install build-essential perl perl-base perl-modules libperl-dev cpanminus
-cpanm PAR::Packer
-cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
+# Debian/Ubuntu (installs the distribution's packages with sudo apt-get)
+./build/linux-setup.sh               # full setup; --dev-deps adds the profiler, --package PAR::Packer
+./build/linux-setup.sh --validate    # run the environment check, change nothing
 ```
 
 ```powershell
@@ -79,31 +78,7 @@ Some test harnesses require Python 3, NumPy, and SciPy. A harness that needs one
 
 **Windows:** `build\windows-setup.ps1` installs Python 3.13 through WinGet with NumPy and SciPy. Windows' own `python` is a Microsoft Store stub that installs nothing; open a new terminal after the script so the real one is first on PATH.
 
-**Linux:** the right install command depends on which `python3` your harness will invoke. Run `which python3` from the shell that will run the harness (a non-interactive shell — PATH ordering can differ from your interactive shell), and pick the matching case below.
-
-**Ubuntu/Linux — older distributions (pre-PEP-668):**
-```bash
-sudo apt-get install python3 python3-pip
-python3 -m pip install --user numpy scipy
-```
-
-**Ubuntu/Linux — modern PEP-668 distributions (Ubuntu 24.04+, Debian 12+, Fedora 38+) and any system where the above hits `error: externally-managed-environment`:**
-Use a project-local venv:
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install numpy scipy
-# Then run the harness with the venv's Python on PATH:
-PATH=$(pwd)/.venv/bin:$PATH ./tests/validate-statistics.sh
-```
-
-Verify the install landed in the right place by running, in the harness's shell environment:
-```bash
-python3 -c "import numpy, scipy"
-```
-
-If this still fails after installing, the `python3` the harness finds is not the one you installed into. The environment check shows which `python3` comes first on the harness's PATH and in a login shell.
-
-Do not use `--break-system-packages` unless you understand the consequence — it can break your system Python.
+**Linux:** `./build/linux-setup.sh` installs the distribution's NumPy and SciPy (`python3-numpy`, `python3-scipy`) for its own `python3`, and the distribution's package for each of the Perl modules `ltl` needs, so nothing is added to the shell configuration. A NumPy or SciPy installed with `pip` shadows the distribution's and fails the environment check.
 
 ### Build Static Binaries
 
