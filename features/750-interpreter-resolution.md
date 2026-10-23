@@ -82,6 +82,44 @@ Observation, not yet a finding: 544 D7 states that `build/macos-setup.sh` puts
 Homebrew Perl ahead of the system directories. The script does so for its own
 run and for later CI steps; a developer's next shell is not changed by it.
 
+## Analysis
+
+Phases: (1) where an interpreter starts, and from what context; (2) the
+problem each workaround got past; (3) how the agent came to run the system
+Perl; (4) what each host's setup establishes, and the one rule every script
+follows; (5) requirements, decisions and acceptance criteria per host.
+
+### Phase 1: where an interpreter starts, and from what context (macOS part)
+
+Every launch point, by the context it runs in and how that context gets its
+`PATH`. "Measured" rows were run on the macOS development host on 2026-10-23;
+the others are read from the scripts and wait for a run on their host.
+
+| Context | How `PATH` arrives | Perl | bash | Python | Source |
+|---|---|---|---|---|---|
+| Developer's interactive zsh, macOS | `~/.zshrc`: `brew shellenv`, then the Perl keg prepended | Homebrew | Homebrew 5 | Homebrew | measured |
+| A non-interactive zsh started from a clean environment, macOS, login or not | `/etc/paths` through `path_helper`: `/usr/bin` and `/bin` come before `/opt/homebrew/bin`, which `/etc/paths.d/homebrew` appends | `/usr/bin/perl` | `/bin/bash` 3.2 | `/usr/bin/python3` | measured |
+| The agent's Bash tool | inherits the environment of the process that started Claude Code; in this session a terminal's interactive shell | Homebrew | Homebrew 5 | Homebrew | measured, this session only |
+| Claude Code hooks | Claude Code's environment; `perl` named explicitly for the two Perl hooks, `session-start.sh` by its `env bash` shebang | from `PATH` | from `PATH` | n/a | read |
+| git pre-commit hook | git's environment, `#!/usr/bin/env bash` | n/a | from `PATH` | n/a | read |
+| A harness starting `ltl` | `"$LTL"`, so `ltl`'s first line: `/opt/homebrew/bin/perl`, whatever `PATH` holds | fixed path | n/a | n/a | read |
+| A harness starting a Perl helper | `perl` from `PATH`, or `$PERL`, defaulting to `/opt/homebrew/bin/perl` in 15 harnesses | mixed | n/a | n/a | read |
+| A harness starting Python | `python3` from `PATH`, in every harness that uses it | n/a | n/a | from `PATH` | read |
+| CI, macOS runner | `build/macos-setup.sh` exports `PATH` and appends to `GITHUB_PATH` | Homebrew | Homebrew 5 | Homebrew | read |
+| CI, Ubuntu runner | `build/generate-cpanfile.sh` on the runner's own Perl; the build inside an `ubuntu:20.04` container on its apt Perl | system, by design | system | n/a | read |
+| CI, Windows build | Strawberry Perl under Wine in a Linux container; `perl.exe` named by its path inside the container the script builds | Strawberry, fixed path | container's | n/a | read |
+| Real Windows host, Git Bash | `~/.bashrc` managed block puts Strawberry Perl first; `./ltl` resolves through the shim at Git's `/opt/homebrew/bin/perl` | Strawberry | Git Bash | WinGet Python | read |
+| Linux development host | nothing the repository sets; the distribution's own | `/usr/bin/perl` | distribution's | distribution's | read; `./ltl`'s first line not yet run there |
+
+What the measured rows show: on the macOS development host, the environment
+that finds Homebrew Perl, bash and Python is set up only in `~/.zshrc`, which
+only an interactive zsh reads. Any shell that does not descend from one, login
+shells included, resolves `/usr/bin/perl`, `/bin/bash` 3.2 and
+`/usr/bin/python3`. A tool started that way (an application launched from the
+Dock, an editor's task runner, a scheduled job, a hook run by a graphical git
+client) runs the system interpreters. This is a candidate mechanism for the
+agent's past use of the system Perl, examined in phase 3.
+
 ## Records found
 
 `./process/find-records.sh --issues 'brew --prefix' 'opt/homebrew' 'require-bash' 'shebang' 'Homebrew bash' 'Homebrew Perl' 'macos-setup' 'windows-setup'`
