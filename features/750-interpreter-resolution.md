@@ -519,7 +519,7 @@ these forms arises there.
 
 | Form | macOS | Linux | Windows | Detected by |
 |---|---|---|---|---|
-| another interpreter comes first | Homebrew's Python only as a versioned formula, so no `python3` link and `/usr/bin/python3` first (measured) | a `python3` from pyenv, conda or Homebrew on Linux ahead of the distribution's | another Python ahead of the setup's; the Microsoft Store stub | the place test of condition 7 on macOS and Linux; on Windows, an import failing (the stub runs no Python). **Not detected on Windows:** another Python that imports both modules, since `python3` there is setup's wrapper script in `~/bin` and the place test reads the path, not the interpreter the wrapper starts; stage 3 |
+| another interpreter comes first | Homebrew's Python only as a versioned formula, so no `python3` link and `/usr/bin/python3` first (measured) | a `python3` from pyenv, conda or Homebrew on Linux ahead of the distribution's | another Python ahead of the setup's; the Microsoft Store stub | the place test of condition 7 on macOS and Linux; on Windows, an import failing (the stub runs no Python). on Windows, since stage 3 step 4, the interpreter the `~/bin/python3` wrapper starts, which must be the WinGet Python |
 | a module installed outside the setup's install shadows the setup's | `pip` into Homebrew Python's `site-packages` (measured) | `pip install --user` over the distribution's packages | `pip install --user` over the install's own `site-packages` | every host: a module from the user's `site-packages`; a module installed more than once. macOS also: a module outside its formula's Cellar |
 | a stale copy left beside the setup's | `pip`'s NumPy metadata left under Homebrew's files (measured) | a `pip` copy beside the distribution's package | a second copy after a reinstall | every host: a module installed more than once |
 | the setup's package installed but not in effect | a formula installed but not linked (measured) | the distribution's package present, another copy first | modules installed for one Python while `PATH` reaches another | every host: an import failing, or a module installed more than once; macOS setup's link step names the files in the way |
@@ -1668,6 +1668,25 @@ w/crlf`): none on this host.
 
 Not run on macOS or Linux since the preflight change: there the site script
 directory is searched first, as before.
+
+### Step 4: condition 7 judges the Python the wrapper starts (2026-10-24)
+
+On Windows `python3` is setup's `~/bin/python3`, a wrapper, so a test of its
+path could not tell which Python answers. The probe condition 7 already
+starts now prints the resolved `sys.executable` first, and the Windows place
+has an interpreter test: the WinGet Python, under the user's
+`AppData\Local\Programs\Python\Python3*`. Another Python fails it ("not the
+setup's Python"), a note on Windows. macOS and Linux have no interpreter test;
+their place tests are unchanged. Git's own Perl keeps the `\r` of a Windows
+Python's line ends, which made the setup's own Python fail the test on the
+first run; the probe's output is read with `\r\n` turned to `\n`.
+
+| Run (`--condition 7`) | Git's Perl | Strawberry Perl |
+|---|---|---|
+| as set up | pass | pass |
+| a wrapper first on `PATH` starting a venv's Python (`--system-site-packages`, so NumPy and SciPy import) | note: "…which starts …/venv/Scripts/python.exe; not the setup's Python" | the same |
+
+The whole check under Git's Perl: 8 pass, 0 FAIL, 0 note, 2 n/a.
 
 ## Troubleshooting a failed condition
 

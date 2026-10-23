@@ -259,7 +259,9 @@ sub modules_judged {
 # path passes, and how that reads in a report. A tool absent from a host's
 # entry may be anywhere on that host. A python3 entry's modules test is passed
 # each module's name and the resolved path of the file it loads from; without
-# one, a module may load from anywhere.
+# one, a module may load from anywhere. Its interpreter test is passed the
+# resolved path of the Python that python3 starts, for a host where python3 is
+# a wrapper rather than the interpreter (Windows: setup's ~/bin/python3).
 my %place = (
     macos => {
         perl    => { test => sub { $_[0] =~ m{/Cellar/perl/} }, text => "Homebrew's, a path into its Cellar, not /usr/bin or /System" },
@@ -279,7 +281,11 @@ my %place = (
         },
     },
     windows => {
-        perl => { test => sub { $_[0] =~ /strawberry/i }, text => "Strawberry Perl's, not Git's own /usr/bin/perl" },
+        perl    => { test => sub { $_[0] =~ /strawberry/i }, text => "Strawberry Perl's, not Git's own /usr/bin/perl" },
+        python3 => {
+            interpreter => sub { $_[0] =~ m{/AppData/Local/Programs/Python/Python3[^/]*/python\.exe\z}i },
+            text        => "the WinGet Python, under the user's AppData\\Local\\Programs\\Python, started by setup's ~/bin/python3; NumPy and SciPy not from a pip install --user",
+        },
     },
 );
 
@@ -292,14 +298,16 @@ sub expectation {
 
 my %measured;
 
-# Started with python3 for condition 7: one tab-separated line per module, its
+# Started with python3 for condition 7: a first line, "python" and the resolved
+# path of the interpreter running, then one tab-separated line per module, its
 # name, the resolved file it loads from, whether that file is in the user's
 # site-packages (where pip --user installs), and every installed copy of it
 # Python can see on sys.path, as version@metadata-directory, joined by ";".
 # On every host, a module from the user's site-packages or one installed more
 # than once is a copy that did not come from the setup alone.
 my $python_modules = join "\n",
-    'import os, site, importlib, importlib.metadata as md',
+    'import os, sys, site, importlib, importlib.metadata as md',
+    'print("python\t" + os.path.realpath(sys.executable).replace(os.sep, "/"))',
     'user = os.path.normcase(os.path.realpath(site.getusersitepackages())) + os.sep',
     'for n in ("numpy", "scipy"):',
     '    f = os.path.normcase(os.path.realpath(importlib.import_module(n).__file__))',
@@ -315,7 +323,7 @@ my $python_modules = join "\n",
 sub judge {
     my ( $name, $tool ) = @_;
     my $place    = $place{$host}{$name};
-    my $in_place = !$place || $place->{test}->( $tool->{real} );
+    my $in_place = !$place || !$place->{test} || $place->{test}->( $tool->{real} );
     my $measure  = sub { my ($code) = @_; $measured{"$name $tool->{real}"} //= [ $code->() ]; @{ $measured{"$name $tool->{real}"} } };
     if ( $name eq 'perl' ) {
         my ($version) = $measure->( sub { perl_version($tool) } );
@@ -328,12 +336,14 @@ sub judge {
     }
     return ( 0, describe($tool), 0 ) unless $in_place;
     my ( $status, $out ) = $measure->( sub { run_capture( $tool->{path}, '-B', '-c', $python_modules ) } );
+    $out =~ s/\r\n/\n/g;    # a Windows Python's line ends, kept by Git's own Perl
     return ( 0, describe($tool) . '; NumPy or SciPy does not import', $in_place ) if $status != 0;
     my $modules = $place && $place->{modules};
     my %label = ( numpy => 'NumPy', scipy => 'SciPy' );
-    my @wrong;
+    my ( @wrong, $interpreter );
     for ( split /\n/, $out ) {
         my ( $name, $file, $in_user_site, $installs ) = split /\t/, $_, -1;
+        if ( $name eq 'python' ) { $interpreter = $file; next }
         my @installs = grep { length } split /;/, $installs // '';
         if ( $in_user_site eq 'True' ) {
             push @wrong, "$label{$name} loads from the user's site-packages, $file";
@@ -345,8 +355,16 @@ sub judge {
             push @wrong, "$label{$name} is installed " . scalar(@installs) . ' times: ' . join( ', ', map { s/\@/ in /r } @installs );
         }
     }
-    return ( 1, describe($tool) . '; NumPy and SciPy import', $in_place ) unless @wrong;
-    return ( 0, describe($tool) . '; ' . join( '; ', @wrong ), $in_place );
+    my $found = describe($tool);
+    if ( $place && $place->{interpreter} ) {
+        $found .= ', which starts ' . ( $interpreter // 'no Python it reports' );
+        if ( !defined $interpreter || !$place->{interpreter}->($interpreter) ) {
+            unshift @wrong, "not the setup's Python";
+            $in_place = 0;
+        }
+    }
+    return ( 1, "$found; NumPy and SciPy import", $in_place ) unless @wrong;
+    return ( 0, "$found; " . join( '; ', @wrong ), $in_place );
 }
 
 # --- The conditions -----------------------------------------------------------
