@@ -4,39 +4,34 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: in progress; work stopped for the day on 2026-10-23 at the end of
-stage 1 (the macOS development host), on the issue branch
-`750-interpreter-resolution`.
-Stage 1's steps 0 to 5 are done and each test case run on macOS is recorded
-under it; § Resuming lists what is open, in order, and the state this work
-left outside the repository. What is in place before this work is recorded as
-found, not as the contract: most of it was put in piecemeal to get past a
-problem at the time, and the analysis is expected to challenge it.
+Status: in progress; stage 1 (the macOS development host) complete on
+2026-10-23, on the issue branch `750-interpreter-resolution`, and work
+stopped there: stage 2 needs the Linux development host.
+Stage 1's steps 0 to 5 are done on two macOS hosts and each test case run on
+macOS is recorded under it; § Resuming says where to start, what stage 1
+leaves to the later stages, and the state this work left outside the
+repository. What is in place before this work is recorded as found, not as
+the contract: most of it was put in piecemeal to get past a problem at the
+time, and the analysis is expected to challenge it.
 
 ## Resuming
 
-Open in stage 1, in this order:
+Stage 1 has nothing open. Its last items, done 2026-10-23: the release build
+on the issue branch (§ Step 3, its CI bullet); AC7, a session started on a
+wrong `PATH` (under AC7); the Perl keg measurement and AC19's macOS build,
+from a second macOS host (§ Step 3, the Perl keg line; AC19).
 
-1. ~~**The release build on the issue branch**~~ Done 2026-10-23, success
-   (§ Step 3, its CI bullet). The command was: `gh workflow run release-build.yml --ref
-   750-interpreter-resolution`, its own command. The macOS job now runs
-   `./build/macos-setup.sh --package`, which ends with the environment check,
-   so a condition failing on GitHub's runner stops the build; the release job
-   runs on tags only, so nothing is published. Record the result under
-   § Step 3: `build/macos-setup.sh`, at its CI bullet.
-2. **AC7, a session started on a wrong `PATH`**, run by the architect. The
-   session-start hook is in this branch's `.claude/settings.json`, so Claude
-   Code is started from the issue worktree: `PATH="/usr/bin:/bin:$PATH"
-   claude`. A session started from the main checkout does not run the hook
-   until the release merges.
-3. ~~Parked for another host: the Perl keg measurement and AC19's macOS
-   build.~~ Done on a second macOS development host, 2026-10-23: the keg
-   line is not needed, and AC19 passes for the macOS build (§ Step 3, the
-   Perl keg line; AC19).
+**Next: stage 2, on the Linux development host.** Check out
+`750-interpreter-resolution`, read this document, and plan the stage there
+before taking its steps (§ Phase 4: investigation stages, one per
+environment): run `perl process/check-environment.pl` first and record what
+the Linux column reports on a host as found. The standing description of the
+check, the setup per host and the troubleshooting entries is
+`docs/development-environment.md`; its Linux row names no setup until stage 2
+writes one.
 
-Then stages 2 (Linux), 3 (Windows) and 4 (the container builds), each planned
-on its own host before its steps are taken (§ Phase 4: investigation stages,
-one per environment). What stage 1 leaves to them:
+Stages 2 (Linux), 3 (Windows) and 4 (the container builds) are each planned
+on their own host before their steps are taken. What stage 1 leaves to them:
 
 - `process/check-environment.pl` has its Linux and Windows columns written
   from the conditions table and not yet run; `run_capture` is the one place a
@@ -46,6 +41,13 @@ one per environment). What stage 1 leaves to them:
   of § Phase 4: investigation stages, one tool or module installed two ways,
   under AC3a, AC4a and AC10b, and stage 3 closes the Windows gap named there (an
   interpreter judged by its wrapper's path).
+- Condition 3's core directories (D16) count any built-in `@INC` directory
+  holding `strict.pm` as core, so Debian's `perl-base` is core: read, not
+  measured; stage 2 confirms it. `run_capture` starts each tool with
+  `POSIX::setsid`, which Strawberry Perl may not provide; stage 3 adapts it.
+- `docs/development-environment.md`'s Linux and Windows rows gain each
+  setup's `--repair` and `--validate` as stages 2 and 3 write them, and the
+  session-start message (`user_message` in the check) names those commands.
 - `README.md`'s Linux and Windows instructions, and `docs/toolchain-guidance.md`
   § Windows development host (trap 3, the shim at Git's
   `/opt/homebrew/bin/perl`, now unused by `./ltl`), are stages 2 and 3's to
