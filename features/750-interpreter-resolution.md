@@ -11,8 +11,10 @@ D6 as changed, D13, condition 8 retired); stage 1 (the macOS development
 host) planned in § Stage 1 implementation plan; steps 0 (the `before`
 benchmark), 1 (`process/check-environment.pl`) and 2 (the session-start
 hook) done, AC8's budget set (D14); step 3 (`build/macos-setup.sh`) built
-and its throwaway-home cases passing, its Perl keg measurement and CI run
-waiting on the architect. Open, measured in stage 1: what still needs the
+and its throwaway-home cases passing, its CI run still to be asked; its Perl
+keg measurement parked for another host (PAR::Packer cannot be fetched
+through this network's proxy); next step 4 (the one rule, applied). Open,
+measured in stage 1: what still needs the
 Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
 provides on macOS). What is in
 place today is recorded as found, not as the contract: most of it was put in
@@ -908,7 +910,10 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   PAR::Packer bailed out. Read, not measured: `/usr/bin/pp`, which `perl -S`
   finds without the keg line, is the four lines `use strict; use warnings;
   use pp; pp->go();`, so under Homebrew Perl it would load Homebrew Perl's own
-  `pp.pm`.
+  `pp.pm`. **Parked by the architect (2026-10-23), to be done from another
+  host**, not behind this network's proxy: this measurement, and with it
+  AC19's macOS build, which needs PAR::Packer on the host as well. Until then
+  the shell step adds Homebrew's line only.
 - **CI:** `.github/workflows/release-build.yml` runs
   `./build/macos-setup.sh --package`. Verified by a manual run of that
   workflow on the issue branch (its release job runs on tags only), asked of
