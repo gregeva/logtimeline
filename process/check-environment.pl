@@ -577,8 +577,8 @@ sub windows_path_scenario {
     return 'Likely cause: the shell configuration does not put the development tools first: the managed block in ~/.bashrc or ~/.bash_profile, '
         . "or setup's ~/bin/python3 wrapper, is missing, or a later line puts Git's directories back in front."
         if $shell || !$result->{8}{login_ok}{perl};
-    return length( $ENV{BASH_ENV} // '' )
-        ?"Likely cause: BASH_ENV is $ENV{BASH_ENV}, which does not put Strawberry Perl first in the plain Git Bash shell Claude Code runs its hooks in."
+    return ( $ENV{BASH_ENV} // '' ) =~ /\S/
+        ? "Likely cause: BASH_ENV is $ENV{BASH_ENV}, which does not put Strawberry Perl first in the plain Git Bash shell Claude Code runs its hooks in."
         : "Likely cause: BASH_ENV is not set, so the plain Git Bash shell Claude Code runs its hooks in never reads ~/.bashrc, and Git's own Perl comes first.";
 }
 

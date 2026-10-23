@@ -6,52 +6,42 @@ the environment setup and fails where Homebrew is absent). Parent: #729
 
 Status: in progress, on the issue branch `750-interpreter-resolution`.
 Stage 1 (the macOS development host) and stage 2 (the Linux development
-host) complete on 2026-10-23; stage 3 needs the Windows development host.
-Each test case run on macOS and Linux is recorded under it; § Resuming says where to start, what stage 1
-leaves to the later stages, and the state this work left outside the
+host) complete on 2026-10-23, stage 3 (the Windows development host) on
+2026-10-24; stage 4 (the container builds) is next. Each test case run on
+each host is recorded under it; § Resuming says where to start, what is left
+to stage 4 and the completion gate, and the state this work left outside the
 repository. What is in place before this work is recorded as found, not as
 the contract: most of it was put in piecemeal to get past a problem at the
 time, and the analysis is expected to challenge it.
 
 ## Resuming
 
-Stages 1 and 2 have nothing open. Stage 2 (§ Stage 2: the Linux development
-host) settled D3 as the distribution's packages, wrote
-`build/linux-setup.sh`, retired condition 5, and ran every Linux test case.
+Stages 1, 2 and 3 have nothing open. Stage 3 (§ Stage 3: the Windows
+development host) gave the check a Windows story and made it run under any
+Perl (the Windows hook runs it with Git's own), wrote Windows setup's
+`--repair` and `--validate` with `BASH_ENV` (D17), removed the
+`/opt/homebrew/bin/perl` wrapper, put the develop block in
+`build/cpanfile.windows`, made condition 7 judge the Python the wrapper
+starts, rewrote the Windows instructions, fixed the write guard for Windows
+paths, settled D18 (condition 8's severity per tool) and D19 (Git for
+Windows' `.bash_profile`), and ran every Windows test case.
 
-**Next: stage 3, on the Windows development host.** Check out
-`750-interpreter-resolution`, read this document, and plan the stage there
-before taking its steps (§ Phase 4: investigation stages, one per
-environment): run `perl process/check-environment.pl` first and record what
-the Windows column reports on a host as found. The standing description of
-the check, the setup per host and the troubleshooting entries is
-`docs/development-environment.md`.
+**Next: stage 4, the container builds**, on a host with Docker. Plan the
+stage there before taking its steps (§ Phase 4: investigation stages, one per
+environment): `build/windows-package.sh` (Strawberry Perl under Wine) and
+`build/ubuntu-package.sh` build as before with the develop block now in
+`build/cpanfile.windows`, and no binary carries the profiler (AC19, its C
+part). The standing description of the check, the setup per host and the
+troubleshooting entries is `docs/development-environment.md`.
 
-Stages 3 (Windows) and 4 (the container builds) are each planned on their own
-host before their steps are taken. What stages 1 and 2 leave to them (the
-Linux items below are done in stage 2):
-
-- `process/check-environment.pl` has its Linux and Windows columns written
-  from the conditions table and not yet run; `run_capture` is the one place a
-  tool is started, for stage 3 to adapt to Strawberry Perl. Condition 7's
-  user-site and installed-twice tests (D15) run on every host; its `modules`
-  place test exists for macOS only. Stages 2 and 3 run their host's column
-  of § Phase 4: investigation stages, one tool or module installed two ways,
-  under AC3a, AC4a and AC10b, and stage 3 closes the Windows gap named there (an
-  interpreter judged by its wrapper's path).
-- Condition 3's core directories (D16) count any built-in `@INC` directory
-  holding `strict.pm` as core, so Debian's `perl-base` is core: read, not
-  measured; stage 2 confirms it. `run_capture` starts each tool with
-  `POSIX::setsid`, which Strawberry Perl may not provide; stage 3 adapts it.
-- `docs/development-environment.md`'s Linux and Windows rows gain each
-  setup's `--repair` and `--validate` as stages 2 and 3 write them, and the
-  session-start message (`user_message` in the check) names those commands.
-- `README.md`'s Linux and Windows instructions, and `docs/toolchain-guidance.md`
-  § Windows development host (trap 3, the shim at Git's
-  `/opt/homebrew/bin/perl`, now unused by `./ltl`), are stages 2 and 3's to
-  rewrite; AC20 completes in stage 3.
-- The profiling preflight names a remedy for a missing `cpanm` on macOS
-  only, until stages 2 and 3 give the other hosts a setup.
+Not run on macOS or Linux since stage 3 changed the files all hosts share:
+`process/check-environment.pl` (the Windows launcher, `run_capture_windows`,
+condition 7's interpreter line, `%tool_severity`, the message's handling of a
+missing tool), `tests/profile/profiling-preflight.sh` (the script directories
+searched, the cpanfile named) and `process/claude-hooks/guard-write.sh` (paths
+in forward-slash form). Each keeps its macOS and Linux behaviour by
+construction; the next session on each host runs `--validate` and a profiling
+preflight before anything else.
 
 The completion gate runs once, after stage 4, on the macOS development host
 where the `before` benchmark was captured (`docs/process/workflow.md` § 3): the
@@ -59,6 +49,11 @@ where the `before` benchmark was captured (`docs/process/workflow.md` § 3): the
 single-day-access-log-standard --label 750-after`) from a worktree beside the
 `release/0.20.0` one, so both sides run from the same kind of checkout,
 compared with `750-before.tsv`; then the full harness suite (AC16).
+
+State outside the repository, on the Windows development host: `BASH_ENV`
+set to `~/.bashrc` as a user environment variable (D17); the wrapper at
+`C:\Program Files\Git\opt\homebrew\bin\perl` and the `opt` directory removed by
+the full setup.
 
 State outside the repository, on the first macOS development host only (the
 one the keg measurement was parked from):
@@ -875,6 +870,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         of `PATH` by hand in the shell that started `claude`, no shell file
         adding it, condition 8 resolving `/usr/bin/perl` in every mode) and
         the fix (a new terminal), and named no issue or branch.
+      - W, 2026-10-24, Windows 11 ARM64, pass, started by the architect from a `cmd` tab as `set BASH_ENV= ` (a trailing space) then `claude`: the user saw "this session finds perl /usr/bin/perl (v5.42.2)", the cause (`BASH_ENV` not putting Strawberry Perl first in the plain Git Bash shell Claude Code runs its hooks in) and the fix (`--repair`, then quit Claude Code and every terminal window). The agent's first reply, to "hi", found the user variable right and Claude Code's own `BASH_ENV` a single space set in the `cmd` tab, named the cause and the fix (a new terminal), and named no issue or branch. The message read "BASH_ENV is  , which…": a `BASH_ENV` of blanks, which bash reads no file for, now reads as not set. The `nytprof.out` that reply found in the checkout was written two minutes into that session, not by the check (three runs of the check, one per Perl and `PATH`, left it untouched); it was removed.
 - [ ] **AC8. The hook is fast enough to run at every session start.** On a
       set-up host, `time sh -c '<command>'`, five runs.
       Pass when: the median is within the median of five timed runs of the
