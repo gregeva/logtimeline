@@ -158,6 +158,17 @@ Not yet locked; the shape the design is being worked toward.
 - **A session-start check** runs it when a Claude Code session starts, so a
   wrong environment is reported before work begins. CI runs outside Claude
   Code and has no session start; it is out of scope for this check.
+- **The session-start hook's shape (agreed):** a shell-form hook, so each
+  platform starts it with the shell Claude Code guarantees there (`sh` on
+  macOS and Linux, Git Bash on Windows). Its command is a few lines of `sh`:
+  when a `perl` is on `PATH`, run the check script with it; when none is,
+  print that no Perl was found and name the setup for the host. The check
+  itself is the one Perl script, run by whatever Perl is present and
+  reporting which one it found. Claude Code does not bundle Node (its
+  `claude` is a native executable that "does not itself invoke Node",
+  https://code.claude.com/docs/en/setup.md), so Node is not a runtime the
+  hook can count on. A Windows host without Git Bash, where Claude Code
+  falls back to PowerShell, is treated as not set up.
 - **Setup makes the shell configuration right without reinstalling
   anything:** the step that writes it is idempotent, or setup has a fix mode
   that repairs the configuration alone.
