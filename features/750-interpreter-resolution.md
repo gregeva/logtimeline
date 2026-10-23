@@ -4,9 +4,12 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: specification, analysis. What is in place today is recorded as found,
-not as the contract: most of it was put in piecemeal to get past a problem at
-the time, and the analysis is expected to challenge it.
+Status: specification stage complete (2026-10-23); next, investigation stage 1
+(the macOS development host, § Phase 4: investigation stages, one per
+environment) on the issue branch `750-interpreter-resolution`. What is in
+place today is recorded as found, not as the contract: most of it was put in
+piecemeal to get past a problem at the time, and the analysis is expected to
+challenge it.
 
 ## The architect's framing (2026-10-23)
 
@@ -396,7 +399,7 @@ https://code.claude.com/docs/en/hooks-guide.md:
 
 ## Requirements
 
-Draft, for the architect's review.
+Written in the specification stage; the architect closed the stage without a line-by-line review (2026-10-23).
 
 - **R1. One environment check.** A single Perl script tests the twelve
   conditions of § Phase 4: the expected conditions, and reports each one by
@@ -469,7 +472,7 @@ Draft, for the architect's review.
 
 ## Acceptance criteria
 
-Draft, for the architect's review. Each criterion is a test case the
+Written in the specification stage (2026-10-23). Each criterion is a test case the
 developer runs by hand, on the hosts it names (M macOS, L Linux, W Windows
 under Git Bash, C the container builds), at that host's stage; no harness is
 built for them (D10). Under each, the developer records the host, the date
