@@ -121,7 +121,7 @@ Dock, an editor's task runner, a scheduled job, a hook run by a graphical git
 client) runs the system interpreters. This is a candidate mechanism for the
 agent's past use of the system Perl, examined in phase 3.
 
-### Phase 3: how the wrong interpreter has been reached (in progress)
+### Phase 3: how the wrong interpreter has been reached (set aside)
 
 The architect starts Claude Code from a terminal, never from the desktop app,
 so the agent's shell inherits the interactive environment and its `PATH`
@@ -130,6 +130,10 @@ non-interactive shell above therefore does not explain the agent's past use
 of the system Perl in a terminal-started session, unless `~/.zshrc` did not
 yet carry the Homebrew lines at the time; its comment matches the wording
 `README.md` gained when the harnesses started refusing bash 3.2 (2026-09-24).
+
+Set aside by the architect (2026-10-23): the incidents span a year and a
+half, and the work is a redesign, not a per-incident fix. What was found
+before that is kept below.
 
 Cases on record, found by searching issues and commit messages for
 "system Perl":
@@ -196,7 +200,7 @@ by trusting the Perl the check runs under.
 | 1 | a `perl` is on `PATH` | | | | fail |
 | 2 | it is the development Perl, not another on the host | Homebrew's, not `/usr/bin` or `/System` | the distribution's | Strawberry Perl's, not Git's own `/usr/bin/perl` | fail |
 | 3 | it loads every runtime module the cpanfile requires | `build/cpanfile` | `build/cpanfile` | `build/cpanfile.windows` | fail |
-| 4 | it loads the development-only modules (the profiler) | when installed | when installed | when installed (`-DevDeps`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
+| 4 | it loads the development-only modules (the profiler) | when installed (`--with-develop`) | when installed (`--with-develop`) | when installed (`--with-develop`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
 | 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
 | 7 | `python3` on `PATH` imports NumPy and SciPy | Homebrew's, not `/usr/bin/python3` | the distribution's | the WinGet Python | fail where the harnesses run, note on Windows |
@@ -262,6 +266,45 @@ full setup safe to re-run was the alternative, set aside because every install
 step on every host (Homebrew's upgrade-on-install, WinGet, cpanm) would have
 to become a guaranteed no-op, each a separate promise to keep and test.
 
+### Phase 4: one option set for every setup script (proposal)
+
+The setup options today are three conventions: `build/macos-setup.sh` takes no
+arguments and reads `LTL_INSTALL_DEV_DEPS=1` (544 D6); `build/windows-setup.ps1`
+takes PowerShell switches `-DevDeps` and `-Package`, plus `-Phase Machine`, the
+elevated re-launch of itself; the modes decided above are written `--repair`
+and `--validate`. The repository's other scripts take double-dash, lower-case,
+hyphenated long options with `-h`/`--help` (`--scenario`, `--list` in every
+harness through `tests/lib/scenario-select.sh`; `--label`, `--force`,
+`--no-html` in `tests/profile/run-profile.sh`; `--label`, `--options` in
+`tests/baseline/run-benchmark.sh`), and an unknown option exits non-zero
+having done nothing.
+
+Proposed: the same options, spelled the same way, on all three setup scripts.
+
+| Option | Effect | Replaces |
+|---|---|---|
+| (none) | full setup: install the runtime tools and modules, write the shell configuration, run the check | |
+| `--with-develop` | full setup, plus the development-only modules (the profiler) | `LTL_INSTALL_DEV_DEPS=1` on macOS, `-DevDeps` on Windows |
+| `--package` | full setup, plus PAR::Packer, for building the static binary | `-Package` on Windows; on macOS PAR::Packer is installed unconditionally today |
+| `--repair` | write the shell configuration only, then run the check | |
+| `--validate` | run the check only | |
+| `-h`, `--help` | usage | |
+
+- `--with-develop` is cpanm's own name for the flag the setup passes on, and
+  the cpanfile names the phase `develop`: one word for one thing.
+- `--repair` and `--validate` take neither install option; given together, or
+  with an unknown option, the script exits non-zero having done nothing.
+- `.github/workflows/release-build.yml` runs `./build/macos-setup.sh` bare, then
+  packages; under this set it runs `./build/macos-setup.sh --package`. A bare
+  run still installs no profiler, which keeps the property 544 D6 chose the
+  environment variable for; D6's other reason, that the script had no option
+  parser, goes with the modes.
+- `-Phase Machine` stays internal to `build/windows-setup.ps1` (the script
+  re-launching itself elevated) and is not part of the set.
+- Not yet known: whether `powershell -File build\windows-setup.ps1 --validate`
+  reaches the script as `--validate` through PowerShell's own parameter
+  binding, or has to be read from `$args`. Stage 3 settles it.
+
 ### Phase 4: the one rule every script follows
 
 With the environment established by setup and asserted by the check, a script
@@ -303,7 +346,7 @@ records what it finds here before the next.
 |---|---|---|
 | 1 | macOS development host | the check script, the session-start hook, `build/macos-setup.sh` with `--repair` and `--validate`, the rule applied to every script; the harness suite passes |
 | 2 | Linux development host | a new Linux setup script (the distribution's Perl, `local::lib`), the check's Linux column, the screenshot tools on Linux; the harness suite passes |
-| 3 | Windows development host | `build/windows-setup.ps1` with `--repair` and `--validate`, the check under Git Bash, `./ltl` through `env perl` with no shim, the hooks, the profiler with `-DevDeps` |
+| 3 | Windows development host | `build/windows-setup.ps1` with `--repair` and `--validate`, the check under Git Bash, `./ltl` through `env perl` with no shim, the hooks, the profiler with `--with-develop`, the option set parsed by PowerShell |
 | 4 | the container builds | `build/windows-package.sh` (Wine) and `build/ubuntu-package.sh` build as before, with the develop block in `build/cpanfile.windows` |
 
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
@@ -349,15 +392,162 @@ https://code.claude.com/docs/en/hooks-guide.md:
 | `tests/distribution-shape/generate-anchor.py`, the Python hints in `tests/validate-statistics.sh`, `tests/validate-profile.sh`, `tests/validate-distribution-shape.sh` | dismissed: each hint is labelled with the platform it is for |
 | #106, #138, #328, #434, #541 | dismissed: closed, matched a term in passing |
 
+
 ## Requirements
 
-To be derived from the analysis and agreed with the architect.
+Draft, for the architect's review.
+
+- **R1. One environment check.** A single Perl script tests the twelve
+  conditions of § Phase 4: the expected conditions, and reports each one by
+  number with its result (pass, fail, note), what it found (the path and
+  version of the tool on `PATH`, the module that did not load) and the remedy
+  for the host it runs on. It is read-only: it installs, writes and changes
+  nothing.
+- **R2. The check runs before setup.** It uses core Perl modules only, so any
+  Perl runs it: the macOS system Perl, Git for Windows' own Perl, a
+  distribution's Perl. It tests the tools it finds on `PATH` by starting them,
+  never the Perl it runs under.
+- **R3. A session-start check.** A shell-form SessionStart hook runs a few
+  lines of `sh`: with a `perl` on `PATH` it runs the check, without one it
+  reports that no Perl was found and names the host's setup. The report goes
+  into the model's context; a failed condition is also shown to the user.
+  The session always proceeds. It is its own hook entry, beside the
+  outstanding-state sweep of `process/claude-hooks/session-start.sh`.
+- **R4. Three setup modes on every host.** `build/macos-setup.sh`,
+  `build/windows-setup.ps1` and a new Linux setup script each have a full
+  setup, `--repair` and `--validate` (§ Phase 4: re-running setup is not safe
+  for the shell configuration). `--repair` and `--validate` install and
+  upgrade nothing. The full setup ends by running the check. All three take
+  the one option set of § Phase 4: one option set for every setup script.
+- **R5. Setup owns the shell configuration.** Each setup writes one managed
+  block, delimited so that rewriting it leaves everything else in the file
+  untouched: macOS into `~/.zshenv` and `~/.zprofile` (measured, § Phase 4:
+  where macOS setup writes its shell configuration), Linux into the files its
+  stage establishes, Windows into `~/.bashrc`, as today. Writing it again
+  changes nothing.
+- **R6. One rule for every script** (§ Phase 4: the one rule every script
+  follows): interpreters from `PATH`, by `env` first lines and bare names; no
+  absolute interpreter path, no `brew --prefix`, no change to `PATH`, outside
+  the sealed environments named there. Every occurrence in the rewrite table
+  is changed as it states.
+- **R7. Python under the same rule.** `python3` is the one setup installs;
+  condition 7 asserts it.
+- **R8. Profiling on every host.** `build/cpanfile.windows` carries the
+  develop block (544 D5a as amended); `--with-develop` installs the profiler
+  on every host; no packaged binary carries it.
+- **R9. No message about a tool the host does not have.** No script prints a
+  message from, or a remedy naming, a tool absent from the host it runs on.
+- **R10. The records say what is now true.** `README.md` § Install
+  Dependencies and § Test-harness dependencies, `CLAUDE.md` § Build and §
+  Test and benchmark, and `docs/toolchain-guidance.md` § Windows development
+  host name the host's setup and its modes in place of the manual `export
+  PATH` line and the shim; 544 D1 and D7 are restated against the
+  requirement the architect gave (the expected Perl, consistently, which on
+  macOS is Homebrew Perl).
 
 ## Decisions
 
-None yet.
+| | Decision | By |
+|---|---|---|
+| D1 | One read-only check, in Perl, one list of conditions with per-host alternatives; the twelve conditions as listed | architect |
+| D2 | The session-start hook: shell form, an `sh` launcher, the Perl check | architect |
+| D3 | Linux starts from the distribution's Perl with `local::lib`; not a hard requirement, settled in the Linux stage | architect |
+| D4 | Setup modes: full, `--repair`, `--validate` | architect |
+| D5 | Profiling on every host; 544 D5a amended | architect |
+| D6 | macOS writes its block into both `~/.zshenv` and `~/.zprofile` | delegated, from the measurement |
+| D7 | The one rule and its exceptions; `require-bash.sh` stays as a guard with a host-neutral message | delegated |
+| D8 | The environment check is its own SessionStart hook entry | delegated |
 
 ## Acceptance criteria
 
-To be derived from the agreed requirements (`docs/test-driven-development.md`),
-each with its validation per host, enumerated over every occurrence above.
+Draft, for the architect's review. Each names the hosts it is validated on
+(M macOS, L Linux, W Windows, C the container builds) and its triage.
+"Throwaway home" means a temporary `HOME` (and `ZDOTDIR`) so the developer's
+own files are never touched.
+
+**The check (R1, R2)**
+
+- [ ] **AC1.** `--validate` on a set-up host reports all twelve conditions by
+      number, every applicable one passing, and exits 0. M L W; assertable.
+- [ ] **AC2.** Started under the wrong Perl, the check still runs and fails
+      condition 2 naming the Perl it found: `/usr/bin/perl` on macOS, Git's
+      own Perl on Windows. M W; assertable.
+- [ ] **AC3.** With a `PATH` whose first `perl` lacks the project's modules,
+      condition 3 fails and names the first module that did not load. M L W;
+      assertable (on macOS the system Perl is that Perl).
+- [ ] **AC4.** With `bash` 3.2 first on `PATH` (macOS `/bin/bash`),
+      condition 6 fails; with `/usr/bin/python3` first, condition 7 fails. M;
+      assertable.
+- [ ] **AC5.** The check writes nothing: run in a throwaway home, no file
+      under it or under the checkout is created or changed. M L W; assertable.
+
+**The session-start check (R3)**
+
+- [ ] **AC6.** The hook's command, run with a `PATH` holding `sh` but no
+      `perl`, prints the no-Perl message naming the host's setup and lets the
+      session proceed. M L W; assertable (a directory of links to the few
+      tools `sh` needs).
+- [ ] **AC7.** In a session started with a failing condition, the user sees
+      the failed condition and its remedy, and the model's context carries
+      the report. M L W; observed by hand once per host (Claude Code's display
+      is not scriptable here).
+- [ ] **AC8.** The hook's wall time on a set-up host is within a budget the
+      architect sets from a measurement taken in stage 1. M L W; unknown until
+      measured.
+
+**Setup (R4, R5)**
+
+- [ ] **AC9.** `--validate` and `--repair` start no installer: run with
+      stand-ins for `brew`, `cpanm`, `apt-get` and `winget` on `PATH` that
+      record each call, they record none apart from read-only queries
+      (`brew --prefix`). M L W; assertable.
+- [ ] **AC10.** In a throwaway home, `--repair` run twice leaves each shell
+      file byte-identical after the second run, and lines outside the managed
+      block are unchanged after the first. M L W; assertable.
+- [ ] **AC11.** After `--repair` in a throwaway home, a shell started from a
+      clean environment in each mode (`-c`, `-lc`, `-ic`, `-lic`) resolves the
+      same `perl`, `bash` and `python3` that conditions 2, 6 and 7 expect.
+      M L (W: Git Bash login and non-login); assertable.
+- [ ] **AC12.** The new Linux setup brings a Linux host from the
+      distribution's packages to `--validate` passing, without installing a
+      Perl module as root. L; assertable in stage 2.
+
+**The rule (R6, R7, R9)**
+
+- [ ] **AC13.** `git grep` over the tracked scripts (`ltl`, `*.sh`, `*.pl`,
+      `*.py`, `build/*`, `process/*`, `prototype/*`) outside the named
+      exceptions and the historical records finds no `brew --prefix`, no
+      `/opt/homebrew`, no `#!/usr/bin/perl`, and no assignment to `PATH`.
+      M; assertable.
+- [ ] **AC14.** On a host without Homebrew, `prototype/412-notice-surfaces/check-tmux.sh`,
+      `prototype/412-notice-surfaces/capture/specimens.sh` and every harness
+      print nothing on stderr naming `brew`. L; assertable.
+- [ ] **AC15.** `./ltl --version` runs on each host through `env perl`, on
+      Windows with no shim at Git's `/opt/homebrew/bin/perl`. M L W;
+      assertable.
+- [ ] **AC16.** The full harness suite passes on macOS and on Linux after the
+      change. M L; assertable (the completion gate, run on both).
+
+**Profiling and packaging (R8)**
+
+- [ ] **AC17.** On Windows, `build/windows-setup.ps1 --with-develop` leaves
+      `perl -MDevel::NYTProf -e 1` succeeding. W; assertable in stage 3.
+- [ ] **AC18.** A profiling run (`tests/profile/run-profile.sh`) produces its
+      report on Windows. W; unknown: whether the profiling scripts meet the
+      Windows traps that stop the harnesses there is stage 3's to find.
+- [ ] **AC19.** No packaged binary carries the profiler: the archive listing
+      of each binary built with the develop block present names no
+      `Devel/NYTProf`. M C; assertable in stages 1 and 4.
+
+**The records (R10)**
+
+- [ ] **AC20.** `README.md`, `CLAUDE.md` and `docs/toolchain-guidance.md`
+      carry no `export PATH="$(brew --prefix)` line and no shim, and name
+      each host's setup with `--repair` and `--validate`. M; assertable by
+      `git grep` and by reading.
+
+**Proposal for the architect's decision (proportionality):** AC1 to AC6 and
+AC9 to AC11 can be gathered into one harness, `tests/validate-environment.sh`,
+whose scenarios build stand-in `PATH` directories and a throwaway home; it
+runs on macOS and Linux. Without it, they are checked by hand at each stage
+and recorded here.
