@@ -33,7 +33,7 @@ nothing fails, 1 otherwise.
 | Host | Full setup | Add only what is missing from the shell configuration | Check only |
 |---|---|---|---|
 | macOS (Homebrew required) | `./build/macos-setup.sh` (`--dev-deps` adds the profiler, `--package` PAR::Packer) | `./build/macos-setup.sh --repair` | `./build/macos-setup.sh --validate` |
-| Windows | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1` | | `perl process/check-environment.pl` |
+| Windows (from PowerShell) | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1` (`--dev-deps` adds the profiler, `--package` PAR::Packer) | the same, with `--repair` | the same, with `--validate` |
 | Debian/Ubuntu | `./build/linux-setup.sh` (`--dev-deps` adds the profiler, `--package` PAR::Packer) | `./build/linux-setup.sh --repair` (adds nothing: the distribution's tools are on its default `PATH`) | `./build/linux-setup.sh --validate` |
 
 ## Troubleshooting a failed condition

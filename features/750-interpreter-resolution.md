@@ -434,9 +434,11 @@ architect named the development option `--dev-deps`; it passes cpanm
   parser, goes with the modes.
 - `-Phase Machine` stays internal to `build/windows-setup.ps1` (the script
   re-launching itself elevated) and is not part of the set.
-- Not yet known: whether `powershell -File build\windows-setup.ps1 --validate`
-  reaches the script as `--validate` through PowerShell's own parameter
-  binding, or has to be read from `$args`. Stage 3 settles it.
+- Settled in stage 3 (2026-10-24): PowerShell's parameter binding refuses
+  `--validate` ("A parameter cannot be found that matches parameter name
+  '-validate'"); with no `param()` block, `powershell -File` hands every
+  argument to `$args` as written, so `build/windows-setup.ps1` reads its
+  options from `$args`.
 
 ### Phase 4: the one rule every script follows
 
@@ -1580,6 +1582,50 @@ Observation, not changed: `process/claude-hooks/guard-write.sh` refuses a write
 under `logs/` given as `C:/…/logs/x.txt` and lets the same path through as
 `C:\…\logs\x.txt`, under Git's Perl and Strawberry Perl alike; the Write tool
 passes backslash paths on Windows.
+
+### Stage 3 plan (agreed by the architect, 2026-10-24)
+
+| Step | What | Test cases |
+|---|---|---|
+| 1 | Windows setup takes D9's option set, read from `$args`; `--repair` adds only what is missing (`BASH_ENV`, `~/bin/python3`, the `~/.bashrc` and `~/.bash_profile` blocks); the message names `--repair` | AC1, AC9, AC10, AC10a |
+| 2 | the `/opt/homebrew/bin/perl` shim goes: `./ltl` starts through `env perl`, and a full setup removes a leftover shim | AC15 |
+| 3 | the develop block in `build/cpanfile.windows`, so `--dev-deps` installs the profiler | AC17, AC18 |
+| 4 | condition 7 on Windows judges the Python the `python3` wrapper starts, not the wrapper's path | the Windows gap under AC4a |
+| 5 | the Windows instructions in `README.md` and `docs/toolchain-guidance.md` rewritten | AC20 |
+| 6 | every Windows test case run and recorded | AC2, AC3, AC5, AC6, AC7, AC8, AC10b, AC11 |
+| 7 | the write guard recognises Windows backslash paths | none; the hooks are in this stage's scope |
+
+### Step 1: `build/windows-setup.ps1`'s options, `--repair` and `--validate` (2026-10-24)
+
+The options are read from `$args` (D9 as settled above); `-Phase Machine`
+stays internal. `--validate` runs the check as the session-start hook does: in
+a plain shell started by Git's `bin\bash.exe`, by Git's own Perl, so it judges
+what the hooks will find. `--repair` and the full setup share one shell step,
+each piece added only when missing (D12), none rewritten (the earlier step
+removed and re-appended its blocks on every run): `BASH_ENV` when the user
+variable is unset; `~/bin/python3` when absent; the `~/.bashrc` block when a
+login shell fails condition 8 and the block is absent; the `~/.bash_profile`
+block when that file does not read `~/.bashrc`. The files are Git Bash's
+home: `HOME` when set, the user's profile otherwise. The full setup ends with
+the check, as on macOS and Linux, in place of its own table of versions. The
+session-start message names `--repair` for every cause but a missing
+Strawberry Perl.
+
+Condition 8 now gives `BASH_ENV` to the plain shell only. Given to the login
+shell, it made that shell read `~/.bashrc` through `BASH_ENV` rather than
+through its own startup files, and a stand-in home with no Strawberry Perl
+line passed.
+
+Runs on this host, captured in the session's scratchpad:
+
+| Run | Result |
+|---|---|
+| `--help` | usage, exit 0 |
+| `--bogus`; `--validate --dev-deps`; `--repair --validate`; `-Phase Bogus` (by `-File` and by `&`) | usage on stderr, exit 2 |
+| `--validate` | 7 pass, 1 note (4), 2 n/a, exit 0 |
+| `--repair` on this host | "BASH_ENV is …\.bashrc", "~/bin/python3 is present", condition 8 pass, "Nothing to add"; `~/.bashrc`, `~/.bash_profile` and `~/bin/python3` byte for byte unchanged; exit 0 |
+| `--repair` twice, `HOME` a stand-in holding only `.bashrc` with `export KEEP=1`, `BASH_ENV` naming it | first: wrapper written, condition 8 FAIL (login shell resolves `/usr/bin/perl`), the Strawberry Perl block appended after `export KEEP=1`, then 7 pass; the stand-in's `.bash_profile` was written by Git for Windows' own `/etc/profile` and reads `~/.bashrc`, so nothing was added there. Second: nothing added, files unchanged |
+| the session-start hook, the four environments of the previous section | the same messages, with `--repair` as the fix for the configuration causes |
 
 ## Troubleshooting a failed condition
 

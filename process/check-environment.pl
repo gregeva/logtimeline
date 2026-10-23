@@ -406,11 +406,13 @@ sub test_modules {
 # { name => { path, real } or undef }. Only the variables a login shell needs
 # to find its files are passed on.
 # On Windows a user variable such as BASH_ENV is in every new process's
-# environment, so it is passed on too. A native Windows Perl is given each
-# path in Windows form, and the shell HOME in Git Bash's.
+# environment, so the plain shell, which reads the file it names, is given it;
+# a login shell is not, so that it shows what its own startup files do. A
+# native Windows Perl is given each path in Windows form, and the shell HOME
+# in Git Bash's.
 sub resolved_in_clean_shell {
     my ( $shell, $mode ) = @_;
-    my @pass = ( qw(HOME USER LOGNAME TERM ZDOTDIR), $host eq 'windows' ? 'BASH_ENV' : () );
+    my @pass = ( qw(HOME USER LOGNAME TERM ZDOTDIR), $host eq 'windows' && $mode eq '-c' ? 'BASH_ENV' : () );
     my %env = map { $_ => $ENV{$_} } grep { defined $ENV{$_} } @pass;
     my $path = '$(command -v "$t")';
     if ( $^O eq 'MSWin32' ) {
@@ -529,7 +531,10 @@ my @conditions = (
 my %setup = (
     macos   => { full => './build/macos-setup.sh', repair => './build/macos-setup.sh --repair' },
     linux   => { full => './build/linux-setup.sh', repair => './build/linux-setup.sh --repair' },
-    windows => { full => 'powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1' },
+    windows => {
+        full   => 'powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1',
+        repair => 'powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1 --repair',
+    },
 );
 
 # Windows: Claude Code runs its hooks in a plain Git Bash shell, which puts
@@ -570,7 +575,8 @@ sub user_message {
             : 'this session finds the right tools, but a new terminal does not';
         push @lines, "Environment check: $what.";
         if ( $host eq 'windows' ) {
-            push @lines, windows_path_scenario( $result, $fails, $shell ), 'Fix: ' . $run->($full) . ', then quit Claude Code and every terminal window, and start it again.';
+            push @lines, windows_path_scenario( $result, $fails, $shell ),
+                'Fix: ' . $run->( $fails->(1) ? $full : $repair ) . ', then quit Claude Code and every terminal window, and start it again.';
         }
         elsif ($shell) {
             push @lines, 'Likely cause: the shell configuration does not put the development tools first in a new terminal.',
