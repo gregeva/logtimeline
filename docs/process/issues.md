@@ -86,6 +86,18 @@ status change is written into the owning feature doc in the same action; the
 comment references the doc. Completion and close follow
 `docs/process/workflow.md` § 4.
 
+**At a stage boundary**, when a stage of an issue ends or work stops while
+the issue stays `in progress`, both are done in the same action, before
+anything else:
+
+1. The feature doc's Status line and § Resuming are brought up to date (what
+   is done, what is open, where the next stage starts and on which host, any
+   state left outside the repository), then committed and pushed.
+2. An issue comment states that the stage is complete and why work stops
+   there; that the issue stays `in progress`; the record, with its path, branch
+   and commit; what the stage did; and the next steps, pointing at
+   § Resuming.
+
 The **`not planned` label** marks an *open* issue retained as a decision or
 spec record (e.g. #370, temporal interpolation). Such issues are not closed:
 "label as not planned" and "close as not planned" are different dispositions.
