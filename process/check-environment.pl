@@ -50,6 +50,15 @@ USAGE
 
 # --- Helpers ----------------------------------------------------------------
 
+# A native Windows Perl reads a file as executable by its extension alone; Git
+# Bash also runs a script without one that starts with #!.
+sub starts_with_shebang {
+    my ($path) = @_;
+    open my $fh, '<', $path or return 0;
+    read $fh, my $head, 2;
+    return ( $head // '' ) eq '#!';
+}
+
 # The first executable of this name on PATH, or undef.
 sub find_on_path {
     my ($name) = @_;
@@ -58,7 +67,7 @@ sub find_on_path {
         next if $dir eq '';
         for my $ext (@exts) {
             my $path = File::Spec->catfile( $dir, "$name$ext" );
-            return $path if -f $path && -x _;
+            return $path if -f $path && ( -x _ || ( $^O eq 'MSWin32' && $ext eq '' && starts_with_shebang($path) ) );
         }
     }
     return undef;
@@ -78,9 +87,12 @@ sub real {
 # started. The tool runs in a session of its own, so a timeout kills its whole
 # process group, and so it has no controlling terminal: an interactive shell
 # started from a terminal in a process group of its own is stopped as soon as
-# it touches that terminal, and would run into the timeout.
+# it touches that terminal, and would run into the timeout. A native Windows
+# Perl (Strawberry Perl) has no fork, so there the tool is started by
+# run_capture_windows.
 sub run_capture {
     my (@cmd) = @_;
+    return run_capture_windows(@cmd) if $^O eq 'MSWin32';
     my $pid = open( my $fh, '-|' );
     return ( -1, '' ) unless defined $pid;
     if ( !$pid ) {
@@ -99,6 +111,60 @@ sub run_capture {
         alarm 0;
         1;
     } or do { $timed_out = 1; kill 'KILL', -$pid };
+    close $fh;
+    my $status = $? == -1 || $? & 127 ? -1 : $? >> 8;
+    return ( $timed_out ? -1 : $status, $out );
+}
+
+# A native Windows Perl joins a list into one command line, wrapping an
+# argument that holds a space or tab in double quotes, leaving one that holds
+# a double quote as it is, and escaping nothing; the tool splits the line
+# again by the C runtime's rules (Git Bash's tools by Cygwin's, which also
+# expand an unquoted wildcard and read single quotes). An argument holding a
+# quote or a wildcard is therefore quoted here, the others only made safe for
+# the quotes Perl adds.
+sub windows_argument {
+    my ($arg) = @_;
+    if ( $arg =~ /["'*?\[{]/ ) {
+        $arg =~ s{(\\*)"}{$1$1\\"}g;
+        $arg =~ s{(\\+)\z}{$1$1};
+        return qq{"$arg"};
+    }
+    $arg =~ s{(\\+)\z}{$1$1} if $arg =~ /[ \t]/;
+    return $arg;
+}
+
+# run_capture under a native Windows Perl. A script without an executable's
+# extension (setup's python3 wrapper) is started by Git Bash's bash, as Git
+# Bash starts it. The tool inherits the handles redirected around its start.
+sub run_capture_windows {
+    my (@cmd) = @_;
+    if ( $cmd[0] !~ m{[/\\]} ) {
+        my $found = tool( $cmd[0] ) or return ( -1, '' );
+        $cmd[0] = $found->{path};
+    }
+    if ( $cmd[0] !~ /\.(?:exe|bat|cmd|com)\z/i ) {
+        my $bash = tool('bash') or return ( -1, '' );
+        unshift @cmd, $bash->{path};
+    }
+    open( my $saved_in,  '<&', \*STDIN )  or return ( -1, '' );
+    open( my $saved_err, '>&', \*STDERR ) or return ( -1, '' );
+    open( STDIN,  '<', File::Spec->devnull );
+    open( STDERR, '>', File::Spec->devnull );
+    my $pid = open( my $fh, '-|', map { windows_argument($_) } @cmd );
+    open( STDIN,  '<&', $saved_in );
+    open( STDERR, '>&', $saved_err );
+    return ( -1, '' ) unless $pid;
+    my $out = '';
+    my $timed_out = 0;
+    eval {
+        local $SIG{ALRM} = sub { die "timeout\n" };
+        alarm TOOL_TIMEOUT;
+        local $/;
+        $out = <$fh> // '';
+        alarm 0;
+        1;
+    } or do { $timed_out = 1; kill 'KILL', $pid };
     close $fh;
     my $status = $? == -1 || $? & 127 ? -1 : $? >> 8;
     return ( $timed_out ? -1 : $status, $out );
@@ -316,7 +382,7 @@ sub test_modules {
     my $file = File::Spec->catfile( $repo_root, 'build', $cpanfile );
     my @modules = cpanfile_modules( $file, $develop );
     my $expected = 'the perl on PATH loads every ' . ( $develop ? 'development-only' : 'runtime' ) . " module of build/$cpanfile";
-    return { result => 'FAIL', expected => $expected, found => "build/$cpanfile lists no modules, or cannot be read" }
+    return { result => $severity, expected => $expected, found => "build/$cpanfile lists no " . ( $develop ? 'development-only ' : '' ) . 'modules, or cannot be read' }
         unless @modules;
     my $perl = tool('perl') or return missing_tool( 'perl', $severity, $expected );
     my $judged = modules_judged( $perl, @modules );
@@ -339,11 +405,24 @@ sub test_modules {
 # What a shell started from a clean environment resolves for each tool, as
 # { name => { path, real } or undef }. Only the variables a login shell needs
 # to find its files are passed on.
+# On Windows a user variable such as BASH_ENV is in every new process's
+# environment, so it is passed on too. A native Windows Perl is given each
+# path in Windows form, and the shell HOME in Git Bash's.
 sub resolved_in_clean_shell {
     my ( $shell, $mode ) = @_;
-    my @env = map { "$_=$ENV{$_}" } grep { defined $ENV{$_} } qw(HOME USER LOGNAME TERM ZDOTDIR);
-    my ( $status, $out ) = run_capture( 'env', '-i', @env, $shell, $mode,
-        'for t in perl bash python3; do printf "%s=%s\n" "$t" "$(command -v "$t")"; done' );
+    my @pass = ( qw(HOME USER LOGNAME TERM ZDOTDIR), $host eq 'windows' ? 'BASH_ENV' : () );
+    my %env = map { $_ => $ENV{$_} } grep { defined $ENV{$_} } @pass;
+    my $path = '$(command -v "$t")';
+    if ( $^O eq 'MSWin32' ) {
+        if ( defined $env{HOME} ) {
+            $env{HOME} =~ s{^([A-Za-z]):}{'/' . lc $1}e;
+            $env{HOME} =~ tr{\\}{/};
+        }
+        $path  = '$(p=$(command -v "$t") && cygpath -m "$p")';
+        $shell = ( tool('bash') // return {} )->{path};
+    }
+    my ( $status, $out ) = run_capture( 'env', '-i', ( map { "$_=$env{$_}" } sort keys %env ), $shell, $mode,
+        "for t in perl bash python3; do printf \"%s=%s\\n\" \"\$t\" \"$path\"; done" );
     my %found;
     for my $line ( split /\n/, $out ) {
         $found{$1} = $2 eq '' ? undef : { path => $2, real => real($2) } if $line =~ /^(perl|bash|python3)=(.*)$/;
@@ -359,19 +438,20 @@ sub test_clean_login_shell {
     my @names = qw(perl bash python3);
     my @modes = ( [ 'login (-lc)', '-lc' ], [ 'new terminal tab (-lic)', '-lic' ], [ 'plain, not a login (-c)', '-c' ] );
     my %resolved = map { $_->[0] => resolved_in_clean_shell( "/bin/$shell", $_->[1] ) } @modes;
-    my @wrong;
+    my ( @wrong, %login_ok );
     for my $name (@names) {
         my $tool = $resolved{'login (-lc)'}{$name};
         if ( !$tool ) { push @wrong, "no $name"; next }
         my ( $ok, $found ) = judge( $name, $tool );
+        $login_ok{$name} = $ok;
         push @wrong, "$name $found" unless $ok;
     }
     my $show = sub { my ($t) = @_; $t ? $t->{real} : 'none' };
     my @context = ( sprintf '%-28s %s', 'on the PATH this check saw:', join '  ', map { "$_=" . $show->( tool($_) ) } @names );
     push @context, map { my $m = $_->[0]; sprintf '%-28s %s', "$m:", join '  ', map { "$_=" . $show->( $resolved{$m}{$_} ) } @names } @modes;
     my $expected = "a login $shell started from a clean environment resolves perl, bash and python3 as conditions 2, 6 and 7 expect ($file_hint)";
-    return passed( context => \@context ) unless @wrong;
-    return { result => 'FAIL', expected => $expected, found => 'the login shell resolves ' . join( '; ', @wrong ), context => \@context };
+    return passed( context => \@context, login_ok => \%login_ok ) unless @wrong;
+    return { result => 'FAIL', expected => $expected, found => 'the login shell resolves ' . join( '; ', @wrong ), context => \@context, login_ok => \%login_ok };
 }
 
 sub test_on_path {
@@ -452,6 +532,24 @@ my %setup = (
     windows => { full => 'powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1' },
 );
 
+# Windows: Claude Code runs its hooks in a plain Git Bash shell, which puts
+# Git's own directories, and its Perl, in front of the PATH it inherits and
+# reads no startup file unless BASH_ENV names one. Setup's managed blocks in
+# ~/.bashrc and ~/.bash_profile put Strawberry Perl first, and its BASH_ENV
+# makes the plain shell read ~/.bashrc. Whatever the cause, the setup puts it
+# right, and a new user variable reaches only processes started after it.
+sub windows_path_scenario {
+    my ( $result, $fails, $shell ) = @_;
+    return 'Likely cause: Strawberry Perl is not installed, or Git Bash is missing and Claude Code runs its hooks in PowerShell.'
+        if $fails->(1);
+    return 'Likely cause: the shell configuration does not put the development tools first: the managed block in ~/.bashrc or ~/.bash_profile, '
+        . "or setup's ~/bin/python3 wrapper, is missing, or a later line puts Git's directories back in front."
+        if $shell || !$result->{8}{login_ok}{perl};
+    return defined $ENV{BASH_ENV}
+        ? "Likely cause: BASH_ENV is $ENV{BASH_ENV}, which does not put Strawberry Perl first in the plain Git Bash shell Claude Code runs its hooks in."
+        : "Likely cause: BASH_ENV is not set, so the plain Git Bash shell Claude Code runs its hooks in never reads ~/.bashrc, and Git's own Perl comes first.";
+}
+
 sub user_message {
     my ($result) = @_;
     my $fails = sub { ( $result->{ $_[0] }{result} // '' ) eq 'FAIL' };
@@ -471,7 +569,10 @@ sub user_message {
             ? 'this session finds ' . join( '; ', map { "$tool{$_} $result->{$_}{found}" } @path )
             : 'this session finds the right tools, but a new terminal does not';
         push @lines, "Environment check: $what.";
-        if ($shell) {
+        if ( $host eq 'windows' ) {
+            push @lines, windows_path_scenario( $result, $fails, $shell ), 'Fix: ' . $run->($full) . ', then quit Claude Code and every terminal window, and start it again.';
+        }
+        elsif ($shell) {
             push @lines, 'Likely cause: the shell configuration does not put the development tools first in a new terminal.',
                 'Fix: ' . $run->($repair) . ', then start Claude Code from a new terminal.';
         }
@@ -487,8 +588,16 @@ sub user_message {
         my $first    = ( @missing ? $missing[0] : $another[0] ) // $problems[0];
         my $more     = @problems > 1 ? ' (' . ( @problems - 1 ) . ' more in the full report: perl process/check-environment.pl)' : '';
         push @lines, "Environment check: $first$more.";
-        if (@missing) {
+        if ( @missing && $host eq 'windows' ) {
+            push @lines, 'Likely cause: the setup has not run on this host, Strawberry Perl was reinstalled, or build/cpanfile.windows is behind build/cpanfile.',
+                'Fix: ' . $run->($full) . '.';
+        }
+        elsif (@missing) {
             push @lines, 'Likely cause: the setup has not run on this host, or modules were added or upgraded since it last ran.', 'Fix: ' . $run->($full) . '.';
+        }
+        elsif ( $host eq 'windows' ) {
+            push @lines, 'Likely cause: a copy installed outside the setup is found first.',
+                "Fix: remove that copy (a pip install, a cpanm copy beside Strawberry Perl's own, or the PERL5LIB entry that adds it), then start Claude Code again.";
         }
         else {
             push @lines, 'Likely cause: a copy installed outside the setup is found first.',

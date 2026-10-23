@@ -1531,6 +1531,56 @@ Strawberry Perl; condition 8 on Windows judging the plain `bash -c` the hooks
 run in as well as the login shell, with `BASH_ENV` kept in its clean
 environment; and an empty develop block reported as condition 4's note.
 
+### The check under any Perl, and the Windows story in place (2026-10-24)
+
+Direction (architect, 2026-10-24): the check needs only a Perl to run, any
+Perl, and judges the tools on `PATH` by starting them; Git's own Perl first
+in the hook shell is the signal the check exists to catch, not a reason to
+port the hook. So:
+
+- **The hook's launcher** (`.claude/settings.json`) runs the check with Git's
+  own `/usr/bin/perl` when `uname -s` reports `MINGW`, `MSYS` or `CYGWIN`, and
+  with the `perl` on `PATH` elsewhere. `docs/development-environment.md`
+  records it as the one interpreter named by its place.
+- **The check under a native Windows Perl** (Strawberry Perl, run by hand):
+  `run_capture_windows` starts each tool without `fork`, quoting each argument
+  for the command line Perl builds (an argument holding a quote is passed
+  unescaped otherwise, and Git Bash's tools expand an unquoted wildcard); a
+  script without an executable's extension (setup's `python3` wrapper) is
+  found on `PATH` by its `#!` and started by Git Bash's `bash`; condition 8's
+  clean shell is the `bash` on `PATH`, given `HOME` in Git Bash's form, and
+  reports Windows paths.
+- **Condition 8 on Windows** passes `BASH_ENV` into its clean environment, as
+  every new Windows process receives a user variable.
+- **Condition 4** reports an empty develop list at its own severity, a note.
+- **The message** names the Windows cause and fix for conditions 1, 2 (and
+  6), 3 and 8 (`windows_path_scenario` and the Windows branches of
+  `user_message`).
+- **`build/windows-setup.ps1`** sets `BASH_ENV` to `~/.bashrc` as a user
+  variable when it is unset, reports it when it already is, and leaves a
+  different value as it is with a warning (D12).
+
+Runs on this host, the hook's own command started by Git's `bin\bash.exe` as
+Claude Code starts it, captured in the session's scratchpad:
+
+| Environment | Message shown |
+|---|---|
+| this session's, no `BASH_ENV` | "this session finds perl /usr/bin/perl (v5.42.2)" / "BASH_ENV is not set, so the plain Git Bash shell Claude Code runs its hooks in never reads ~/.bashrc, and Git's own Perl comes first" / run the Windows setup, then quit Claude Code and every terminal window |
+| `BASH_ENV` set | none: 7 pass, condition 4 a note |
+| no `BASH_ENV`, `HOME` without shell files | the shell configuration does not put the development tools first (condition 8: the login shell resolves Git's Perl, no `python3`) |
+| `BASH_ENV` set, a copy of YAML::PP on `PERL5LIB` | "YAML::PP loads from … outside this Perl's own install" / a copy installed outside the setup |
+| Strawberry Perl first, Devel::Size hidden by an `@INC` hook | "Devel::Size does not load" / setup not run, Strawberry Perl reinstalled, or `build/cpanfile.windows` behind `build/cpanfile` |
+
+`perl process/check-environment.pl` by hand under Git's Perl and under
+Strawberry Perl, Strawberry Perl first: the same results, 7 pass, 1 note, 2
+n/a. `windows-setup.ps1`'s `BASH_ENV` step run on a scratch variable: set when
+unset, reported when the same, left with a warning when different.
+
+Observation, not changed: `process/claude-hooks/guard-write.sh` refuses a write
+under `logs/` given as `C:/…/logs/x.txt` and lets the same path through as
+`C:\…\logs\x.txt`, under Git's Perl and Strawberry Perl alike; the Write tool
+passes backslash paths on Windows.
+
 ## Troubleshooting a failed condition
 
 The entries live in `docs/development-environment.md` § Troubleshooting a

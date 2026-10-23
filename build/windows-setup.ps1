@@ -176,6 +176,20 @@ Write-Step '[5/7] Git Bash: Strawberry Perl ahead of Git''s own Perl'
 Set-ManagedBlock "$HOME\.bashrc" 'perl' 'export PATH="/c/Strawberry/perl/site/bin:/c/Strawberry/perl/bin:$PATH"'
 Set-ManagedBlock "$HOME\.bash_profile" 'bashrc' '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"'
 Write-Info 'wrote managed blocks to ~/.bashrc and ~/.bash_profile'
+# Claude Code runs its hooks in a plain Git Bash shell, which puts Git's own
+# directories first and reads no startup file unless BASH_ENV names one. A user
+# variable reaches every process started after it is set.
+$bashEnv = [Environment]::GetEnvironmentVariable('BASH_ENV', 'User')
+$bashrc = "$HOME\.bashrc"
+if (-not $bashEnv) {
+    [Environment]::SetEnvironmentVariable('BASH_ENV', $bashrc, 'User')
+    $env:BASH_ENV = $bashrc
+    Write-Info "BASH_ENV set to $bashrc; quit Claude Code and every terminal window for it to apply"
+} elseif ($bashEnv -eq $bashrc) {
+    Write-Info "BASH_ENV is $bashrc"
+} else {
+    Write-Warn2 "BASH_ENV is $bashEnv, left as it is: Claude Code's hooks find Strawberry Perl only if that file puts it first on PATH"
+}
 # The harnesses call python3. The WinGet install has only python.exe, so in Git
 # Bash python3 falls through to the Microsoft Store stub. A one-line wrapper in
 # ~/bin, which Git Bash puts ahead of the Windows PATH, runs the installed Python.

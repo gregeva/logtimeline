@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if command -v perl >/dev/null 2>&1; then exec perl \"$CLAUDE_PROJECT_DIR/process/check-environment.pl\" --hook; fi; printf '{\"systemMessage\":\"Environment check: 1 condition failed\\\\n  1 a perl is on PATH; see docs/development-environment.md § Troubleshooting a failed condition, condition 1\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Environment check (SessionStart hook in .claude/settings.json): no perl on PATH, so process/check-environment.pl did not run.\\\\nPATH:   %s\\\\n\\\\n 1  FAIL  a perl is on PATH\\\\n            see: docs/development-environment.md § Troubleshooting a failed condition, condition 1\\\\n\"}}\\n' \"$PATH\"",
+            "command": "case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) p=/usr/bin/perl ;; *) p=perl ;; esac; if command -v \"$p\" >/dev/null 2>&1; then exec \"$p\" \"$CLAUDE_PROJECT_DIR/process/check-environment.pl\" --hook; fi; printf '{\"systemMessage\":\"Environment check: 1 condition failed\\\\n  1 a perl is on PATH; see docs/development-environment.md § Troubleshooting a failed condition, condition 1\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Environment check (SessionStart hook in .claude/settings.json): no perl on PATH, so process/check-environment.pl did not run.\\\\nPATH:   %s\\\\n\\\\n 1  FAIL  a perl is on PATH\\\\n            see: docs/development-environment.md § Troubleshooting a failed condition, condition 1\\\\n\"}}\\n' \"$PATH\"",
             "timeout": 60
           }
         ]
