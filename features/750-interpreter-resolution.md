@@ -280,7 +280,7 @@ by trusting the Perl the check runs under.
 | 7 | `python3` on `PATH` imports NumPy and SciPy, each from the setup's install (D15) | Homebrew's, not `/usr/bin/python3`; each module's file resolves into its own formula's Cellar; on every host, neither module from the user's `site-packages` nor installed more than once | the distribution's; NumPy and SciPy from its packages, in `/usr/lib/python3/dist-packages` (D3) | the WinGet Python; the modules' place established in the Windows stage | fail where the harnesses run, note on Windows |
 | 8 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7; the report also shows, for context, what a new terminal tab (an interactive login shell) and a plain non-login shell resolve | `zsh -lc`; `~/.zprofile` (D6) | a login bash | a Git Bash login shell | fail |
 | 9 | `tmux` is on `PATH` | expected | expected | not expected | note |
-| 10 | the screenshot tools are present | `swiftc` (Xcode command line tools) | established in the Linux stage | not expected | note |
+| 10 | the screenshot tools are present | `swiftc` (Xcode command line tools) | not expected: the PNG is drawn by WebKit on macOS (`features/598-screenshot-capture.md` D23) | not expected | note |
 | 11 | the repository checks files out with LF endings | n/a | n/a | `core.autocrlf=false` | fail |
 
 **Profiling on Windows (architect, 2026-10-23):** profiling works on Windows
@@ -676,7 +676,8 @@ scripts, put first on `PATH` to change what one name resolves to.
 **The check (R1, R2)**
 
 - [ ] **AC1. A set-up host passes.** Run `<setup> --validate`.
-      Pass when: all eleven conditions are reported by number, each one
+      Pass when: every condition is reported by number (eleven until D3 as
+      settled in stage 2 retired condition 5, ten since), each one
       applicable to the host passes or is a note, those not applicable are
       reported as such, and the exit status is 0. M L W.
       - M, 2026-10-23, pass, on the architect's home after `--repair` (stage
@@ -687,6 +688,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         terminal: 8 pass, 1 note (no `tmux`), 2 `n/a`. That run's condition 8
         context showed a new terminal tab resolving nothing; see § Step 1,
         run from a terminal.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: after `./build/linux-setup.sh --dev-deps --package`, `--validate` reported 1 to 4 and 6 to 11, 8 pass and 2 `n/a` (10, the screenshot tools; 11, Windows' line endings), exit 0.
 - [ ] **AC2. The wrong Perl first on `PATH` is reported, and the check still
       runs under it.** macOS: `PATH="/usr/bin:/bin:$PATH" /usr/bin/perl
       process/check-environment.pl`. Windows: `PATH="/usr/bin:$PATH"
@@ -699,19 +701,23 @@ scripts, put first on `PATH` to change what one name resolves to.
         expected Homebrew's Perl and found `/usr/bin/perl (v5.34.1)`; the
         header gave the Perl and the `PATH`; pointer on every failure; exit 1.
 - [ ] **AC3. A Perl without the project's modules is reported by the module.**
-      The run of AC2 on macOS and Windows; on Linux, `env -u PERL5LIB perl
+      The run of AC2 on macOS and Windows; on Linux, where the distribution's
+      Perl is the development Perl (D3), the modules are hidden from it: a
+      stand-in directory holding `Hide.pm`, an `@INC` hook that refuses
+      `Devel/Size.pm` and `YAML/PP.pm`, and `PERL5OPT="-I$D -MHide" perl
       process/check-environment.pl`.
       Pass when: condition 3 fails, naming the first module of the host's
-      cpanfile that did not load, with its pointer; on Linux condition 5 also
-      fails. M L W.
+      cpanfile that did not load, with its pointer. M L W.
       - M, 2026-10-23, pass (the AC2 run): condition 3 found "Devel::Size does
         not load; 3 of 20 do not: Devel::Size, Text::CSV, Text::CSV_PP", with
         its pointer.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: with `Devel/Size.pm` and `YAML/PP.pm` hidden by the `@INC` hook, condition 3 found "Devel::Size does not load; 2 of 20 do not: Devel::Size, YAML::PP", with its pointer; exit 1.
 - [x] **AC3a. A Perl module from outside the setup's install is reported**
       (D16). A copy of a runtime module from the Perl's own `site_perl`, and
       one of a core module, in a stand-in directory put first with
-      `PERL5LIB`. Linux: the same with `PERL5LIB` keeping `~/perl5` as well,
-      and a module installed both by the distribution and into `~/perl5`.
+      `PERL5LIB`. Linux: the same, the runtime module's copy taken from the
+      distribution's package directory, and a module installed both by the
+      distribution and by `cpanm` into a directory on `PERL5LIB`.
       Pass when: condition 3 fails naming each module loading from the
       stand-in, the site copy also as installed twice, the core copy not;
       with no `PERL5LIB`, condition 3 passes. M L W.
@@ -722,6 +728,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         and 4 pass. The system Perl run (AC2) reads as before D16: Apple's
         `/System/Library/Perl/Extras` is on that Perl's built-in `@INC`.
         The full check took 0.35 s before and after (medians of five).
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: copies of Text::CSV (from `/usr/share/perl5`) and Getopt::Long (core, from `perl-base`) in a stand-in directory on `PERL5LIB`: each "loads from <D>/…, outside this Perl's own install"; "Text::CSV is installed 2 times: <D>/Text/CSV.pm, /usr/share/perl5/Text/CSV.pm"; Getopt::Long not counted twice. Without `PERL5LIB` conditions 3 and 4 pass. The copy stands in for a `cpanm` install, as `cpanm` is not on this host; Debian's `perl-base` counted as core, as D16 read it.
 - [x] **AC4. Old bash and the system Python are reported.** macOS:
       `ln -s /bin/bash "$D/bash"; PATH="$D:$PATH" perl
       process/check-environment.pl`, then the same with
@@ -768,6 +775,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         with Homebrew's SciPy on `PYTHONPATH` passed. The full check took
         0.35 s against 0.29 s before (medians of five, this host now
         starting Homebrew's Python 3.15), inside D14's budget.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: a copy of the distribution's NumPy in a scratch user `site-packages` (`PYTHONUSERBASE`) failed condition 7, "NumPy loads from the user's site-packages, …" and "NumPy is installed 2 times: 2.3.5 in <user>/numpy-2.3.5.dist-info, 2.3.5 in /usr/lib/python3/dist-packages/numpy-2.3.5.dist-info"; without it, pass. The other forms: a venv's `python3` first, without the modules, failed "NumPy or SciPy does not import"; a venv with `--system-site-packages` first passed, as it loads the distribution's modules from their place (the place test judges where the modules load from; the interpreter's path resolves to `/usr/bin/python3.14`).
 - [ ] **AC5. The check writes nothing.** `T=$(mktemp -d)`, then, a second
       later, `M=$(mktemp)`; then `HOME="$T" ZDOTDIR="$T" perl
       process/check-environment.pl`, then `find "$T" -newer "$M"` and
@@ -787,6 +795,7 @@ scripts, put first on `PATH` to change what one name resolves to.
       - M, 2026-10-23, pass, on a second macOS development host after D15 and
         D16 (Python and Perl started to judge where each module loads from):
         `find` listed nothing, `git status` unchanged.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: `find` in the throwaway home and in the checkout listed nothing; `git status` unchanged by the run.
 
 **The session-start check (R3)**
 
@@ -802,6 +811,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         `systemMessage` naming condition 1 with its pointer, and an
         `additionalContext` saying no `perl` was on `PATH`, the `PATH` it saw
         and the pointer; exit 0, nothing on stderr.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: with only `sh` linked into the stand-in directory, the command from `.claude/settings.json` printed the SessionStart JSON naming condition 1 with its pointer and the `PATH` it saw; exit 0.
 - [ ] **AC7. A session started on a wrong environment.** From the checkout,
       start Claude Code as `PATH="/usr/bin:/bin:$PATH" claude` (on Windows,
       Git's `/usr/bin` first from Git Bash).
@@ -864,6 +874,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         D16, `CLAUDE_PROJECT_DIR` set to the checkout: the hook's command,
         five runs, 0.35 to 0.37 s, median 0.36 s; the outstanding-state
         sweep, five runs, median 4.28 s.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: the hook's command, five runs, 0.40 to 0.41 s, median 0.40 s; the outstanding-state sweep, five runs, 2.05 to 2.43 s, median 2.23 s.
 
 **Setup (R4, R5)**
 
@@ -878,31 +889,36 @@ scripts, put first on `PATH` to change what one name resolves to.
       - M, 2026-10-23, pass, in an empty throwaway home: after `--validate`
         `$D/calls` was empty (exit 1, condition 8 failing in the empty home);
         after `--repair` it held `brew --prefix` alone (exit 0).
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: stand-ins for `apt-get`, `apt`, `sudo`, `cpanm`, `brew`, `winget`, `pip` and `pip3`; after `--validate` and `--repair` (both exit 0) `$D/calls` was empty.
 - [ ] **AC10. `--repair` adds nothing to a configuration that already works.**
       Seed the throwaway home's shell files with the line `export KEEP=1` and
       the host's own configuration of its tools, as a developer who already
       uses them carries it (macOS: Homebrew's `eval "$(<prefix>/bin/brew
-      shellenv)"` in `.zprofile`; Linux and Windows: what stages 2 and 3
-      establish), copy the files aside, run `HOME="$T" ZDOTDIR="$T" <setup>
+      shellenv)"` in `.zprofile`; Linux: nothing, since the distribution's
+      tools are on its default `PATH` (D3), so `.profile`, `.bash_profile`
+      and `.bashrc` hold `export KEEP=1` alone; Windows: what stage 3
+      establishes), copy the files aside, run `HOME="$T" ZDOTDIR="$T" <setup>
       --repair`, `cmp` each file with its copy.
       Pass when: the check passes and `cmp` reports no difference. M L W.
       - M, 2026-10-23, pass: `.zshenv`, `.zprofile` and `.zshrc` each seeded
         with `export KEEP=1`, `.zprofile` also with Homebrew's line; the shell
         step reported "Nothing to add", the check passed (exit 0), `cmp`
         reported no difference in any of the three.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: `.profile`, `.bash_profile` and `.bashrc` each `export KEEP=1`; `--repair` reported "Yes. Nothing to add.", the check passed (exit 0), `cmp` found no difference.
 - [ ] **AC10a. `--repair` adds exactly the missing piece, once.** Seed the
       throwaway home's shell files with `export KEEP=1` only. Run `HOME="$T"
       ZDOTDIR="$T" <setup> --repair`, copy the files aside, run it again, `cmp`
       each file with its copy.
       Pass when: after the first run each file still holds `export KEEP=1`
       unchanged, the check passes, and the only addition is one delimited
-      piece for what the check reported missing; after the second run `cmp`
-      reports no difference. M L W.
+      piece for what the check reported missing (on Linux none: nothing is
+      missing, D3); after the second run `cmp` reports no difference. M L W.
       - M, 2026-10-23, pass: the first run left `.zshenv` and `.zshrc` as
         `export KEEP=1` alone and appended to `.zprofile` one block, `# >>>
         ltl homebrew >>>`, `eval "$(/opt/homebrew/bin/brew shellenv)"`,
         `# <<< ltl homebrew <<<`; the check passed (exit 0). The second run
         reported "Nothing to add" and `cmp` found no difference.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass, the same run (D3: nothing is missing on Linux): nothing added; a second `--repair` exit 0, `cmp` found no difference in any of the three files.
 - [x] **AC10b. Setup links what it installs, and leaves files it did not put
       there.** macOS, on a host with a formula installed but not linked
       because a `pip` install holds its paths: `./build/macos-setup.sh`.
@@ -924,6 +940,7 @@ scripts, put first on `PATH` to change what one name resolves to.
         developer then removed pip's SciPy (`pip uninstall`) and ran the full
         setup: "[link] Linking scipy", Homebrew reporting 2854 symlinks
         created, and the check passing condition 7 on Python 3.15.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass, the stop case: the full setup with a copy of NumPy in a scratch user `site-packages` exited 1, condition 7 naming the user copy's file; the shell step added nothing; `find` listed nothing newer than the mark in either `site-packages`. Its message first read "a line in the shell configuration puts other tools first", wrong for this cause; it now says the report and its troubleshooting entry show where the cause lies.
 - [ ] **AC11. Every login shell resolves the same tools.** After AC10a's first
       run, for each login mode `-lc` and `-lic`:
       `env -i HOME="$T" ZDOTDIR="$T" zsh <mode> 'command -v perl bash python3'`
@@ -934,12 +951,16 @@ scripts, put first on `PATH` to change what one name resolves to.
         `/opt/homebrew/bin/perl`, `/opt/homebrew/bin/bash`,
         `/opt/homebrew/bin/python3`, links into Homebrew's Cellar; `.zshenv`
         still `export KEEP=1` alone.
-- [ ] **AC12. The Linux setup works without root for Perl modules.** On a
-      Linux host carrying only the distribution's packages, run the Linux
-      setup, then `--validate`.
-      Pass when: `--validate` exits 0, the project's modules are under
-      `~/perl5`, and the setup's output shows no `cpanm` run through `sudo`.
-      L.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: after AC10a's run, `env -i HOME="$T" bash -lc` and `-lic` each printed `/usr/bin/perl /usr/bin/bash /usr/bin/python3`.
+- [ ] **AC12. The Linux setup installs every module from the
+      distribution's packages** (D3, settled in stage 2; first written for
+      `local::lib`, modules under `~/perl5`). On a Debian or Ubuntu host, run
+      `./build/linux-setup.sh --dev-deps`, then `--validate`, then load each
+      cpanfile module and print the file it loads from.
+      Pass when: `--validate` exits 0; every module loads from the Perl's
+      built-in `@INC`, none from `~/perl5`; `PERL5LIB` is unset; no `cpanm`
+      ran. L.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: after `--dev-deps`, `--validate` exit 0; `PERL5LIB` unset; no `~/perl5`; no `cpanm` on the host. Every module loads from the Perl's built-in `@INC`: the cpanfile's from `/usr/share/perl5` and `/usr/lib/x86_64-linux-gnu/perl5/5.40`, the core ones from `perl-base`, `/usr/share/perl/5.40` and `/usr/lib/x86_64-linux-gnu/perl/5.40`.
 
 **The rule (R6, R7, R9)**
 
@@ -961,12 +982,14 @@ scripts, put first on `PATH` to change what one name resolves to.
       `prototype/412-notice-surfaces/capture/specimens.sh` and the full harness
       suite of AC16, capturing stderr; `grep -i brew` the captures.
       Pass when: `grep` finds nothing. L.
+      - L, 2026-10-23, Ubuntu 26.04.1, partial: `prototype/412-notice-surfaces/check-tmux.sh` (scenario `modal-quit`, exit 0) and `capture/specimens.sh` (every case its expected result, against the two known-bad trees taken with `git archive`) each printed nothing matching `brew`. The harness suite part waits for AC16.
 - [ ] **AC15. `ltl` starts through `env perl`.** `./ltl --version`, and on
       Windows `ls /opt/homebrew/bin/perl`.
       Pass when: `ltl` prints its version on every host, and on Windows `ls`
       reports no such file. M L W.
       - M, 2026-10-23, pass: first line `#!/usr/bin/env perl`; `./ltl
         --disable-progress --version` printed `0.20.0-750`.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: `./ltl --disable-progress --version` printed `0.20.0-750`, first line `#!/usr/bin/env perl`.
 - [ ] **AC16. The harness suite passes.** The completion gate's full suite
       (`docs/process/workflow.md` § 3). Pass when: every harness passes. M L.
 
@@ -1355,7 +1378,7 @@ note, 2 n/a.
 | 5 | FAIL | `PERL5LIB` not set; no `~/perl5` |
 | 7 | FAIL | `/usr/bin/python3` imports neither NumPy nor SciPy |
 | 8 | FAIL | every shell mode (`-lc`, `-lic`, `-c`) resolves the same three tools as the check's own `PATH`; fails on condition 7's Python only |
-| 10 | n/a | the Linux screenshot tools are not yet named; this stage establishes them |
+| 10 | n/a | not expected on Linux: the screenshot tool draws its PNG with WebKit on macOS (`features/598-screenshot-capture.md` D23) |
 | 11 | n/a | Windows only, by the conditions table |
 
 Nothing of ltl's is installed on this host: no `~/perl5`, no `local::lib`, no
@@ -1401,10 +1424,17 @@ Runs on this host (Ubuntu 26.04.1), captured in the session's scratchpad:
 | `--repair` | exit 0; "Nothing to add."; 8 pass |
 | an unknown option | usage on stderr, exit 2 |
 
-Open in stage 2: the session-start message's "Likely cause" reads "modules
-were added or upgraded since the setup last ran" on a host where setup never
-ran; condition 10's Linux screenshot tools; the class of AC3a, AC4a and AC10b
-(one tool or module installed two ways) run on this host; the harness suite.
+The session-start message for missing modules read "Likely cause: modules
+were added or upgraded since the setup last ran", wrong on a host where setup
+never ran; it now reads "the setup has not run on this host, or modules were
+added or upgraded since it last ran" (shown with two modules hidden by an
+`@INC` hook). Condition 10 is not expected on Linux: the screenshot tool
+draws its PNG with WebKit on macOS (`features/598-screenshot-capture.md` D23).
+Each Linux test case's result is recorded under it.
+
+Open in stage 2: AC7 (a session started on a wrong `PATH`), the architect's
+to run; AC16 (the harness suite) and AC14's harness part, which need the
+`logs/` corpus, absent from this checkout.
 
 ## Troubleshooting a failed condition
 

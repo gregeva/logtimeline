@@ -488,7 +488,7 @@ sub user_message {
         my $more     = @problems > 1 ? ' (' . ( @problems - 1 ) . ' more in the full report: perl process/check-environment.pl)' : '';
         push @lines, "Environment check: $first$more.";
         if (@missing) {
-            push @lines, 'Likely cause: modules were added or upgraded since the setup last ran.', 'Fix: ' . $run->($full) . '.';
+            push @lines, 'Likely cause: the setup has not run on this host, or modules were added or upgraded since it last ran.', 'Fix: ' . $run->($full) . '.';
         }
         else {
             push @lines, 'Likely cause: a copy installed outside the setup is found first.',

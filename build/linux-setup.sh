@@ -100,8 +100,8 @@ fi
 
 # The shell step of --repair and of the full setup. The distribution's tools
 # are on its default PATH, so the setup has nothing to add to the shell
-# configuration; when a login shell resolves other tools, a line the
-# developer owns puts them first, and the check's report shows which.
+# configuration; when a login shell fails the check, the cause lies in what
+# the developer installed or configured, and the report shows what it found.
 shell_step() {
     echo "[shell] Does a login shell find the tools? (environment check, condition 8)"
     local report
@@ -109,7 +109,7 @@ shell_step() {
         echo "[shell] Yes. Nothing to add."
     else
         printf '%s\n' "$report"
-        echo "[shell] Nothing added: the distribution's tools are on its default PATH, so a line in the shell configuration puts other tools first; the report above shows what a login shell resolves."
+        echo "[shell] Nothing added: the distribution's tools are on its default PATH, so the setup has nothing to add; the report above shows what a login shell resolves, and its troubleshooting entry where the cause lies."
     fi
 }
 

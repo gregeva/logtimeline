@@ -50,6 +50,7 @@ A Full GC loop explored through zooming in on the specific time range, activatin
 # Debian/Ubuntu (installs the distribution's packages with sudo apt-get)
 ./build/linux-setup.sh               # full setup; --dev-deps adds the profiler, --package PAR::Packer
 ./build/linux-setup.sh --validate    # run the environment check, change nothing
+./build/linux-setup.sh --repair      # install nothing; report what a login shell finds (the distribution's tools need no shell configuration)
 ```
 
 ```powershell
