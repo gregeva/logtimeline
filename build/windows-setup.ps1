@@ -5,8 +5,10 @@
 
 .DESCRIPTION
     Installs the toolchain with WinGet, installs the Perl and Python packages the
-    tool and its test harnesses use, and configures Git and Git Bash so the
-    harnesses run. Safe to run again: each step checks before it acts.
+    tool and its development tools use, configures Git and Git Bash so ltl runs
+    from Git Bash with Strawberry Perl, and runs the environment check
+    (process/check-environment.pl). Safe to run again: each step checks before
+    it acts.
 
     Works on AMD64 and ARM64 Windows. WinGet selects the native installer for
     each package. Strawberry Perl publishes x64 only, so on ARM64 it runs under

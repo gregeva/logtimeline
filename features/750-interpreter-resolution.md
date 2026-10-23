@@ -1055,6 +1055,13 @@ scripts, put first on `PATH` to change what one name resolves to.
         `docs/toolchain-guidance.md` § Windows development host, trap 3 (the
         shim), which stage 3 rewrites; the Linux and Windows instructions are
         stages 2 and 3's.
+      - W, 2026-10-24, pass, at stage 3 step 5: the search finds nothing in
+        `README.md`, `CLAUDE.md` or `docs/toolchain-guidance.md`. `README.md`
+        § Install Dependencies names `build/windows-setup.ps1` with
+        `--validate` and `--repair` beside the macOS and Linux setups;
+        `docs/toolchain-guidance.md` § Windows development host names the same
+        three forms, and its traps 3, 4 and 6 describe `env perl`, `BASH_ENV`
+        and the `python3` wrapper.
 
 ## Stage 1 implementation plan (macOS development host)
 
@@ -1687,6 +1694,20 @@ first run; the probe's output is read with `\r\n` turned to `\n`.
 | a wrapper first on `PATH` starting a venv's Python (`--system-site-packages`, so NumPy and SciPy import) | note: "…which starts …/venv/Scripts/python.exe; not the setup's Python" | the same |
 
 The whole check under Git's Perl: 8 pass, 0 FAIL, 0 note, 2 n/a.
+
+### Step 5: the Windows instructions (2026-10-24)
+
+`README.md`: the Windows setup's three forms (full, `--validate`,
+`--repair`); `./ltl` runs from Git Bash with Strawberry Perl in a terminal and
+in Claude Code's hooks alike (the harnesses were said to run there, which
+`docs/toolchain-guidance.md` states they do not); the check by any Perl; the
+`python3` wrapper; `--dev-deps` per host for the profiler.
+`docs/toolchain-guidance.md` § Windows development host: the option forms,
+elevation only when needed, trap 2 with the check run by Git's own Perl,
+trap 3 rewritten (`env perl`, a wrapper in the Git install's `opt` removed),
+trap 4 with `BASH_ENV`, trap 6 with the wrapper. `build/windows-setup.ps1`'s
+own description no longer says the harnesses run. AC20 passes on Windows
+(recorded under it).
 
 ## Troubleshooting a failed condition
 

@@ -55,10 +55,12 @@ A Full GC loop explored through zooming in on the specific time range, activatin
 
 ```powershell
 # Windows, AMD64 or ARM64 (installs with WinGet; asks for administrator approval once)
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1              # full setup; --dev-deps adds the profiler, --package PAR::Packer
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1 --validate   # run the environment check, change nothing
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1 --repair     # install nothing; add to the Git Bash configuration only what is missing
 ```
 
-On Windows the script installs Git, GitHub CLI, jq, Python with NumPy and SciPy, and Strawberry Perl, then configures Git Bash so `./ltl` and the test harnesses run from it. Clone with `git clone -c core.autocrlf=false` so scripts keep their LF line endings. Run `gh auth login` afterwards.
+On Windows the script installs Git, GitHub CLI, jq, Python with NumPy and SciPy, and Strawberry Perl, then configures Git Bash so `./ltl` runs from it with Strawberry Perl, in a terminal and in Claude Code's hooks alike. Clone with `git clone -c core.autocrlf=false` so scripts keep their LF line endings. Run `gh auth login` afterwards, and open a new terminal: a setting the script adds reaches only programs started after it.
 
 #### Test-harness dependencies
 
@@ -66,7 +68,8 @@ The test harnesses, `ltl` and every other script take `perl`, `bash` and `python
 
 ```bash
 ./build/macos-setup.sh --validate      # macOS
-perl process/check-environment.pl      # any host; the same check
+./build/linux-setup.sh --validate      # Debian/Ubuntu
+perl process/check-environment.pl      # any host, with any Perl; the same check
 ```
 
 On macOS, Homebrew's own `brew shellenv` line, which its installer asks you to add to `~/.zprofile`, is what puts its tools first in every login shell. If the check finds a login shell without it, `./build/macos-setup.sh --repair` adds it, once; it never rewrites a line already there.
@@ -77,7 +80,7 @@ Some test harnesses require Python 3, NumPy, and SciPy. A harness that needs one
 
 **macOS:** `./build/macos-setup.sh` installs Homebrew Python with NumPy and SciPy (`brew install python numpy scipy`; Homebrew's NumPy and SciPy do not pull in Homebrew Python themselves). With Homebrew's line in the shell configuration, as above, `python3` is that Python, not the system one.
 
-**Windows:** `build\windows-setup.ps1` installs Python 3.13 through WinGet with NumPy and SciPy. Windows' own `python` is a Microsoft Store stub that installs nothing; open a new terminal after the script so the real one is first on PATH.
+**Windows:** `build\windows-setup.ps1` installs Python 3.13 through WinGet with NumPy and SciPy. The WinGet Python has no `python3`, and Windows' own is a Microsoft Store stub that installs nothing, so the script writes `~/bin/python3`, a one-line wrapper that starts the WinGet Python; the environment check tests that it starts that Python.
 
 **Linux:** `./build/linux-setup.sh` installs the distribution's NumPy and SciPy (`python3-numpy`, `python3-scipy`) for its own `python3`, and the distribution's package for each of the Perl modules `ltl` needs, so nothing is added to the shell configuration. A NumPy or SciPy installed with `pip` shadows the distribution's and fails the environment check.
 
@@ -117,10 +120,15 @@ Not needed for normal development.
 **Profiling tools:** performance work uses `Devel::NYTProf`, which is declared as a development-only dependency. Install it once:
 
 ```bash
-./build/macos-setup.sh --dev-deps
+./build/macos-setup.sh --dev-deps        # macOS
+./build/linux-setup.sh --dev-deps        # Debian/Ubuntu
 ```
 
-Run the same command after `brew upgrade perl`. Homebrew installs CPAN modules per Perl minor version, inside that version's own directory, so an upgrade leaves your modules behind rather than migrating them; nothing is broken, they simply are not visible to the new Perl.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1 --dev-deps   # Windows (Strawberry Perl ships the profiler)
+```
+
+On macOS, run the same command after `brew upgrade perl`. Homebrew installs CPAN modules per Perl minor version, inside that version's own directory, so an upgrade leaves your modules behind rather than migrating them; nothing is broken, they simply are not visible to the new Perl.
 
 Verify the install landed for the Perl that will run the profiler:
 
