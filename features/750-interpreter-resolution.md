@@ -4,11 +4,10 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: in progress; stage 1 (the macOS development host) complete on
-2026-10-23, on the issue branch `750-interpreter-resolution`, and work
-stopped there: stage 2 needs the Linux development host.
-Stage 1's steps 0 to 5 are done on two macOS hosts and each test case run on
-macOS is recorded under it; § Resuming says where to start, what stage 1
+Status: in progress, on the issue branch `750-interpreter-resolution`.
+Stage 1 (the macOS development host) and stage 2 (the Linux development
+host) complete on 2026-10-23; stage 3 needs the Windows development host.
+Each test case run on macOS and Linux is recorded under it; § Resuming says where to start, what stage 1
 leaves to the later stages, and the state this work left outside the
 repository. What is in place before this work is recorded as found, not as
 the contract: most of it was put in piecemeal to get past a problem at the
@@ -16,22 +15,22 @@ time, and the analysis is expected to challenge it.
 
 ## Resuming
 
-Stage 1 has nothing open. Its last items, done 2026-10-23: the release build
-on the issue branch (§ Step 3, its CI bullet); AC7, a session started on a
-wrong `PATH` (under AC7); the Perl keg measurement and AC19's macOS build,
-from a second macOS host (§ Step 3, the Perl keg line; AC19).
+Stages 1 and 2 have nothing open. Stage 2 (§ Stage 2: the Linux development
+host) settled D3 as the distribution's packages, wrote
+`build/linux-setup.sh`, retired condition 5, and ran every Linux test case.
 
-**Next: stage 2, on the Linux development host.** Check out
+**Next: stage 3, on the Windows development host.** Check out
 `750-interpreter-resolution`, read this document, and plan the stage there
 before taking its steps (§ Phase 4: investigation stages, one per
 environment): run `perl process/check-environment.pl` first and record what
-the Linux column reports on a host as found. The standing description of the
-check, the setup per host and the troubleshooting entries is
-`docs/development-environment.md`; its Linux row names no setup until stage 2
-writes one.
+the Windows column reports on a host as found. The standing description of
+the check, the setup per host and the troubleshooting entries is
+`docs/development-environment.md`. AC16 on Windows, as on Linux, is every
+harness starting, never the full suite.
 
-Stages 2 (Linux), 3 (Windows) and 4 (the container builds) are each planned
-on their own host before their steps are taken. What stage 1 leaves to them:
+Stages 3 (Windows) and 4 (the container builds) are each planned on their own
+host before their steps are taken. What stages 1 and 2 leave to them (the
+Linux items below are done in stage 2):
 
 - `process/check-environment.pl` has its Linux and Windows columns written
   from the conditions table and not yet run; `run_capture` is the one place a
@@ -500,8 +499,8 @@ records what it finds here before the next.
 
 | Stage | Host | What it establishes |
 |---|---|---|
-| 1 | macOS development host | the check script, the session-start hook, `build/macos-setup.sh` with `--repair` and `--validate`, the rule applied to every script; the harness suite passes |
-| 2 | Linux development host | a new Linux setup script (the distribution's Perl, `local::lib`), the check's Linux column, the screenshot tools on Linux; the harness suite passes |
+| 1 | macOS development host | the check script, the session-start hook, `build/macos-setup.sh` with `--repair` and `--validate`, the rule applied to every script |
+| 2 | Linux development host | a new Linux setup script (the distribution's packages, D3), the check's Linux column, the screenshot tools on Linux (not expected), every harness starting under it (AC16) |
 | 3 | Windows development host | `build/windows-setup.ps1` with `--repair` and `--validate`, the check under Git Bash, `./ltl` through `env perl` with no shim, the hooks, the profiler with `--dev-deps`, the option set parsed by PowerShell |
 | 4 | the container builds | `build/windows-package.sh` (Wine) and `build/ubuntu-package.sh` build as before, with the develop block in `build/cpanfile.windows` |
 
@@ -990,10 +989,11 @@ scripts, put first on `PATH` to change what one name resolves to.
         `tests/profile/results/`).
 - [ ] **AC14. No message about Homebrew where there is none.** On Linux, run
       `prototype/412-notice-surfaces/check-tmux.sh`,
-      `prototype/412-notice-surfaces/capture/specimens.sh` and the full harness
-      suite of AC16, capturing stderr; `grep -i brew` the captures.
+      `prototype/412-notice-surfaces/capture/specimens.sh` and every harness
+      as AC16 starts it on Linux, capturing stderr; `grep -i brew` the
+      captures.
       Pass when: `grep` finds nothing. L.
-      - L, 2026-10-23, Ubuntu 26.04.1, partial: `prototype/412-notice-surfaces/check-tmux.sh` (scenario `modal-quit`, exit 0) and `capture/specimens.sh` (every case its expected result, against the two known-bad trees taken with `git archive`) each printed nothing matching `brew`. The harness suite part waits for AC16.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: `prototype/412-notice-surfaces/check-tmux.sh` (scenario `modal-quit`, exit 0) and `capture/specimens.sh` (every case its expected result, against the two known-bad trees taken with `git archive`) each printed nothing matching `brew`; nor did the 53 harnesses started with `--list` (AC16's Linux run).
 - [ ] **AC15. `ltl` starts through `env perl`.** `./ltl --version`, and on
       Windows `ls /opt/homebrew/bin/perl`.
       Pass when: `ltl` prints its version on every host, and on Windows `ls`
@@ -1001,8 +1001,21 @@ scripts, put first on `PATH` to change what one name resolves to.
       - M, 2026-10-23, pass: first line `#!/usr/bin/env perl`; `./ltl
         --disable-progress --version` printed `0.20.0-750`.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: `./ltl --disable-progress --version` printed `0.20.0-750`, first line `#!/usr/bin/env perl`.
-- [ ] **AC16. The harness suite passes.** The completion gate's full suite
-      (`docs/process/workflow.md` § 3). Pass when: every harness passes. M L.
+- [ ] **AC16. The harness suite passes, and every harness starts on each
+      host it runs on.** macOS: the completion gate's full suite
+      (`docs/process/workflow.md` § 3), run once, after stage 4; pass when
+      every harness passes. Linux: what this work changes there is how a
+      harness finds bash, Perl and Python, so each `tests/validate-*.sh` is
+      started with `--list` under the Linux setup; pass when each starts
+      (lists its scenarios, or stops at its own check for a corpus file, past
+      the interpreter guard) and none prints anything matching `brew`. No
+      stage runs the full suite; on the Linux host the `logs/` corpus is not
+      available. M L. (First written as the full suite on both hosts, which
+      contradicts `CLAUDE.md`'s rule that the full suite runs once, as the
+      completion gate; corrected by the architect in stage 2.)
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: 53 harnesses started; 41 listed
+        their scenarios, 12 stopped at their own "not found" check for a
+        corpus file; `grep -i brew` found nothing.
 
 **Profiling and packaging (R8)**
 
@@ -1444,9 +1457,9 @@ draws its PNG with WebKit on macOS (`features/598-screenshot-capture.md` D23).
 Each Linux test case's result is recorded under it.
 
 AC7 (a session started on a wrong `PATH`) passed, run by the architect.
+AC16's Linux part (every harness starts) and AC14 passed.
 
-Open in stage 2: AC16 (the harness suite) and AC14's harness part, which need the
-`logs/` corpus, absent from this checkout.
+Stage 2 complete, 2026-10-23: every Linux test case passes.
 
 ## Troubleshooting a failed condition
 
