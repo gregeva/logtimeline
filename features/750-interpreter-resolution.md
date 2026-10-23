@@ -99,7 +99,8 @@ the others are read from the scripts and wait for a run on their host.
 |---|---|---|---|---|---|
 | Developer's interactive zsh, macOS | `~/.zshrc`: `brew shellenv`, then the Perl keg prepended | Homebrew | Homebrew 5 | Homebrew | measured |
 | A non-interactive zsh started from a clean environment, macOS, login or not | `/etc/paths` through `path_helper`: `/usr/bin` and `/bin` come before `/opt/homebrew/bin`, which `/etc/paths.d/homebrew` appends | `/usr/bin/perl` | `/bin/bash` 3.2 | `/usr/bin/python3` | measured |
-| The agent's Bash tool | inherits the environment of the process that started Claude Code; in this session a terminal's interactive shell | Homebrew | Homebrew 5 | Homebrew | measured, this session only |
+| The agent's Bash tool | runs the user's login shell (`$SHELL`, here `/bin/zsh -c`), not bash, despite its name; each command first sources a snapshot Claude Code writes at session start (`~/.claude/shell-snapshots/snapshot-zsh-*.sh`), whose last line exports the `PATH` of the shell that started Claude Code (here an interactive login `-zsh`). No rc file is read per command, so the `PATH` is fixed for the session | Homebrew | Homebrew 5 | Homebrew | measured, this session |
+| A script the agent runs, by its `env bash` shebang or as `bash script` | a non-interactive bash, which reads no rc file and inherits the `PATH` above | from `PATH` | Homebrew 5 | from `PATH` | read |
 | Claude Code hooks | Claude Code's environment; `perl` named explicitly for the two Perl hooks, `session-start.sh` by its `env bash` shebang | from `PATH` | from `PATH` | n/a | read |
 | git pre-commit hook | git's environment, `#!/usr/bin/env bash` | n/a | from `PATH` | n/a | read |
 | A harness starting `ltl` | `"$LTL"`, so `ltl`'s first line: `/opt/homebrew/bin/perl`, whatever `PATH` holds | fixed path | n/a | n/a | read |
