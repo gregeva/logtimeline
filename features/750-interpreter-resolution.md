@@ -6,33 +6,29 @@ the environment setup and fails where Homebrew is absent). Parent: #729
 
 Status: in progress, on the issue branch `750-interpreter-resolution`.
 Stage 1 (the macOS development host) and stage 2 (the Linux development
-host) complete on 2026-10-23, stage 3 (the Windows development host) on
-2026-10-24; stage 4 (the container builds) is next. Each test case run on
-each host is recorded under it; § Resuming says where to start, what is left
-to stage 4 and the completion gate, and the state this work left outside the
-repository. What is in place before this work is recorded as found, not as
+host) complete on 2026-10-23, stage 3 (the Windows development host) and
+stage 4 (the container builds) on 2026-10-24; the completion gate is
+next. Each test case run on each host is recorded under it; § Resuming says
+where to start, what the completion gate runs, and the state this work left
+outside the repository. What is in place before this work is recorded as found, not as
 the contract: most of it was put in piecemeal to get past a problem at the
 time, and the analysis is expected to challenge it.
 
 ## Resuming
 
-Stages 1, 2 and 3 have nothing open. Stage 3 (§ Stage 3: the Windows
+Stages 1 to 4 have nothing open. Stage 4 (§ Stage 4: the container builds)
+made tmux required on macOS and Linux, with macOS setup installing it (D20),
+and built the two Ubuntu binaries and the Windows one in their containers,
+none carrying the profiler (AC19). Stage 3 (§ Stage 3: the Windows
 development host) gave the check a Windows story and made it run under any
-Perl (the Windows hook runs it with Git's own), wrote Windows setup's
-`--repair` and `--validate` with `BASH_ENV` (D17), removed the
-`/opt/homebrew/bin/perl` wrapper, put the develop block in
-`build/cpanfile.windows`, made condition 7 judge the Python the wrapper
-starts, rewrote the Windows instructions, fixed the write guard for Windows
-paths, settled D18 (condition 8's severity per tool) and D19 (Git for
-Windows' `.bash_profile`), and ran every Windows test case.
+Perl, wrote Windows setup's `--repair` and `--validate` with `BASH_ENV`
+(D17), removed the `/opt/homebrew/bin/perl` wrapper, put the develop block in
+`build/cpanfile.windows`, and settled D18 (condition 8's severity per tool)
+and D19 (Git for Windows' `.bash_profile`).
 
-**Next: stage 4, the container builds**, on a host with Docker. Plan the
-stage there before taking its steps (§ Phase 4: investigation stages, one per
-environment): `build/windows-package.sh` (Strawberry Perl under Wine) and
-`build/ubuntu-package.sh` build as before with the develop block now in
-`build/cpanfile.windows`, and no binary carries the profiler (AC19, its C
-part). The standing description of the check, the setup per host and the
-troubleshooting entries is `docs/development-environment.md`.
+**Next: the completion gate.** The standing description of the check, the
+setup per host and the troubleshooting entries is
+`docs/development-environment.md`.
 
 Not run on Linux since stage 3 changed the files all hosts share:
 `process/check-environment.pl` (the Windows launcher, `run_capture_windows`,
@@ -1059,6 +1055,12 @@ scripts, put first on `PATH` to change what one name resolves to.
         `build/macos-package.sh arm64` from a clean login shell; `unzip -l`
         lists 148 entries, none naming `Devel/NYTProf`. C (the CI builds)
         is stage 4's.
+      - C, 2026-10-24, pass, at stage 4, from Rancher Desktop on a macOS
+        development host: with `build/cpanfile.windows` carrying the develop
+        block, `build/ubuntu-package.sh arm64` and `amd64` and
+        `build/windows-package.sh` each built; `unzip -l` lists 147, 147 and
+        533 entries, none naming `Devel/NYTProf`, though Strawberry Perl ships
+        it.
 
 **The records (R10)**
 
@@ -1815,6 +1817,36 @@ shell step added nothing, and the final check read 9 pass, 0 FAIL, 0 note,
 tmux, and the condition's change is the severity alone. GitHub's macOS
 runner now installs tmux in `--package`'s full setup before the check that
 ends it.
+
+### The container builds (2026-10-24)
+
+Run on the second macOS development host (Apple silicon), Rancher Desktop's
+engine, at `a5e9226b`, as `.github/workflows/release-build.yml` runs them:
+
+- `cd build && ./generate-cpanfile.sh`, exit 0: `git status` shows
+  `build/cpanfile` and `build/cpanfile.windows` unchanged, the Windows one
+  with its develop block.
+- `./build/ubuntu-package.sh arm64` and `amd64` first stopped at `apt-get
+  install`, each within about 33 seconds: the container could not connect to
+  `ports.ubuntu.com:80` or `archive.ubuntu.com:80`, run straight after the
+  engine started. Environmental: an `apt-get update` in an `ubuntu:20.04`
+  container then succeeded, and both rebuilds passed: arm64 natively in 25
+  seconds, amd64 under emulation in 98; each printed `Version: 0.20.0-750` and
+  passed the build's read-path check. cpanm's `--installdeps .` found the
+  runtime modules only (Term::ReadKey, the YAML::PP modules, Devel::Size,
+  Text::CSV_PP, Text::CSV).
+- `./build/windows-package.sh` (amd64 under Wine, emulated), 161 seconds:
+  Strawberry Perl 5.42.3.1, PAR::Packer 1.064 already present in it;
+  `--cpanfile cpanfile.windows --installdeps .` installed two distributions
+  (Devel-Size 0.87, YAML-PP 0.43.0); the `.exe` printed `Version:
+  0.20.0-750` under Wine and passed the read-path check.
+- `unzip -l` of each binary: Ubuntu arm64 147 entries, Ubuntu amd64 147,
+  Windows 533; `grep -c NYTProf` 0 in each (AC19, C). Strawberry Perl ships
+  Devel::NYTProf in `perl/vendor/lib` (AC17), and `pp` still packs none of
+  it: `ltl` does not load it.
+
+Stage 4 has nothing open. Not run: the builds on GitHub's runners, which run
+these scripts unchanged; the next `v*` tag runs them.
 
 ## Troubleshooting a failed condition
 
