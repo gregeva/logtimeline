@@ -202,7 +202,11 @@ Profiling works on Windows too: a Windows development host (set up by
 `build/windows-setup.ps1`, whose `-DevDeps` switch asks for the development-only modules)
 profiles as macOS and Linux do. The Windows build is unaffected, because cpanm resolves the
 develop phase only when passed `--with-develop`, which `build/windows-package.sh` does not
-pass. The change is made under #750 (scripts find bash and Perl from the environment the
+pass, and because its `pp` call (`wine ... perl.exe -S pp -o ... ltl`) carries no inclusion
+flag, so the D5 reasoning ("The packagers cannot pick it up") holds for the Windows
+packager as it does for the other two: `pp` bundles what `ltl` loads, and `ltl` never
+names the profiler. Read from the scripts on 2026-10-23, not yet shown by a build. The
+change is made under #750 (scripts find bash and Perl from the environment the
 setup prepared).
 
 *The decision as first taken (delegated), superseded by the amendment above:*
