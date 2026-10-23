@@ -4,8 +4,9 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: **parked by the architect, 2026-10-23, at the end of stage 1** (the
-macOS development host), on the issue branch `750-interpreter-resolution`.
+Status: in progress; work stopped for the day on 2026-10-23 at the end of
+stage 1 (the macOS development host), on the issue branch
+`750-interpreter-resolution`.
 Stage 1's steps 0 to 5 are done and each test case run on macOS is recorded
 under it; § Resuming lists what is open, in order, and the state this work
 left outside the repository. What is in place before this work is recorded as
