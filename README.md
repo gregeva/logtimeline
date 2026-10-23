@@ -138,7 +138,7 @@ Not needed for normal development.
 **Profiling tools:** performance work uses `Devel::NYTProf`, which is declared as a development-only dependency. Install it once:
 
 ```bash
-LTL_INSTALL_DEV_DEPS=1 ./build/macos-setup.sh
+./build/macos-setup.sh --dev-deps
 ```
 
 Run the same command after `brew upgrade perl`. Homebrew installs CPAN modules per Perl minor version, inside that version's own directory, so an upgrade leaves your modules behind rather than migrating them; nothing is broken, they simply are not visible to the new Perl.

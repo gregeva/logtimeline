@@ -10,8 +10,9 @@ environment and setup never overwrites the user's shell configuration (D12,
 D6 as changed, D13, condition 8 retired); stage 1 (the macOS development
 host) planned in § Stage 1 implementation plan; steps 0 (the `before`
 benchmark), 1 (`process/check-environment.pl`) and 2 (the session-start
-hook) done, AC8's budget set (D14); next step 3
-(`build/macos-setup.sh`). Open, measured in stage 1: what still needs the
+hook) done, AC8's budget set (D14); step 3 (`build/macos-setup.sh`) built
+and its throwaway-home cases passing, its Perl keg measurement and CI run
+waiting on the architect. Open, measured in stage 1: what still needs the
 Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
 provides on macOS). What is in
 place today is recorded as found, not as the contract: most of it was put in
@@ -683,6 +684,9 @@ scripts, put first on `PATH` to change what one name resolves to.
       same with `--repair`.
       Pass when: `$D/calls` holds no line other than `brew --prefix` and
       `brew shellenv`. M L W.
+      - M, 2026-10-23, pass, in an empty throwaway home: after `--validate`
+        `$D/calls` was empty (exit 1, condition 8 failing in the empty home);
+        after `--repair` it held `brew --prefix` alone (exit 0).
 - [ ] **AC10. `--repair` adds nothing to a configuration that already works.**
       Seed the throwaway home's shell files with the line `export KEEP=1` and
       the host's own configuration of its tools, as a developer who already
@@ -691,6 +695,10 @@ scripts, put first on `PATH` to change what one name resolves to.
       establish), copy the files aside, run `HOME="$T" ZDOTDIR="$T" <setup>
       --repair`, `cmp` each file with its copy.
       Pass when: the check passes and `cmp` reports no difference. M L W.
+      - M, 2026-10-23, pass: `.zshenv`, `.zprofile` and `.zshrc` each seeded
+        with `export KEEP=1`, `.zprofile` also with Homebrew's line; the shell
+        step reported "Nothing to add", the check passed (exit 0), `cmp`
+        reported no difference in any of the three.
 - [ ] **AC10a. `--repair` adds exactly the missing piece, once.** Seed the
       throwaway home's shell files with `export KEEP=1` only. Run `HOME="$T"
       ZDOTDIR="$T" <setup> --repair`, copy the files aside, run it again, `cmp`
@@ -699,12 +707,21 @@ scripts, put first on `PATH` to change what one name resolves to.
       unchanged, the check passes, and the only addition is one delimited
       piece for what the check reported missing; after the second run `cmp`
       reports no difference. M L W.
+      - M, 2026-10-23, pass: the first run left `.zshenv` and `.zshrc` as
+        `export KEEP=1` alone and appended to `.zprofile` one block, `# >>>
+        ltl homebrew >>>`, `eval "$(/opt/homebrew/bin/brew shellenv)"`,
+        `# <<< ltl homebrew <<<`; the check passed (exit 0). The second run
+        reported "Nothing to add" and `cmp` found no difference.
 - [ ] **AC11. Every login shell resolves the same tools.** After AC10a's first
       run, for each login mode `-lc` and `-lic`:
       `env -i HOME="$T" ZDOTDIR="$T" zsh <mode> 'command -v perl bash python3'`
       (bash on Linux; on Windows the Git Bash modes stage 3 establishes).
       Pass when: each login mode prints the paths conditions 2, 6 and 7
       expect, and AC10a added nothing to `.zshenv`. M L W.
+      - M, 2026-10-23, pass: `-lc` and `-lic` each printed
+        `/opt/homebrew/bin/perl`, `/opt/homebrew/bin/bash`,
+        `/opt/homebrew/bin/python3`, links into Homebrew's Cellar; `.zshenv`
+        still `export KEEP=1` alone.
 - [ ] **AC12. The Linux setup works without root for Perl modules.** On a
       Linux host carrying only the distribution's packages, run the Linux
       setup, then `--validate`.
@@ -853,16 +870,30 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   `PATH` exports and `GITHUB_PATH` lines for its own run and CI as today; then
   the shell step, then the check, exiting with its status.
 - **The shell step** (`--repair`, and the full setup's; D12, D6): run the
-  check; when condition 8 passes, add nothing. When it fails, read a clean
-  login shell's `PATH` (`env -i … /bin/zsh -lc 'echo $PATH'`): if
-  `$(brew --prefix)/bin` is absent from it, Homebrew's line is the missing
-  piece, and it is appended once to `${ZDOTDIR:-$HOME}/.zprofile` between the
-  markers the Windows setup already uses (`# >>> ltl homebrew >>>`,
-  `# <<< ltl homebrew <<<`), as `eval "$(<prefix>/bin/brew shellenv)"` with
-  the prefix written out. If the markers are already there, or Homebrew's
-  `bin` is on that `PATH` but behind other entries, nothing is added: the
-  cause lies in a line the user owns, and the check's report shows it. Then
-  run the check again.
+  check; when condition 8 passes, add nothing. When it fails, ask a clean
+  login shell (`env -i … /bin/zsh -lc`) for `HOMEBREW_PREFIX`, which
+  Homebrew's own line (`brew shellenv`) exports: when it is unset, Homebrew's
+  line is the missing piece, and it is appended once to
+  `${ZDOTDIR:-$HOME}/.zprofile` between the markers the Windows setup already
+  uses (`# >>> ltl homebrew >>>`, `# <<< ltl homebrew <<<`), as
+  `eval "$(<prefix>/bin/brew shellenv)"` with the prefix written out. If the
+  markers are already there, or a login shell already has `HOMEBREW_PREFIX`,
+  nothing is added: the cause lies in a line the user owns, and the check's
+  report shows it. Then run the check again.
+- **Why `HOMEBREW_PREFIX`, measured on macOS, 2026-10-23:** the rule first
+  written here took Homebrew's line as missing when `$(brew --prefix)/bin` was
+  absent from a clean login shell's `PATH`. On this host that rule adds
+  nothing: `/etc/paths.d/homebrew` holds `/opt/homebrew/bin`, so `path_helper`
+  puts it on every clean login shell's `PATH`, behind `/usr/bin`, while
+  condition 8 fails. A clean login shell here has no `HOMEBREW_PREFIX`;
+  `brew shellenv` (Homebrew 7.0.10) exports it along with `PATH`. The
+  variable tells whether Homebrew's own line ran, whoever wrote it, where
+  `PATH` cannot.
+- **Paths no criterion reaches, run on macOS, 2026-10-23:** `.zprofile`
+  holding the block followed by `export PATH=/usr/bin:/bin:$PATH`, and
+  holding Homebrew's line followed by the same: nothing added, the file
+  unchanged, the check's report showing the cause, exit 1. A `.zprofile`
+  without a final newline: the block added on lines of its own.
 - **The Perl keg line:** with PAR::Packer installed for Homebrew Perl (this
   host has none for 5.44; asked of the architect before installing), build the
   binary from a clean login shell carrying only Homebrew's line
