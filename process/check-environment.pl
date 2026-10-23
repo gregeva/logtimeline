@@ -188,6 +188,20 @@ sub expectation {
 
 my %measured;
 
+# Started with python3 for condition 7: one tab-separated line per module, its
+# name, the resolved file it loads from, whether that file is in the user's
+# site-packages (where pip --user installs), and every installed copy of it
+# Python can see on sys.path, as version@metadata-directory, joined by ";".
+# On every host, a module from the user's site-packages or one installed more
+# than once is a copy that did not come from the setup alone.
+my $python_modules = join "\n",
+    'import os, site, importlib, importlib.metadata as md',
+    'user = os.path.normcase(os.path.realpath(site.getusersitepackages())) + os.sep',
+    'for n in ("numpy", "scipy"):',
+    '    f = os.path.normcase(os.path.realpath(importlib.import_module(n).__file__))',
+    '    found = sorted({(d.version, os.path.realpath(str(getattr(d, "_path", "")))) for d in md.distributions() if (d.metadata["Name"] or "").lower() == n})',
+    '    print("\t".join([n, f, str(f.startswith(user)), ";".join(v + "@" + p for v, p in found)]))';
+
 # Whether a tool meets what this host's setup provides, and what was found.
 # What is measured by starting the tool is remembered by its resolved path, so
 # a tool reached twice is started once. A python3 outside its place is not
@@ -208,18 +222,26 @@ sub judge {
         return ( $ok, describe( $tool, $version // 'version not read' ) );
     }
     return ( 0, describe($tool) ) unless $in_place;
-    my ( $status, $out ) = $measure->( sub {
-        run_capture( $tool->{path}, '-B', '-c',
-            'import os, numpy, scipy; print(os.path.realpath(numpy.__file__)); print(os.path.realpath(scipy.__file__))' );
-    } );
+    my ( $status, $out ) = $measure->( sub { run_capture( $tool->{path}, '-B', '-c', $python_modules ) } );
     return ( 0, describe($tool) . '; NumPy or SciPy does not import' ) if $status != 0;
-    my %from;
-    @from{qw(numpy scipy)} = split /\n/, $out;
     my $modules = $place && $place->{modules};
-    my @outside = grep { $modules && !$modules->( $_, $from{$_} // '' ) } qw(numpy scipy);
-    return ( 1, describe($tool) . '; NumPy and SciPy import' ) unless @outside;
     my %label = ( numpy => 'NumPy', scipy => 'SciPy' );
-    return ( 0, describe($tool) . '; ' . join( ', ', map { "$label{$_} loads from $from{$_}" } @outside ) );
+    my @wrong;
+    for ( split /\n/, $out ) {
+        my ( $name, $file, $in_user_site, $installs ) = split /\t/, $_, -1;
+        my @installs = grep { length } split /;/, $installs // '';
+        if ( $in_user_site eq 'True' ) {
+            push @wrong, "$label{$name} loads from the user's site-packages, $file";
+        }
+        elsif ( $modules && !$modules->( $name, $file ) ) {
+            push @wrong, "$label{$name} loads from $file";
+        }
+        if ( @installs > 1 ) {
+            push @wrong, "$label{$name} is installed " . scalar(@installs) . ' times: ' . join( ', ', map { s/\@/ in /r } @installs );
+        }
+    }
+    return ( 1, describe($tool) . '; NumPy and SciPy import' ) unless @wrong;
+    return ( 0, describe($tool) . '; ' . join( '; ', @wrong ) );
 }
 
 # --- The conditions -----------------------------------------------------------

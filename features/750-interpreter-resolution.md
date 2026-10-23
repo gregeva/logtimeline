@@ -41,11 +41,11 @@ one per environment). What stage 1 leaves to them:
 - `process/check-environment.pl` has its Linux and Windows columns written
   from the conditions table and not yet run; `run_capture` is the one place a
   tool is started, for stage 3 to adapt to Strawberry Perl. Condition 7's
-  `modules` test (D15) exists for macOS only; stages 2 and 3 give their host
-  entries in `%place` theirs, once their setups say where NumPy and SciPy
-  are installed, and each reproduces its host's column of § Phase 4:
-  investigation stages, the scenarios of one tool installed two ways, under
-  AC4a and AC10b.
+  user-site and installed-twice tests (D15) run on every host; its `modules`
+  place test exists for macOS only. Stages 2 and 3 run their host's column
+  of § Phase 4: investigation stages, one tool or module installed two ways,
+  under AC4a and AC10b, and stage 3 closes the Windows gap named there (an
+  interpreter judged by its wrapper's path).
 - `README.md`'s Linux and Windows instructions, and `docs/toolchain-guidance.md`
   § Windows development host (trap 3, the shim at Git's
   `/opt/homebrew/bin/perl`, now unused by `./ltl`), are stages 2 and 3's to
@@ -275,7 +275,7 @@ by trusting the Perl the check runs under.
 | 4 | it loads the development-only modules (the profiler) | when installed (`--dev-deps`) | when installed (`--dev-deps`) | when installed (`--dev-deps`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
 | 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
-| 7 | `python3` on `PATH` imports NumPy and SciPy, each from the setup's install (D15) | Homebrew's, not `/usr/bin/python3`; each module's file resolves into its own formula's Cellar | the distribution's; the modules' place established in the Linux stage | the WinGet Python; the modules' place established in the Windows stage | fail where the harnesses run, note on Windows |
+| 7 | `python3` on `PATH` imports NumPy and SciPy, each from the setup's install (D15) | Homebrew's, not `/usr/bin/python3`; each module's file resolves into its own formula's Cellar; on every host, neither module from the user's `site-packages` nor installed more than once | the distribution's; the modules' place established in the Linux stage | the WinGet Python; the modules' place established in the Windows stage | fail where the harnesses run, note on Windows |
 | 8 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7; the report also shows, for context, what a new terminal tab (an interactive login shell) and a plain non-login shell resolve | `zsh -lc`; `~/.zprofile` (D6) | a login bash | a Git Bash login shell | fail |
 | 9 | `tmux` is on `PATH` | expected | expected | not expected | note |
 | 10 | the screenshot tools are present | `swiftc` (Xcode command line tools) | established in the Linux stage | not expected | note |
@@ -503,23 +503,26 @@ records what it finds here before the next.
 | 3 | Windows development host | `build/windows-setup.ps1` with `--repair` and `--validate`, the check under Git Bash, `./ltl` through `env perl` with no shim, the hooks, the profiler with `--dev-deps`, the option set parsed by PowerShell |
 | 4 | the container builds | `build/windows-package.sh` (Wine) and `build/ubuntu-package.sh` build as before, with the develop block in `build/cpanfile.windows` |
 
-**Scenarios each stage reproduces: one tool or module installed two ways.**
+**One tool or module installed two ways: what detects it on each host.**
 Found on a second macOS host whose Python was set up by hand (§ Step 5, the
 second host): a check that a tool runs and a module imports passes while the
-copy that wins is not the setup's. Each stage reproduces its host's forms of
-this, on that host, in a throwaway home or a stand-in directory where it can,
-and records under AC4a and AC10b what the check and the setup do. The forms
-below for Linux and Windows are read, not measured; the stage confirms or
-replaces them. Stage 4's containers run no harness and install into a fresh
-image, so none of these forms arises there.
+copy that wins is not the setup's. The check detects the class on every host
+now, without waiting for a stage to find it there: for Python, a module from
+the user's `site-packages` and a module installed more than once fail
+condition 7 on every host (D15), and each host's place test adds what only
+that host's layout can tell. The forms for Linux and Windows are read, not
+measured; stages 2 and 3 run them on their hosts under AC4a and AC10b. Stage
+4's containers run no harness and install into a fresh image, so none of
+these forms arises there.
 
-| Form | macOS (stage 1, measured) | Linux (stage 2) | Windows (stage 3) |
-|---|---|---|---|
-| the setup's interpreter is installed but another comes first | Homebrew's Python present only as a versioned formula another formula needs, so no `python3` link, and `/usr/bin/python3` first | a `python3` from pyenv, conda or Homebrew on Linux ahead of the distribution's | the Microsoft Store stub, or another Python, ahead of the WinGet Python; a Python that provides `python` and `py` but no `python3` |
-| a module installed outside the setup's install shadows the setup's | `pip` into Homebrew Python's `site-packages`, ahead of the formula's (SciPy 1.17.1 over 1.18.1) | `pip install --user` into `~/.local/lib/python3.X/site-packages`, or `sudo pip` into `/usr/local/lib/python3.X/dist-packages`, ahead of the distribution's packages | `pip install --user` into the user's `site-packages` under `%APPDATA%\Python`, ahead of the install's own |
-| the setup's package is installed but not in effect | a formula installed but not linked, its paths held by files put there another way | a `pip` copy of a module the distribution's package also provides | a module installed for one Python version while `PATH` reaches another |
-| the setup's default moved past what is installed | Homebrew's `python` alias names 3.15 while the modules were on 3.14 | a distribution upgrade changing `python3`'s minor version under `--user` installs | WinGet upgrading Python to a new minor version, leaving `pip` modules on the old one |
-| the same for Perl (condition 3 judges loading, not where from) | a Homebrew Perl upgrade across a minor version leaving the modules in the old keg (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism) | a module in `~/perl5` (`local::lib`) and the distribution's `lib*-perl` package at different versions | Strawberry Perl reinstalled or upgraded, its `site\lib` modules from the earlier one |
+| Form | macOS | Linux | Windows | Detected by |
+|---|---|---|---|---|
+| another interpreter comes first | Homebrew's Python only as a versioned formula, so no `python3` link and `/usr/bin/python3` first (measured) | a `python3` from pyenv, conda or Homebrew on Linux ahead of the distribution's | another Python ahead of the setup's; the Microsoft Store stub | the place test of condition 7 on macOS and Linux; on Windows, an import failing (the stub runs no Python). **Not detected on Windows:** another Python that imports both modules, since `python3` there is setup's wrapper script in `~/bin` and the place test reads the path, not the interpreter the wrapper starts; stage 3 |
+| a module installed outside the setup's install shadows the setup's | `pip` into Homebrew Python's `site-packages` (measured) | `pip install --user` over the distribution's packages | `pip install --user` over the install's own `site-packages` | every host: a module from the user's `site-packages`; a module installed more than once. macOS also: a module outside its formula's Cellar |
+| a stale copy left beside the setup's | `pip`'s NumPy metadata left under Homebrew's files (measured) | a `pip` copy beside the distribution's package | a second copy after a reinstall | every host: a module installed more than once |
+| the setup's package installed but not in effect | a formula installed but not linked (measured) | the distribution's package present, another copy first | modules installed for one Python while `PATH` reaches another | every host: an import failing, or a module installed more than once; macOS setup's link step names the files in the way |
+| the setup's default moved past what is installed | Homebrew's `python` alias names 3.15 while the modules were on 3.14 (measured) | a distribution upgrade changing `python3`'s minor version | WinGet upgrading Python, leaving the modules on the old one | every host: an import failing on the Python now first |
+| the same for Perl | a Homebrew Perl upgrade across a minor version leaving the modules in the old keg (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism) | a module in `~/perl5` and the distribution's `lib*-perl` package at different versions | Strawberry Perl reinstalled, its `site\lib` from the earlier one | condition 3 when a module no longer loads. **Not detected:** a module that loads from a copy outside the setup's install; condition 3 judges loading, not where from |
 
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
 
@@ -649,7 +652,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D12 | The check judges the environment, whatever configured it; setup never overwrites or duplicates the user's shell configuration, and adds a piece only when `--repair` (or the full setup's shell step) finds it missing | architect |
 | D13 | Homebrew is a requirement of the macOS development host: `build/macos-setup.sh` stops when it is absent, as today, and never installs it. The case in D12's first wording, setup adding Homebrew's line after installing Homebrew itself, therefore does not arise | architect |
 | D14 | AC8's budget: the session-start check finishes within the outstanding-state sweep's time on the same host. The two SessionStart entries run in parallel, so the check then never lengthens session start, and each host is judged against itself rather than against a figure measured on macOS (decided 2026-10-23 from the stage 1 measurement: check 0.29 s, sweep 3.40 s, medians of five) | architect |
-| D15 | Condition 7 also judges where NumPy and SciPy load from: each module's file must resolve into the setup's install (on macOS its own formula's Cellar), so a `pip` install shadowing the setup's fails it. Decided 2026-10-23 from a second macOS host, where a `python3` link to Homebrew's Python passed condition 7 while it loaded a pip-installed SciPy 1.17.1 over Homebrew's unlinked 1.18.1 (§ Step 5). Linux and Windows name their place in their stages | architect |
+| D15 | Condition 7 also judges where NumPy and SciPy load from: each module's file must resolve into the setup's install (on macOS its own formula's Cellar), so a `pip` install shadowing the setup's fails it. Decided 2026-10-23 from a second macOS host, where a `python3` link to Homebrew's Python passed condition 7 while it loaded a pip-installed SciPy 1.17.1 over Homebrew's unlinked 1.18.1 (§ Step 5). Linux and Windows name their place in their stages. Directed by the architect the same day, so the class is detected on every host now rather than when a stage finds it: on every host a module loaded from the user's `site-packages` (where `pip --user` installs), or a module Python sees installed more than once on `sys.path`, fails condition 7 | architect |
 
 ## Acceptance criteria
 
@@ -731,6 +734,16 @@ scripts, put first on `PATH` to change what one name resolves to.
         it passed. The code before D15 passed the first run. The host as it
         stands reads as before, condition 7 naming `/usr/bin/python3`; the
         full check took 0.16 s before and after (medians of five).
+      - M, 2026-10-23, pass, the tests every host runs, on the same host with
+        stand-ins: a copy of Homebrew's NumPy in a scratch user
+        `site-packages` (`PYTHONUSERBASE`) failed, "NumPy loads from the
+        user's site-packages, …" and "NumPy is installed 2 times"; a
+        `python3` link to Homebrew's 3.14 failed with "NumPy is installed 2
+        times: 2.4.6 in …/numpy-2.4.6.dist-info, 2.5.4 in
+        …/numpy-2.5.4.dist-info" and SciPy outside its Cellar; Python 3.15
+        with Homebrew's SciPy on `PYTHONPATH` passed. The full check took
+        0.35 s against 0.29 s before (medians of five, this host now
+        starting Homebrew's Python 3.15), inside D14's budget.
 - [ ] **AC5. The check writes nothing.** `T=$(mktemp -d)`, then, a second
       later, `M=$(mktemp)`; then `HOME="$T" ZDOTDIR="$T" perl
       process/check-environment.pl`, then `find "$T" -newer "$M"` and
@@ -1245,7 +1258,7 @@ Two things hold for every entry:
 | 4 | note: the profiler is not installed | expected unless setup ran with `--dev-deps`; the same upgrade cause as 3 applies |
 | 5 | Linux: `PERL5LIB` does not carry `~/perl5` | the line that sets it missing from a file this context reads, as for 2 |
 | 6 | the first `bash` is older than 4 | the system's bash ahead of the setup's; macOS's `/bin/bash` is 3.2. Same `PATH` causes as 2 |
-| 7 | `python3` does not import NumPy or SciPy, or loads one from outside the setup's install | another Python ahead of the setup's (macOS `/usr/bin/python3`; on Windows the Microsoft Store stub), or the modules installed for a different Python than the one on `PATH`; on macOS, Homebrew's Python present only as a versioned formula another formula depends on, which links `python3.x` and no `python3`, so `/usr/bin/python3` comes first; or a module installed with `pip` into Homebrew Python's `site-packages`, which shadows the formula's own and can leave the formula unlinked (the report names the file the module loads from; `brew link --dry-run <formula>` shows what is not linked) |
+| 7 | `python3` does not import NumPy or SciPy, or loads one from outside the setup's install | on every host, a `pip install --user` copy (the report names the user's `site-packages`), or a second copy of a module (the report lists each with its version and metadata directory; on macOS a `pip` install overwritten by Homebrew's formula leaves `pip`'s metadata behind, and `pip uninstall` removes every path in that metadata's `RECORD`, which Homebrew's files now occupy: read, not run); another Python ahead of the setup's (macOS `/usr/bin/python3`; on Windows the Microsoft Store stub), or the modules installed for a different Python than the one on `PATH`; on macOS, Homebrew's Python present only as a versioned formula another formula depends on, which links `python3.x` and no `python3`, so `/usr/bin/python3` comes first; or a module installed with `pip` into Homebrew Python's `site-packages`, which shadows the formula's own and can leave the formula unlinked (the report names the file the module loads from; `brew link --dry-run <formula>` shows what is not linked) |
 | 8 | a login shell from a clean environment resolves different tools | the lines that put the tools first are in a file a login shell does not read (on macOS, `~/.zshrc` alone, which only an interactive shell reads: the report then shows a new tab right and a login shell wrong), or another file read after them reorders `PATH`; compare the modes as § Phase 4: where macOS setup writes its shell configuration did. `--repair` adds the missing piece to `~/.zprofile`. When every mode resolves the same tool as the `PATH` the check saw, the shell files are not the cause: the failure repeats condition 2's, 6's or 7's, and that entry applies |
 | 9 | note: no `tmux` | the terminal-interface navigation tests cannot run on this host |
 | 10 | note: no screenshot tools | screenshot capture cannot run on this host |
