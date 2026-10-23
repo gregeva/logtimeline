@@ -4,11 +4,14 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: specification reopened on the issue branch `750-interpreter-resolution`
-(2026-10-23) for the architect's direction that setup never overwrites the
-user's shell configuration (§ The architect's framing); investigation stage 1
-(the macOS development host, § Phase 4: investigation stages, one per
-environment) resumes once the reworked records are agreed. What is in
+Status: specification reworked on the issue branch `750-interpreter-resolution`
+(2026-10-23) for the architect's direction that the check judges the
+environment and setup never overwrites the user's shell configuration (D12,
+D6 as changed, D13, condition 8 retired); next, implementation planning for
+investigation stage 1 (the macOS development host, § Phase 4: investigation
+stages, one per environment). Open, measured in stage 1: what still needs the
+Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
+provides on macOS). What is in
 place today is recorded as found, not as the contract: most of it was put in
 piecemeal to get past a problem at the time, and the analysis is expected to
 challenge it.
@@ -53,7 +56,9 @@ challenge it.
   its configuration in their shell files, so setup does not overwrite that
   configuration or add a redundant copy of it. Adding a piece is legitimate
   when `--repair` runs and the check has found that piece missing, or when
-  setup itself installed Homebrew.
+  setup itself installed Homebrew. The architect then settled that Homebrew
+  is a requirement of the macOS host: setup stops when it is absent and never
+  installs it (D13), so only the first case arises.
 
 ## What it is for
 
@@ -326,7 +331,7 @@ right.
 
 | Mode | Installs | Writes the shell configuration | Runs the check |
 |---|---|---|---|
-| full setup (no switch) | yes | Homebrew's own line only when this run installed Homebrew; otherwise as `--repair` | yes, last |
+| full setup (no switch) | yes | as `--repair` | yes, last |
 | `--repair` | no | only the pieces the check found missing, each added once | yes, before writing and after |
 | `--validate` | no | no | yes |
 
@@ -509,8 +514,9 @@ Written in the specification stage; the architect closed the stage without a lin
   check judges whether the shell configuration resolves the expected tools,
   whoever wrote its lines. Setup never rewrites, removes or duplicates a line
   the user already has. It adds a piece only when the check reports that piece
-  missing (`--repair`, and the full setup's shell step), or, for Homebrew's
-  own line, when the same run installed Homebrew. Each addition is delimited,
+  missing (`--repair`, and the full setup's shell step, which is the same).
+  Homebrew is a requirement of the macOS host, not something setup installs
+  (D13). Each addition is delimited,
   so that a later run recognises it and adds nothing. On macOS, Homebrew's
   own line already meets the Perl, bash and Python conditions (§ Phase 4: what
   Homebrew's own configuration already provides on macOS); the Perl keg line
@@ -551,7 +557,8 @@ Written in the specification stage; the architect closed the stage without a lin
 | D8 | The environment check is its own SessionStart hook entry | delegated |
 | D10 | No harness for this work. The acceptance criteria are test cases written out in this document; the developer runs each one by hand on the hosts it names, at that host's stage, and records the result under it | architect |
 | D11 | The check reports what it expected, what it found and the context it ran in, and points at the failed condition's entry in this document's § Troubleshooting a failed condition; it carries no remedies, and the agent or developer reading it works out the cause on the host from that entry | architect |
-| D12 | The check judges the environment, whatever configured it; setup never overwrites or duplicates the user's shell configuration, and adds a piece only when `--repair` (or the full setup's shell step) finds it missing, or Homebrew's own line when the same run installed Homebrew | architect |
+| D12 | The check judges the environment, whatever configured it; setup never overwrites or duplicates the user's shell configuration, and adds a piece only when `--repair` (or the full setup's shell step) finds it missing | architect |
+| D13 | Homebrew is a requirement of the macOS development host: `build/macos-setup.sh` stops when it is absent, as today, and never installs it. The case in D12's first wording, setup adding Homebrew's line after installing Homebrew itself, therefore does not arise | architect |
 
 ## Acceptance criteria
 
