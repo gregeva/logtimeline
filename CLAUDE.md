@@ -95,6 +95,10 @@ about anything else, these still hold.
 
 ### At session start, or whenever context begins mid-stream
 
+- [ ] A failed environment check in the session-start context is the first
+      reply's subject, whatever the architect sent: read the troubleshooting
+      entries its pointers name, find the cause on this host, and give the
+      cause and the step that fixes it.
 - [ ] Reconstruct outstanding state before anything else: `gh pr list --state open`,
       `git branch -a --no-merged main`, `./process/issue-status.sh list`, uncommitted
       or unpushed work in every worktree. Everything found is potentially this

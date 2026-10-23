@@ -239,7 +239,8 @@ my $python_modules = join "\n",
     '    found = sorted({(d.version, os.path.realpath(str(getattr(d, "_path", "")))) for d in md.distributions() if (d.metadata["Name"] or "").lower() == n})',
     '    print("\t".join([n, f, str(f.startswith(user)), ";".join(v + "@" + p for v, p in found)]))';
 
-# Whether a tool meets what this host's setup provides, and what was found.
+# Whether a tool meets what this host's setup provides, what was found, and
+# whether the tool is the setup's own (in its place).
 # What is measured by starting the tool is remembered by its resolved path, so
 # a tool reached twice is started once. A python3 outside its place is not
 # started: on macOS /usr/bin/python3 is a stub that may offer to install the
@@ -251,16 +252,16 @@ sub judge {
     my $measure  = sub { my ($code) = @_; $measured{"$name $tool->{real}"} //= [ $code->() ]; @{ $measured{"$name $tool->{real}"} } };
     if ( $name eq 'perl' ) {
         my ($version) = $measure->( sub { perl_version($tool) } );
-        return ( $in_place, describe( $tool, $version ) );
+        return ( $in_place, describe( $tool, $version ), $in_place );
     }
     if ( $name eq 'bash' ) {
         my ($version) = $measure->( sub { bash_version($tool) } );
         my $ok = $in_place && defined $version && ( split /\./, $version )[0] >= 4;
-        return ( $ok, describe( $tool, $version // 'version not read' ) );
+        return ( $ok, describe( $tool, $version // 'version not read' ), $in_place );
     }
-    return ( 0, describe($tool) ) unless $in_place;
+    return ( 0, describe($tool), 0 ) unless $in_place;
     my ( $status, $out ) = $measure->( sub { run_capture( $tool->{path}, '-B', '-c', $python_modules ) } );
-    return ( 0, describe($tool) . '; NumPy or SciPy does not import' ) if $status != 0;
+    return ( 0, describe($tool) . '; NumPy or SciPy does not import', $in_place ) if $status != 0;
     my $modules = $place && $place->{modules};
     my %label = ( numpy => 'NumPy', scipy => 'SciPy' );
     my @wrong;
@@ -277,8 +278,8 @@ sub judge {
             push @wrong, "$label{$name} is installed " . scalar(@installs) . ' times: ' . join( ', ', map { s/\@/ in /r } @installs );
         }
     }
-    return ( 1, describe($tool) . '; NumPy and SciPy import' ) unless @wrong;
-    return ( 0, describe($tool) . '; ' . join( '; ', @wrong ) );
+    return ( 1, describe($tool) . '; NumPy and SciPy import', $in_place ) unless @wrong;
+    return ( 0, describe($tool) . '; ' . join( '; ', @wrong ), $in_place );
 }
 
 # --- The conditions -----------------------------------------------------------
@@ -305,8 +306,8 @@ sub test_tool {
     my ( $name, $severity ) = @_;
     my $expected = expectation($name);
     my $tool = tool($name) or return missing_tool( $name, $severity, $expected );
-    my ( $ok, $found ) = judge( $name, $tool );
-    return $ok ? passed( found => $found ) : { result => $severity, expected => $expected, found => $found };
+    my ( $ok, $found, $in_place ) = judge( $name, $tool );
+    return $ok ? passed( found => $found ) : { result => $severity, expected => $expected, found => $found, in_place => $in_place };
 }
 
 sub test_modules {
@@ -443,6 +444,71 @@ my @conditions = (
       tests => { windows => \&test_autocrlf } },
 );
 
+# --- The message shown to the user at session start ------------------------
+#
+# What is wrong, the likely scenario, and the command to run, read from the
+# failed conditions. A wrong tool first on PATH (conditions 1, 2, 5, and 6 or
+# 7 outside the setup's place) is this session's PATH when a clean login shell
+# finds the right ones (condition 8 passes), the shell configuration when it
+# does not. Otherwise, the right tool with modules missing or from elsewhere
+# (conditions 3, 6 and 7 in place) is the install. The troubleshooting
+# pointers stay in the agent's context.
+
+my %setup = (
+    macos   => { full => './build/macos-setup.sh', repair => './build/macos-setup.sh --repair' },
+    windows => { full => 'powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1' },
+);
+
+sub user_message {
+    my ($result) = @_;
+    my $fails = sub { ( $result->{ $_[0] }{result} // '' ) eq 'FAIL' };
+    my %tool  = ( 1 => 'perl', 2 => 'perl', 6 => 'bash', 7 => 'python3' );
+    my @path    = grep { $fails->($_) && ( $_ == 1 || $_ == 2 || $_ == 5 || ( ( $_ == 6 || $_ == 7 ) && !$result->{$_}{in_place} ) ) } 1, 2, 5, 6, 7;
+    my @install = grep { $fails->($_) && ( $_ == 3 || ( ( $_ == 6 || $_ == 7 ) && $result->{$_}{in_place} ) ) } 3, 6, 7;
+    my $full   = $setup{$host}{full};
+    my $repair = $setup{$host}{repair} // $full;
+    my $run    = sub { defined $_[0] ? "run $_[0]" : 'follow the install steps in README.md' };
+    my @lines;
+    # A login shell that starts the same tool shares its install fault, so
+    # condition 8 names the shell configuration only beside a wrong tool, or
+    # alone.
+    my $shell = $fails->(8) && ( @path || !@install );
+    if ( @path || $shell ) {
+        my $what = @path
+            ? 'this session finds ' . join( '; ', map { $_ == 5 ? 'PERL5LIB without ~/perl5' : "$tool{$_} $result->{$_}{found}" } @path )
+            : 'this session finds the right tools, but a new terminal does not';
+        push @lines, "Environment check: $what.";
+        if ($shell) {
+            push @lines, 'Likely cause: the shell configuration does not put the development tools first in a new terminal.',
+                'Fix: ' . $run->($repair) . ', then start Claude Code from a new terminal.';
+        }
+        else {
+            push @lines, "Likely cause: Claude Code was started with a PATH that differs from a new terminal's, which finds the right tools.",
+                'Fix: quit Claude Code, open a new terminal, and start it there.';
+        }
+    }
+    elsif (@install) {
+        my @problems = map { ( my $f = $result->{$_}{found} ) =~ s/ \(perl: [^)]*\)$//; grep { !m{^/} } split /; /, $f } @install;
+        my @missing  = grep { /does not (?:load|import)/ } @problems;
+        my @another  = grep { !/does not (?:load|import)|^\d+ of \d+ do not/ } @problems;
+        my $first    = ( @missing ? $missing[0] : $another[0] ) // $problems[0];
+        my $more     = @problems > 1 ? ' (' . ( @problems - 1 ) . ' more in the full report: perl process/check-environment.pl)' : '';
+        push @lines, "Environment check: $first$more.";
+        if (@missing) {
+            push @lines, 'Likely cause: modules were added or upgraded since the setup last ran.', 'Fix: ' . $run->($full) . '.';
+        }
+        else {
+            push @lines, 'Likely cause: a copy installed outside the setup is found first.',
+                'Fix: remove that copy (a pip install, or the PERL5LIB entry that adds it), then start Claude Code again.';
+        }
+    }
+    if ( $fails->(11) ) {
+        push @lines, 'Environment check: this clone checks files out with CRLF line endings.',
+            'Fix: clone the repository again with git clone -c core.autocrlf=false.';
+    }
+    return join "\n", @lines;
+}
+
 # --- Main -------------------------------------------------------------------
 
 my ( $hook, $only, $help );
@@ -479,11 +545,12 @@ my @lines = (
     'PATH:   ' . ( $ENV{PATH} // '' ),
     '',
 );
-my ( %count, @failed );
+my ( %count, @failed, %result );
 for my $c (@conditions) {
     next if %wanted && !$wanted{ $c->{n} };
     my $test = $c->{tests}{$host};
     my $r = $test ? $test->() : { result => 'n/a' };
+    $result{ $c->{n} } = $r;
     $count{ $r->{result} }++;
     push @lines, sprintf '%2d  %-4s  %s', $c->{n}, $r->{result}, $c->{title};
     if ( $r->{result} eq 'FAIL' || $r->{result} eq 'note' ) {
@@ -500,9 +567,13 @@ my $report = join( "\n", @lines ) . "\n";
 
 if ($hook) {
     my %out = ( hookSpecificOutput => { hookEventName => 'SessionStart', additionalContext => $report } );
-    $out{systemMessage} = 'Environment check: ' . scalar(@failed) . ' condition' . ( @failed == 1 ? '' : 's' )
-        . " failed\n" . join( "\n", map {"  $_"} @failed )
-        if @failed;
+    if (@failed) {
+        $out{systemMessage} = user_message( \%result );
+        $out{hookSpecificOutput}{additionalContext} =
+            "Act on this in your first reply, before anything else: for each FAIL read the entry its pointer names, "
+            . "work out the cause on this host, and tell the user the cause and the step that fixes it. "
+            . "The user was shown:\n$out{systemMessage}\n\n$report";
+    }
     print JSON::PP->new->canonical->encode( \%out ), "\n";
     exit 0;
 }

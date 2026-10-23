@@ -648,7 +648,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D7 | The one rule and its exceptions; `require-bash.sh` stays as a guard with a host-neutral message | delegated |
 | D8 | The environment check is its own SessionStart hook entry | delegated |
 | D10 | No harness for this work. The acceptance criteria are test cases written out in this document; the developer runs each one by hand on the hosts it names, at that host's stage, and records the result under it | architect |
-| D11 | The check reports what it expected, what it found and the context it ran in, and points at the failed condition's entry in this document's § Troubleshooting a failed condition; it carries no remedies, and the agent or developer reading it works out the cause on the host from that entry | architect |
+| D11 | The check reports what it expected, what it found and the context it ran in, and points at the failed condition's entry in this document's § Troubleshooting a failed condition; it carries no remedies, and the agent or developer reading it works out the cause on the host from that entry. Amended by the architect 2026-10-23, after AC7: at session start the user is shown a short message naming what is wrong, the likely scenario and the command to run; the pointers go only to the agent, whose context tells it to diagnose the failure in its first reply | architect |
 | D12 | The check judges the environment, whatever configured it; setup never overwrites or duplicates the user's shell configuration, and adds a piece only when `--repair` (or the full setup's shell step) finds it missing | architect |
 | D13 | Homebrew is a requirement of the macOS development host: `build/macos-setup.sh` stops when it is absent, as today, and never installs it. The case in D12's first wording, setup adding Homebrew's line after installing Homebrew itself, therefore does not arise | architect |
 | D14 | AC8's budget: the session-start check finishes within the outstanding-state sweep's time on the same host. The two SessionStart entries run in parallel, so the check then never lengthens session start, and each host is judged against itself rather than against a figure measured on macOS (decided 2026-10-23 from the stage 1 measurement: check 0.29 s, sweep 3.40 s, medians of five) | architect |
@@ -802,10 +802,11 @@ scripts, put first on `PATH` to change what one name resolves to.
 - [ ] **AC7. A session started on a wrong environment.** From the checkout,
       start Claude Code as `PATH="/usr/bin:/bin:$PATH" claude` (on Windows,
       Git's `/usr/bin` first from Git Bash).
-      Pass when: the user sees the failed conditions, each with its pointer;
-      asked what the environment check reported, the agent answers from its
-      context; and, asked to find the cause, it reads the entries the pointers
-      name and identifies the `PATH` order as the cause. M L W.
+      Pass when: the user sees what is wrong, the likely scenario (Claude
+      Code started with a `PATH` that differs from a new terminal's) and the
+      step that fixes it; and the agent's first reply, to whatever the user
+      sends, reads the entries the pointers name and reports the `PATH` order
+      as the cause. M L W.
       - M, 2026-10-23, on a second macOS development host, the session
         started by the architect on a broken `PATH` (Homebrew's `bin` after
         `/usr/bin` and `/bin`, no Perl keg): the hook's report reached the
@@ -1036,8 +1037,10 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   § Troubleshooting a failed condition, <n>`; a last line counting each
   result. Exit 0 with no `FAIL`, 1 with any, 2 on a usage error.
 - **Options:** `--hook` prints the SessionStart JSON
-  (`hookSpecificOutput.additionalContext` carries the whole report; a
-  `systemMessage` lists each failed condition with its pointer, and is absent
+  (`hookSpecificOutput.additionalContext` carries the whole report, preceded,
+  when a condition fails, by an instruction to the agent to diagnose it in its
+  first reply; a `systemMessage`, shown to the user, names what is wrong, the
+  likely scenario and the command to run (D11 as amended), and is absent
   when nothing fails) and exits 0; `--condition N[,N...]` runs only those
   conditions, for the profiling preflight (step 4); `-h`, `--help`. An unknown
   option prints usage to stderr and exits 2 having tested nothing.
@@ -1312,7 +1315,9 @@ belong to stages 2 to 4.
 ## Troubleshooting a failed condition
 
 The check points here (D11). It reports what it expected, what it found, the
-Perl it ran under and the `PATH` it saw; it does not say what to do. Work out
+Perl it ran under and the `PATH` it saw; it does not say what to do. (At
+session start the user is shown a likely scenario and a command, D11 as
+amended; the agent works from this section.) Work out
 the cause on the host from what the report shows and what each entry below
 says, then fix the cause, not the symptom: no script is edited to name an
 interpreter, and no `PATH` line is added by hand outside setup's managed
