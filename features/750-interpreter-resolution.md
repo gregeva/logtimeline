@@ -184,7 +184,7 @@ Not yet locked; the shape the design is being worked toward.
   `python3` on `PATH` imports NumPy and SciPy, and the host-limited tools
   (tmux, the screenshot tools) are present where they are expected.
 
-### Phase 4: the expected conditions (draft, for the architect's review)
+### Phase 4: the expected conditions (agreed by the architect, 2026-10-23)
 
 One list; a cell names the per-host alternative where hosts differ. "Fail"
 stops the session-start report at a problem to fix; "note" reports without
@@ -219,6 +219,34 @@ on a Windows host.
 
 Condition 9 is the measured fault of phase 1: the Homebrew interpreters were
 set up only in `~/.zshrc`, read by interactive shells alone.
+
+### Phase 4: where macOS setup writes its shell configuration (measured)
+
+The same block (`brew shellenv`, then the Perl keg prepended) placed in a
+throwaway `ZDOTDIR` and each zsh mode started from a clean environment on the
+macOS development host, 2026-10-23:
+
+| Block in | `zsh -c` | `zsh -lc` (login) | `zsh -ic` (interactive) | `zsh -lic` (terminal tab) |
+|---|---|---|---|---|
+| `.zshenv` only | Homebrew | `/usr/bin/perl` | Homebrew | `/usr/bin/perl` |
+| `.zprofile` only | `/usr/bin/perl` | Homebrew | `/usr/bin/perl` | Homebrew |
+| both | Homebrew | Homebrew | Homebrew | Homebrew |
+
+`.zshenv` alone loses every login shell, because `/etc/zprofile` runs
+`path_helper` after it and puts `/usr/bin` back in front; `.zprofile` alone
+misses every shell that is not a login shell. Only the block in both files
+meets condition 9 in every mode, so macOS setup writes its managed block into
+both `~/.zshenv` and `~/.zprofile`.
+
+### Phase 4: re-running setup is not safe for the shell configuration
+
+`brew install --help`: "Unless $HOMEBREW_NO_INSTALL_UPGRADE is set, brew
+install formula will upgrade formula if it is already installed but
+outdated." Re-running `build/macos-setup.sh` to repair the shell
+configuration can therefore upgrade Perl across a minor version, which leaves
+its CPAN modules behind (544 § Machine state and mechanism). The architect's
+condition is that setup never reinstalls anything to put the configuration
+right.
 
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
 
