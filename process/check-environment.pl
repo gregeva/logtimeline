@@ -374,6 +374,11 @@ sub judge {
 
 sub passed { return { result => 'pass', @_ } }
 
+# The severity of a wrong perl, bash or python3: that of conditions 2, 6 and 7,
+# which condition 8 shares. Python is a note on Windows, where the harnesses do
+# not run.
+my %tool_severity = ( perl => 'FAIL', bash => 'FAIL', python3 => $host eq 'windows' ? 'note' : 'FAIL' );
+
 sub missing_tool {
     my ( $name, $severity, $expected ) = @_;
     return { result => $severity, expected => $expected, found => "no $name on PATH" };
@@ -452,26 +457,29 @@ sub resolved_in_clean_shell {
 
 # Condition 8: a login shell started from a clean environment resolves tools
 # that meet conditions 2, 6 and 7, whatever this check's own PATH holds. A new
-# terminal tab and a plain shell are shown beside it, not judged.
+# terminal tab and a plain shell are shown beside it, not judged. Each tool's
+# fault is reported at the severity of the condition that owns it (D18), so a
+# note where that condition is a note.
 sub test_clean_login_shell {
     my ( $shell, $file_hint ) = @_;
     my @names = qw(perl bash python3);
     my @modes = ( [ 'login (-lc)', '-lc' ], [ 'new terminal tab (-lic)', '-lic' ], [ 'plain, not a login (-c)', '-c' ] );
     my %resolved = map { $_->[0] => resolved_in_clean_shell( "/bin/$shell", $_->[1] ) } @modes;
-    my ( @wrong, %login_ok );
+    my ( @wrong, %login_ok, $severity );
     for my $name (@names) {
         my $tool = $resolved{'login (-lc)'}{$name};
-        if ( !$tool ) { push @wrong, "no $name"; next }
-        my ( $ok, $found ) = judge( $name, $tool );
+        my ( $ok, $found ) = $tool ? judge( $name, $tool ) : ( 0, undef );
         $login_ok{$name} = $ok;
-        push @wrong, "$name $found" unless $ok;
+        next if $ok;
+        push @wrong, $tool ? "$name $found" : "no $name";
+        $severity = $tool_severity{$name} unless ( $severity // '' ) eq 'FAIL';
     }
     my $show = sub { my ($t) = @_; $t ? $t->{real} : 'none' };
     my @context = ( sprintf '%-28s %s', 'on the PATH this check saw:', join '  ', map { "$_=" . $show->( tool($_) ) } @names );
     push @context, map { my $m = $_->[0]; sprintf '%-28s %s', "$m:", join '  ', map { "$_=" . $show->( $resolved{$m}{$_} ) } @names } @modes;
     my $expected = "a login $shell started from a clean environment resolves perl, bash and python3 as conditions 2, 6 and 7 expect ($file_hint)";
     return passed( context => \@context, login_ok => \%login_ok ) unless @wrong;
-    return { result => 'FAIL', expected => $expected, found => 'the login shell resolves ' . join( '; ', @wrong ), context => \@context, login_ok => \%login_ok };
+    return { result => $severity, expected => $expected, found => 'the login shell resolves ' . join( '; ', @wrong ), context => \@context, login_ok => \%login_ok };
 }
 
 sub test_on_path {
@@ -503,7 +511,7 @@ my @conditions = (
     { n => 1, title => 'a perl is on PATH',
       tests => { macos => \&test_perl_on_path, linux => \&test_perl_on_path, windows => \&test_perl_on_path } },
     { n => 2, title => 'it is the development Perl, not another on the host',
-      tests => { macos => sub { test_tool( 'perl', 'FAIL' ) }, linux => sub { test_tool( 'perl', 'FAIL' ) }, windows => sub { test_tool( 'perl', 'FAIL' ) } } },
+      tests => { macos => sub { test_tool( 'perl', $tool_severity{perl} ) }, linux => sub { test_tool( 'perl', $tool_severity{perl} ) }, windows => sub { test_tool( 'perl', $tool_severity{perl} ) } } },
     { n => 3, title => 'it loads every runtime module the cpanfile requires',
       tests => {
           macos   => sub { test_modules( 'cpanfile', 0, 'FAIL' ) },
@@ -517,9 +525,9 @@ my @conditions = (
           windows => sub { test_modules( 'cpanfile.windows', 1, 'note' ) },
       } },
     { n => 6, title => 'bash on PATH is 4 or later',
-      tests => { macos => sub { test_tool( 'bash', 'FAIL' ) }, linux => sub { test_tool( 'bash', 'FAIL' ) }, windows => sub { test_tool( 'bash', 'FAIL' ) } } },
+      tests => { macos => sub { test_tool( 'bash', $tool_severity{bash} ) }, linux => sub { test_tool( 'bash', $tool_severity{bash} ) }, windows => sub { test_tool( 'bash', $tool_severity{bash} ) } } },
     { n => 7, title => 'python3 on PATH imports NumPy and SciPy',
-      tests => { macos => sub { test_tool( 'python3', 'FAIL' ) }, linux => sub { test_tool( 'python3', 'FAIL' ) }, windows => sub { test_tool( 'python3', 'note' ) } } },
+      tests => { macos => sub { test_tool( 'python3', $tool_severity{python3} ) }, linux => sub { test_tool( 'python3', $tool_severity{python3} ) }, windows => sub { test_tool( 'python3', $tool_severity{python3} ) } } },
     { n => 8, title => 'a login shell from a clean environment resolves the same tools',
       tests => {
           macos   => sub { test_clean_login_shell( 'zsh', '~/.zprofile' ) },

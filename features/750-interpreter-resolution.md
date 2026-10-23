@@ -658,6 +658,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D15 | Condition 7 also judges where NumPy and SciPy load from: each module's file must resolve into the setup's install (on macOS its own formula's Cellar), so a `pip` install shadowing the setup's fails it. Decided 2026-10-23 from a second macOS host, where a `python3` link to Homebrew's Python passed condition 7 while it loaded a pip-installed SciPy 1.17.1 over Homebrew's unlinked 1.18.1 (§ Step 5). Linux and Windows name their place in their stages. Directed by the architect the same day, so the class is detected on every host now rather than when a stage finds it: on every host a module loaded from the user's `site-packages` (where `pip --user` installs), or a module Python sees installed more than once on `sys.path`, fails condition 7 | architect |
 | D16 | Condition 3 (and 4, the profiler) also judges where each module loads from, on every host: a module whose file lies outside the Perl's built-in `@INC` (the one it was built with, without what `PERL5LIB` or `PERLLIB` add) and the setup's own directory (on Linux `~/perl5`, D3) fails, as does one with two copies on `@INC` outside the core directories. A dual-life module upgraded over its core copy counts once. Decided by the architect 2026-10-23, extending D15 to Perl | architect |
 | D17 | Windows setup sets `BASH_ENV` to `~/.bashrc` as a user environment variable, so the plain Git Bash shell Claude Code runs its hooks in reads the managed block that puts Strawberry Perl first; and the check's session-start message has a Windows story of its own for every failure, rather than falling to the branches written for macOS and Linux. Decided by the architect 2026-10-24, from § Stage 3, the check on this host as found | architect |
+| D18 | Condition 8 reports each tool's fault at the severity of the condition that owns it: 2 for perl, 6 for bash, 7 for python3. A Python fault in a login shell is therefore a note on Windows, as condition 7 is there, and a failure on macOS and Linux, as before. Decided by the architect 2026-10-24, from stage 3's AC10b run, where the full setup exited 1 on condition 8 over a stray NumPy that condition 7 reported as a note | architect |
 
 ## Acceptance criteria
 
@@ -1743,11 +1744,15 @@ Changes to `process/check-environment.pl` the runs brought out:
 
 Observations, not changed:
 
-- **The same stray Python module is a note under condition 7 and a failure
+- **The same stray Python module was a note under condition 7 and a failure
   under condition 8 on Windows.** Condition 7 is a note there (the conditions
-  table: "fail where the harnesses run, note on Windows"); condition 8 judges
-  the login shell's `python3` with condition 7's place and reports at its own
+  table: "fail where the harnesses run, note on Windows"); condition 8 judged
+  the login shell's `python3` with condition 7's place and reported at its own
   severity, a failure. AC10b's run: the full setup exited 1 on condition 8.
+  Settled by D18: each tool's severity is stated once (`%tool_severity`) and
+  conditions 2, 6, 7 and 8 read it. Rerun under Git's Perl and Strawberry
+  Perl: a stray NumPy is a note under 7 and 8, exit 0; a login shell finding
+  Git's Perl still fails condition 8; the host as set up, 8 pass.
 - **Git for Windows writes `~/.bash_profile` from a login shell** when only
   `~/.bashrc` exists (AC5, partial). Setup's own `.bash_profile` step then
   finds a file reading `~/.bashrc` and adds nothing.
