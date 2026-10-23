@@ -37,13 +37,21 @@ BUILD_DIR="$(cd "$SCRIPT_DIR/../../build" && pwd)"   # the cpanfile and its deve
 
 PROFILER_MODULE="Devel::NYTProf::Data"
 HTML_TOOL="nytprofhtml"
-INSTALL_COMMAND="cd build && cpanm --notest --installdeps --with-develop ."
 CHECK_ENVIRONMENT="$SCRIPT_DIR/../../process/check-environment.pl"
 POINTER="see: docs/development-environment.md § Troubleshooting a failed condition"
+# Each host's setup, run with --dev-deps, installs cpanm and the profiler; Windows
+# has its own cpanfile.
+CPANFILE="cpanfile"
 case "$(uname -s)" in
-    Darwin) SETUP_COMMAND="./build/macos-setup.sh --dev-deps" ;;   # installs cpanm and the profiler
-    *)      SETUP_COMMAND="" ;;
+    Darwin) SETUP_COMMAND="./build/macos-setup.sh --dev-deps" ;;
+    Linux)  SETUP_COMMAND="./build/linux-setup.sh --dev-deps" ;;
+    MINGW* | MSYS* | CYGWIN*)
+        SETUP_COMMAND='powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1 --dev-deps'
+        CPANFILE="cpanfile.windows"
+        ;;
+    *) SETUP_COMMAND="" ;;
 esac
+INSTALL_COMMAND="cd build && cpanm --notest --cpanfile $CPANFILE --installdeps --with-develop ."
 
 RESOLVED_PERL=""
 RESOLVED_HTML_TOOL=""
@@ -75,21 +83,25 @@ check_profiler_module() {
 
 # --- Check 3: the HTML report tool resolves ----------------------------------
 # cpanm installs scripts into the running Perl's own script directory, which
-# Homebrew does not link onto PATH. Asking the interpreter where it installs
-# scripts answers for the interpreter that will run, whatever version it is.
-# `perl -S` is the fallback for a setup where scripts do land on PATH.
+# Homebrew does not link onto PATH; a distribution that bundles the profiler
+# (Strawberry Perl) has it in its vendor or core script directory. Asking the
+# interpreter where it keeps scripts answers for the interpreter that will
+# run, whatever version it is. A search of PATH is the fallback for a setup
+# where scripts do land on PATH.
 check_html_tool() {
-    local script_dir
+    local script_dirs script_dir
     if [ -n "${LTL_PROFILING_SCRIPT_DIR:-}" ]; then
-        script_dir="$LTL_PROFILING_SCRIPT_DIR"
+        script_dirs="$LTL_PROFILING_SCRIPT_DIR"
     else
-        script_dir="$(perl -e 'use Config; print $Config{installsitescript}' 2>/dev/null)"
+        script_dirs="$(perl -e 'use Config; print "$_\n" for grep { length } @Config{qw(installsitescript installvendorscript installscript)}' 2>/dev/null)"
     fi
 
-    if [ -n "$script_dir" ] && [ -x "$script_dir/$HTML_TOOL" ]; then
-        RESOLVED_HTML_TOOL="$script_dir/$HTML_TOOL"
-        return 0
-    fi
+    while IFS= read -r script_dir; do
+        if [ -n "$script_dir" ] && [ -x "$script_dir/$HTML_TOOL" ]; then
+            RESOLVED_HTML_TOOL="$script_dir/$HTML_TOOL"
+            return 0
+        fi
+    done <<<"$script_dirs"
 
     local via_path
     via_path="$(perl -e 'use File::Spec; my $t = shift;
@@ -113,7 +125,7 @@ install_dev_dependencies() {
         return 3
     fi
     echo "[info] The profiling tools are missing for $RESOLVED_PERL. Installing the development-only dependencies."
-    if ( cd "$BUILD_DIR" && cpanm --notest --installdeps --with-develop . ); then
+    if ( cd "$BUILD_DIR" && cpanm --notest --cpanfile "$CPANFILE" --installdeps --with-develop . ); then
         return 0
     fi
     echo "[error] The install of the development-only dependencies failed." >&2

@@ -68,10 +68,10 @@ generate_unix_cpanfile() {
     append_develop_block "$SCRIPT_DIR/cpanfile"
 }
 
-# Write the Windows cpanfile: runtime modules only. There is no profiling on
-# the Windows path, so the develop block is deliberately absent.
+# Write the Windows cpanfile: the scanned runtime list, then the develop block.
 generate_windows_cpanfile() {
     generate_cpanfile | exclude_modules "$UNIX_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile.windows"
+    append_develop_block "$SCRIPT_DIR/cpanfile.windows"
 }
 
 case "$TARGET_PLATFORM" in

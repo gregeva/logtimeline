@@ -1025,10 +1025,12 @@ scripts, put first on `PATH` to change what one name resolves to.
 - [ ] **AC17. `--dev-deps` installs the profiler on Windows.**
       `build/windows-setup.ps1 --dev-deps`, then from Git Bash
       `perl -MDevel::NYTProf -e 1`. Pass when: exit 0. W.
+      - W, 2026-10-24, Windows 11 ARM64, pass: `--dev-deps` ran cpanm with `--with-develop` over `build/cpanfile.windows`, now carrying the develop block, and the check reported condition 4 pass (8 pass, 0 FAIL); `perl -MDevel::NYTProf -e 1` exit 0. The profiler, Devel::NYTProf 6.15, ships with Strawberry Perl (`perl/vendor/lib`), so cpanm found it installed and added nothing.
 - [ ] **AC18. Profiling runs on Windows.** `tests/profile/run-profile.sh`
       from Git Bash. Pass when: it writes its report. W; unknown: whether the
       profiling scripts meet the Windows traps that stop the harnesses there
       is stage 3's to find.
+      - W, 2026-10-24, Windows 11 ARM64, pass, after the preflight change of § Step 3: `tests/profile/run-profile.sh --no-samples` on a 677-line web access log carrying microsecond durations, given by its absolute path, wrote `nytprof.out`, `nytprof/index.html` and `summary.txt` under Strawberry Perl 5.42.3; exit 0. The first run stopped at the preflight: "The HTML report tool nytprofhtml is missing". A relative log path fails on every host under `--no-samples`, which runs `ltl` from the output directory and passes file arguments unchanged.
 - [ ] **AC19. No binary carries the profiler.** With the develop block in the
       cpanfile and the profiler installed, build each binary and list its
       archive (`unzip -l <binary>`). Pass when: no entry names
@@ -1648,6 +1650,24 @@ has changes": a file committed with CRLF endings (`i/crlf w/crlf`), which a
 fresh checkout gives back with CRLF, so the warning could never clear. The step
 now takes only files committed with LF and checked out with CRLF (`i/lf
 w/crlf`): none on this host.
+
+### Step 3: the profiler on Windows (2026-10-24)
+
+- `generate_windows_cpanfile` in `build/generate-cpanfile.sh` appends the
+  develop block (`Devel::NYTProf`), as the Unix cpanfile has it (D5);
+  `build/cpanfile.windows` regenerated; `build/cpanfile` regenerated unchanged.
+  `build/windows-package.sh` installs without `--with-develop`, so its binary
+  is unaffected (AC19, stage 4).
+- `tests/profile/profiling-preflight.sh` looked for `nytprofhtml` only in the
+  Perl's `installsitescript`; Strawberry Perl ships it in `installscript`
+  (`perl\bin`). It now asks the Perl for its site, vendor and core script
+  directories, in that order. Its install runs over the host's cpanfile
+  (`cpanfile.windows` on Windows; the default `cpanfile` elsewhere, as
+  before), and it names each host's setup with `--dev-deps` when `cpanm` is
+  missing (Linux and Windows added).
+
+Not run on macOS or Linux since the preflight change: there the site script
+directory is searched first, as before.
 
 ## Troubleshooting a failed condition
 
