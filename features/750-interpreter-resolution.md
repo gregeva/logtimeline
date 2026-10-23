@@ -1104,6 +1104,31 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   empty `~/.zprofile`. The separator is now written only when the file
   already holds something; checked in throwaway homes with `.zprofile`
   absent, ending in a newline, and ending without one.
+- **Run on a second macOS development host, 2026-10-23**, whose Python was
+  set up by hand rather than by `build/macos-setup.sh`. `--validate`: exit 1,
+  6 pass, conditions 7 and 8 failing; conditions 1 to 6 pass. What the host
+  holds, read from Homebrew and the site-packages directories:
+  - Homebrew's Python is `python@3.14` alone, installed as another formula's
+    dependency. It links only versioned names (`python3.14`); there is no
+    unversioned `python3` link, so `/usr/bin/python3` (no NumPy) comes first.
+    Homebrew's `python` alias, which the full setup installs, now names
+    `python@3.15`, which is not installed.
+  - NumPy 2.4.6 and SciPy 1.17.1 were installed with `pip` into Homebrew
+    Python 3.14's `site-packages`; Homebrew's NumPy 2.5.4 and SciPy 1.18.1
+    were installed later. NumPy 2.5.4 is linked over pip's files, while pip
+    still lists 2.4.6. Homebrew's SciPy 1.18.1 is not linked
+    (`brew link --dry-run scipy` would link it), so Python 3.14 imports pip's
+    SciPy 1.17.1. Homebrew's NumPy is also linked into
+    `lib/python3.15/site-packages`, for a Python that is not installed.
+  - What the check reports: condition 7 names `/usr/bin/python3`, and
+    condition 8 shows every shell mode resolving it; the shell files are not
+    the cause here, while troubleshooting entry 8 points at them. With a
+    `python3` link to Homebrew's 3.14 put first on `PATH` (a scratch
+    directory, the host unchanged), condition 7 passes: it tests that
+    `import numpy, scipy` succeeds, not which install each comes from.
+    Resolving each module's file tells the installs apart: NumPy's
+    `__init__.py` resolves into `Cellar/numpy/2.5.4`, SciPy's stays in
+    `lib/python3.14/site-packages`.
 
 ### Not in stage 1
 
