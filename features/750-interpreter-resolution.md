@@ -4,24 +4,68 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: specification reworked on the issue branch `750-interpreter-resolution`
-(2026-10-23) for the architect's direction that the check judges the
-environment and setup never overwrites the user's shell configuration (D12,
-D6 as changed, D13, condition 8 retired); stage 1 (the macOS development
-host) planned in § Stage 1 implementation plan; steps 0 (the `before`
-benchmark), 1 (`process/check-environment.pl`) and 2 (the session-start
-hook) done, AC8's budget set (D14); step 3 (`build/macos-setup.sh`) built
-and its throwaway-home cases passing, its CI run still to be asked; its Perl
-keg measurement parked for another host (PAR::Packer cannot be fetched
-through this network's proxy); step 4 (the one rule, applied) done; step 5
-(this host) done, AC1 passing on the architect's home, AC7 the architect's
-to run. Open,
-measured in stage 1: what still needs the
-Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
-provides on macOS). What is in
-place today is recorded as found, not as the contract: most of it was put in
-piecemeal to get past a problem at the time, and the analysis is expected to
-challenge it.
+Status: **parked by the architect, 2026-10-23, at the end of stage 1** (the
+macOS development host), on the issue branch `750-interpreter-resolution`.
+Stage 1's steps 0 to 5 are done and each test case run on macOS is recorded
+under it; § Resuming lists what is open, in order, and the state this work
+left outside the repository. What is in place before this work is recorded as
+found, not as the contract: most of it was put in piecemeal to get past a
+problem at the time, and the analysis is expected to challenge it.
+
+## Resuming
+
+Open in stage 1, in this order:
+
+1. **The release build on the issue branch**, asked of the architect and not
+   yet answered: `gh workflow run release-build.yml --ref
+   750-interpreter-resolution`, its own command. The macOS job now runs
+   `./build/macos-setup.sh --package`, which ends with the environment check,
+   so a condition failing on GitHub's runner stops the build; the release job
+   runs on tags only, so nothing is published. Record the result under
+   § Step 3: `build/macos-setup.sh`, at its CI bullet.
+2. **AC7, a session started on a wrong `PATH`**, run by the architect. The
+   session-start hook is in this branch's `.claude/settings.json`, so Claude
+   Code is started from the issue worktree: `PATH="/usr/bin:/bin:$PATH"
+   claude`. A session started from the main checkout does not run the hook
+   until the release merges.
+3. **Parked for another host**, one not behind this network's web proxy,
+   which blocks the `Archive-Zip` download PAR::Packer depends on (§ Step 3,
+   the Perl keg line): install PAR::Packer for Homebrew Perl (`perl -S cpanm
+   --notest PAR::Packer`); build from a login shell started from a clean
+   environment that carries Homebrew's line only (`build/macos-package.sh
+   arm64`), and record which `pp` it starts and whether the binary runs; then
+   AC19's macOS build. The shell step gains the Perl keg line only if that
+   run shows it is needed.
+
+Then stages 2 (Linux), 3 (Windows) and 4 (the container builds), each planned
+on its own host before its steps are taken (§ Phase 4: investigation stages,
+one per environment). What stage 1 leaves to them:
+
+- `process/check-environment.pl` has its Linux and Windows columns written
+  from the conditions table and not yet run; `run_capture` is the one place a
+  tool is started, for stage 3 to adapt to Strawberry Perl.
+- `README.md`'s Linux and Windows instructions, and `docs/toolchain-guidance.md`
+  § Windows development host (trap 3, the shim at Git's
+  `/opt/homebrew/bin/perl`, now unused by `./ltl`), are stages 2 and 3's to
+  rewrite; AC20 completes in stage 3.
+- The profiling preflight names a remedy for a missing `cpanm` on macOS
+  only, until stages 2 and 3 give the other hosts a setup.
+
+The completion gate runs once, after stage 4, on the macOS development host
+where the `before` benchmark was captured (`docs/process/workflow.md` § 3): the
+`after` benchmark (`./tests/baseline/run-benchmark.sh
+single-day-access-log-standard --label 750-after`) from a worktree beside the
+`release/0.20.0` one, so both sides run from the same kind of checkout,
+compared with `750-before.tsv`; then the full harness suite (AC16).
+
+State outside the repository, on the macOS development host only:
+
+- `tests/baseline/results/750-before.tsv`, untracked, in the `release/0.20.0`
+  worktree (`.claude/worktrees/release-0.20.0`), captured at `7d0b57f8`. The
+  `after` side needs this machine.
+- `~/.zprofile`, created by `--repair` in step 5, holding the one marked
+  Homebrew block.
+- PAR::Packer is not installed for Homebrew Perl 5.44.
 
 ## The architect's framing (2026-10-23)
 
