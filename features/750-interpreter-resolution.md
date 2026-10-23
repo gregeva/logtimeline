@@ -13,8 +13,9 @@ benchmark), 1 (`process/check-environment.pl`) and 2 (the session-start
 hook) done, AC8's budget set (D14); step 3 (`build/macos-setup.sh`) built
 and its throwaway-home cases passing, its CI run still to be asked; its Perl
 keg measurement parked for another host (PAR::Packer cannot be fetched
-through this network's proxy); step 4 (the one rule, applied) done; next
-step 5 (this host). Open,
+through this network's proxy); step 4 (the one rule, applied) done; step 5
+(this host) done, AC1 passing on the architect's home, AC7 the architect's
+to run. Open,
 measured in stage 1: what still needs the
 Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
 provides on macOS). What is in
@@ -605,6 +606,9 @@ scripts, put first on `PATH` to change what one name resolves to.
       Pass when: all eleven conditions are reported by number, each one
       applicable to the host passes or is a note, those not applicable are
       reported as such, and the exit status is 0. M L W.
+      - M, 2026-10-23, pass, on the architect's home after `--repair` (stage
+        1 step 5): eleven conditions reported, 9 pass and 2 `n/a` (5, Linux's
+        `PERL5LIB`; 11, Windows' line endings), exit 0.
 - [ ] **AC2. The wrong Perl first on `PATH` is reported, and the check still
       runs under it.** macOS: `PATH="/usr/bin:/bin:$PATH" /usr/bin/perl
       process/check-environment.pl`. Windows: `PATH="/usr/bin:$PATH"
@@ -1025,6 +1029,22 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   provides on macOS). Moving the `~/.zshrc` lines, or running `--repair`, is
   the architect's choice; then AC1.
 - AC7, a session started on a wrong `PATH`, is run by the architect.
+- **Run on the architect's home, 2026-10-23.** `--validate` before: 8 pass,
+  condition 8 failing as expected (a clean login shell resolved
+  `/usr/bin/perl`, `/bin/bash` 3.2 and `/usr/bin/python3`; a new tab resolved
+  Homebrew's), with Homebrew's lines in `~/.zshrc` alone and no `~/.zprofile`.
+  The architect chose `--repair`, over moving the `~/.zshrc` lines by hand,
+  knowing a new tab then runs `brew shellenv` twice. `--repair` created
+  `~/.zprofile` holding the one marked block and left `~/.zshrc` and
+  `~/.zshenv` byte for byte as they were; condition 8 then passed. A second
+  `--repair` reported "Nothing to add" and left `~/.zprofile` unchanged. A
+  clean `zsh -lc` resolved `/opt/homebrew/bin/perl`, `bash` and `python3`, a
+  clean `zsh -lic` the same with the keg's `perl`. The session-start hook's
+  command printed no `systemMessage`.
+- Found there: the block was written after a blank line even into a new,
+  empty `~/.zprofile`. The separator is now written only when the file
+  already holds something; checked in throwaway homes with `.zprofile`
+  absent, ending in a newline, and ending without one.
 
 ### Not in stage 1
 

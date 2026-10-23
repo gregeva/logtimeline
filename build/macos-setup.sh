@@ -124,10 +124,13 @@ shell_step() {
     elif [ -n "$brew_prefix" ]; then
         echo "[shell] Nothing added: a login shell already runs Homebrew's line (HOMEBREW_PREFIX=$brew_prefix), so the cause lies in another line; the report above shows what a login shell resolves."
     else
-        if [ -s "$zprofile" ] && [ -n "$(tail -c 1 "$zprofile")" ]; then
+        if [ -s "$zprofile" ]; then
+            if [ -n "$(tail -c 1 "$zprofile")" ]; then
+                printf '\n' >>"$zprofile"
+            fi
             printf '\n' >>"$zprofile"
         fi
-        printf '\n%s\n%s\n%s\n' "$BLOCK_BEGIN" "eval \"\$($prefix/bin/brew shellenv)\"" "$BLOCK_END" >>"$zprofile"
+        printf '%s\n%s\n%s\n' "$BLOCK_BEGIN" "eval \"\$($prefix/bin/brew shellenv)\"" "$BLOCK_END" >>"$zprofile"
         echo "[shell] Added Homebrew's line to $zprofile: a login shell did not run it."
     fi
 }
