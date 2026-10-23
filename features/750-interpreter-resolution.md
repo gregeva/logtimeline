@@ -7,8 +7,8 @@ the environment setup and fails where Homebrew is absent). Parent: #729
 Status: in progress, on the issue branch `750-interpreter-resolution`.
 Stage 1 (the macOS development host) and stage 2 (the Linux development
 host) complete on 2026-10-23, stage 3 (the Windows development host) and
-stage 4 (the container builds) on 2026-10-24; the completion gate is
-next. Each test case run on each host is recorded under it; § Resuming says
+stage 4 (the container builds) on 2026-10-24; the completion gate passed
+the same day. Each test case run on each host is recorded under it; § Resuming says
 where to start, what the completion gate runs, and the state this work left
 outside the repository. What is in place before this work is recorded as found, not as
 the contract: most of it was put in piecemeal to get past a problem at the
@@ -26,7 +26,8 @@ Perl, wrote Windows setup's `--repair` and `--validate` with `BASH_ENV`
 `build/cpanfile.windows`, and settled D18 (condition 8's severity per tool)
 and D19 (Git for Windows' `.bash_profile`).
 
-**Next: the completion gate.** The standing description of the check, the
+The completion gate passed on 2026-10-24 (§ Completion gate). **Next: the
+PR and close-out.** The standing description of the check, the
 setup per host and the troubleshooting entries is
 `docs/development-environment.md`.
 
@@ -1030,6 +1031,9 @@ scripts, put first on `PATH` to change what one name resolves to.
       available. M L. (First written as the full suite on both hosts, which
       contradicts `CLAUDE.md`'s rule that the full suite runs once, as the
       completion gate; corrected by the architect in stage 2.)
+      - M, 2026-10-24, pass, at the completion gate: by the architect's
+        direction, a few scenarios from the harnesses whose changes differ,
+        each exit 0 (§ Completion gate).
       - L, 2026-10-23, Ubuntu 26.04.1, pass: 53 harnesses started; 41 listed
         their scenarios, 12 stopped at their own "not found" check for a
         corpus file; `grep -i brew` found nothing.
@@ -1847,6 +1851,35 @@ engine, at `a5e9226b`, as `.github/workflows/release-build.yml` runs them:
 
 Stage 4 has nothing open. Not run: the builds on GitHub's runners, which run
 these scripts unchanged; the next `v*` tag runs them.
+
+## Completion gate (2026-10-24)
+
+On the second macOS development host, at `347260c5` (`$version_number`
+restored to `0.20.0`). The diff from `7d0b57f8` changes `ltl`'s first line
+and 20 harnesses, so the benchmark and the harnesses are both in scope.
+
+**Benchmark.** `single-day-access-log-standard`, three pairs taken
+alternately from two worktrees side by side, `before` at `7d0b57f8` and
+`after` at `347260c5`, both under Homebrew Perl 5.44.0. Read from
+`compare-results.sh summary`: `total` −0.8%, −1.0%, −0.6%; `rss_peak` −0.6%,
+−0.2%, +0.7%. No metric is worse by more than 1% across the pairs.
+
+**Finding, fixed: `run-benchmark.sh` exited 1 after its first test case.**
+This work moved its shebang from `/bin/bash` (3.2) to `env bash` (5.3 on
+macOS). Under `set -e`, bash 4.1 and later exit on `((run_count++))` from 0;
+3.2 does not (`bash -c 'set -e; x=0; ((x++)); echo ok'` prints nothing under
+5.3.20). A one-test run kept its rows; a run of several tests stopped after
+the first. Its four increments now carry `|| true`, as
+`tests/profile/run-profile.sh`'s do. After the fix, one test and then a second
+under the same label each exited 0, the second merging the first's 76 rows.
+
+**Harnesses (AC16, macOS).** By the architect's direction, a few scenarios
+from the harnesses whose changes differ, not the full suite:
+`validate-csv-output` in full, and `statistics` (apache-default,
+gated-means-access), `section-layout` (layout-baseline, progress-rendered),
+`profile` (day, profile-off), `value-display` (count-spelling, fit-sweep),
+`notices` (clean-run, tmux-modal-keys, tmux-quit). Each exited 0; no capture
+mentions `brew`, a skip or a runtime warning.
 
 ## Troubleshooting a failed condition
 

@@ -148,7 +148,7 @@ run_test() {
         # absolute, because the run below leaves this directory
         [[ "$f" == /* ]] || f="$PWD/$f"
         file_args="$file_args $f"
-        ((found++))
+        ((found++)) || true
     done
 
     if [[ $found -eq 0 ]]; then
@@ -236,9 +236,9 @@ for file_def in "${FILE_SELECTIONS[@]}"; do
 
         if result=$(run_test "$test_name" "$files_glob" "$local_options"); then
             printf '%s\n' "$result" >> "$OUTPUT_FILE"
-            ((run_count++))
+            ((run_count++)) || true
         else
-            ((skip_count++))
+            ((skip_count++)) || true
         fi
     done
 done
@@ -281,7 +281,7 @@ if [[ "$MERGE_EXISTING" == true && -f "$EXISTING_FILE" ]]; then
         tname="${line%%	*}"
         if ! echo "$ran_tests" | grep -qxF "$tname"; then
             printf '%s\n' "$line" >> "$OUTPUT_FILE"
-            ((merged_count++))
+            ((merged_count++)) || true
         fi
     done < <(tail -n +2 "$EXISTING_FILE")
 
