@@ -8,7 +8,9 @@ Status: specification reworked on the issue branch `750-interpreter-resolution`
 (2026-10-23) for the architect's direction that the check judges the
 environment and setup never overwrites the user's shell configuration (D12,
 D6 as changed, D13, condition 8 retired); stage 1 (the macOS development
-host) planned in § Stage 1 implementation plan; next, its steps. Open, measured in stage 1: what still needs the
+host) planned in § Stage 1 implementation plan; steps 0 (the `before`
+benchmark) and 1 (`process/check-environment.pl`) done, next step 2 (the
+session-start hook). Open, measured in stage 1: what still needs the
 Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
 provides on macOS). What is in
 place today is recorded as found, not as the contract: most of it was put in
@@ -588,24 +590,45 @@ scripts, put first on `PATH` to change what one name resolves to.
       naming the Perl found and the one expected; the report gives the Perl it
       ran under and the `PATH` it saw; and condition 2 carries the pointer to
       its troubleshooting entry. The exit status is non-zero. M W.
+      - M, 2026-10-23, pass: ran under `/usr/bin/perl` (v5.34.1); condition 2
+        expected Homebrew's Perl and found `/usr/bin/perl (v5.34.1)`; the
+        header gave the Perl and the `PATH`; pointer on every failure; exit 1.
 - [ ] **AC3. A Perl without the project's modules is reported by the module.**
       The run of AC2 on macOS and Windows; on Linux, `env -u PERL5LIB perl
       process/check-environment.pl`.
       Pass when: condition 3 fails, naming the first module of the host's
       cpanfile that did not load, with its pointer; on Linux condition 5 also
       fails. M L W.
-- [ ] **AC4. Old bash and the system Python are reported.** macOS:
+      - M, 2026-10-23, pass (the AC2 run): condition 3 found "Devel::Size does
+        not load; 3 of 20 do not: Devel::Size, Text::CSV, Text::CSV_PP", with
+        its pointer.
+- [x] **AC4. Old bash and the system Python are reported.** macOS:
       `ln -s /bin/bash "$D/bash"; PATH="$D:$PATH" perl
       process/check-environment.pl`, then the same with
       `ln -s /usr/bin/python3 "$D/python3"` in a fresh stand-in directory.
       Pass when: the first run fails condition 6 naming `/bin/bash` and 3.2,
       the second fails condition 7 naming `/usr/bin/python3`, each with its
       pointer, and every other condition reads as in AC1. M.
-- [ ] **AC5. The check writes nothing.** `touch "$T/.mark"`, then
-      `HOME="$T" ZDOTDIR="$T" perl process/check-environment.pl`, then
-      `find "$T" -newer "$T/.mark"` and `git status --porcelain`.
+      - M, 2026-10-23, pass, run twice. On the architect's home, condition 8
+        fails in AC1 as well (Homebrew's lines only in `~/.zshrc`), so the
+        cases were repeated in a throwaway home whose `.zprofile` holds only
+        Homebrew's `eval "$(/opt/homebrew/bin/brew shellenv)"`. There AC1's run
+        passes every macOS condition; with the stand-in `bash` only condition 6
+        fails, found `<D>/bash -> /bin/bash (3.2)`; with the stand-in
+        `python3` only condition 7 fails, found `<D>/python3 ->
+        /usr/bin/python3`. Condition 8 passes in both: it judges the login
+        shell's tools against what conditions 2, 6 and 7 expect, not against
+        the check's own `PATH`.
+- [ ] **AC5. The check writes nothing.** `T=$(mktemp -d)`, then, a second
+      later, `M=$(mktemp)`; then `HOME="$T" ZDOTDIR="$T" perl
+      process/check-environment.pl`, then `find "$T" -newer "$M"` and
+      `git status --porcelain`. The mark is made outside the throwaway home
+      and after it: made inside it, it leaves the home's directory a few
+      microseconds newer than itself, and `find` lists the home on every run
+      (measured on macOS, three runs without the check, 2026-10-23).
       Pass when: `find` lists nothing and `git status` is as it was before
       the run. M L W.
+      - M, 2026-10-23, pass: `find` listed nothing, `git status` unchanged.
 
 **The session-start check (R3)**
 
@@ -724,6 +747,9 @@ gate requires a before/after benchmark (`docs/process/workflow.md` § 3).
 `7d0b57f8`, the issue's base, a worktree beside the issue's own, so both sides
 run from the same kind of checkout.
 
+Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
+`release/0.20.0` worktree at `7d0b57f8`.
+
 ### Step 1: `process/check-environment.pl`
 
 - `#!/usr/bin/env perl`, `use strict; use warnings;`, core modules only
@@ -751,7 +777,7 @@ run from the same kind of checkout.
   | 5 | n/a (Linux: `PERL5LIB` carries `$HOME/perl5`) |
   | 6 | `bash -c 'echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}'` is 4 or later, and `real()` of it is in a Cellar |
   | 7 | `python3 -B -c 'import numpy, scipy'` succeeds (`-B` writes no bytecode), and `real()` of it is in a Cellar |
-  | 8 | `env -i HOME USER LOGNAME TERM` (and `ZDOTDIR` when set) `/bin/zsh -lc` printing `command -v` of `perl`, `bash`, `python3`; each `real()` equals that of conditions 2, 6 and 7. Also run, shown and not judged: `-lic` (a new tab) and `-c` (a plain shell) |
+  | 8 | `env -i HOME USER LOGNAME TERM` (and `ZDOTDIR` when set) `/bin/zsh -lc` printing `command -v` of `perl`, `bash`, `python3`; each tool it resolves passes the test of condition 2, 6 or 7, whatever the check's own `PATH` holds (AC4, AC11). Also run, shown and not judged: `-lic` (a new tab) and `-c` (a plain shell) |
   | 9 | `tmux` on `PATH`; note |
   | 10 | `swiftc` on `PATH`; note |
   | 11 | n/a (Windows: `git config core.autocrlf` is `false`) |
