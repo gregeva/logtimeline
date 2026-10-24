@@ -15,8 +15,9 @@ three of its four harnesses fixed (§ Drop 6). Drop 7 done 2026-10-24
 2026-10-24 (b59c637d): the failed-run checker (§ Drop 8). Completion gate
 passed 2026-10-24 on e3bfbccc (§ Completion gate). Merged into
 `release/0.20.0` by PR #755 as 4c8d1fae; issue closed 2026-10-24. Stage 2
-(§ Stage 2: the observations) is planned, at the architect's request, and not
-started.
+(§ Stage 2: the observations) started 2026-10-24 on the architect's word: #747
+reopened, branch `747-harness-checks-on-a-failed-run-2` off `release/0.20.0`
+at cd4c3639, the `747-before` benchmark captured there.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -31,11 +32,11 @@ and the status line, and the document reaches the release branch with the PR,
 as the work merged by PR #754 did with its own. Drops 1 to 7, D4 (the four
 selection defects), drop 8 (D3: the failed-run checker,
 `tests/validate-harness-failed-run.sh`), the completion gate (§ Completion
-gate), the PR (#755), the merge and the close-out are done. The next step is
-§ Stage 2: the observations, planned 2026-10-24 at the architect's request and
-started on the architect's word: it reopens #747 and runs eight drops and a
-gate, as its Delivery says (D5: every harness read again against a run that
-prints something unrelated). The scratchpad worktree
+gate), the PR (#755), the merge and the close-out are done. § Stage 2: the
+observations, planned 2026-10-24 at the architect's request, is under way on
+branch `747-harness-checks-on-a-failed-run-2`: eight drops and a gate, as its
+Delivery says (D5: every harness read again against a run that prints
+something unrelated); its status line says which drop is next. The scratchpad worktree
 and stubs do not survive the session: a new session makes them again as
 § Drop 2 describes (stubs: `failing` prints nothing and exits 1, `silent`
 prints nothing and exits 0, each a two-line Perl script).
@@ -1111,7 +1112,9 @@ commit and a push on the branch, and a comment pointing here.
 
 1. **Start.** #747 reopened (`gh issue reopen 747`), `./process/issue-status.sh
    set 747 "in progress"`, a comment pointing here. Branch
-   `747-stage-2-observations` off `release/0.20.0`, synced; `$version_number`
+   `747-harness-checks-on-a-failed-run-2` off `release/0.20.0`, synced (a
+   second branch for an issue takes a numeric suffix,
+   `docs/process/workflow.md` § 1); `$version_number`
    stamped `0.20.0-747`; the `747-before` benchmark
    (`single-day-access-log-standard`) on the base commit from the main
    checkout, the diff touching harnesses (`docs/process/workflow.md` § 3).
