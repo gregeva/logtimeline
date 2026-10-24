@@ -26,7 +26,8 @@ question, four fixed, and D6's three in that group (§ Drop S2-2). Drop
 S2-3 done 2026-10-25 (c2481bd3): drop 3's eleven read, three fixed, and D6's two in
 that group (§ Drop S2-3). Drop S2-4 done 2026-10-25 (d22f7cf7): drop 4's eight read,
 three fixed (§ Drop S2-4). Drop S2-5 done 2026-10-25 (89ac5a19): drop 5's six read, two
-fixed (§ Drop S2-5). Next: § Resuming stage 2.
+fixed (§ Drop S2-5). Drop S2-6 done 2026-10-25: drop 6's four read, two
+fixed, and D6's one in that group (§ Drop S2-6). Next: § Resuming stage 2.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -518,7 +519,7 @@ index-read-back, also stops before its summary, at its
 | format-detection | 7 | `Results: N passed, M failed` | 472 (33 s) → 472 | 0 / no (0 s) → 3 / yes | 0 / no (0 s) → 3 / yes | 5 (2 unmarked) / yes (5 s) | fixed in drop 7: run_format_detection, run_classification_csv and run_byte_notation exit inside `$( )` on a failed run, and the assignment ends the harness (1, 13); four bare runs (11); two summary-row absences on empty captures (3); assert_command evaluates in the harness's own shell (15) | the CRLF fixture check and the two padded-level fixture checks (committed fixtures), the 3 a stub run passes |
 | format-registry | 4 | `Results: N passed, M failed` | 59 (4 s) → 59 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | 0 / yes (0 s) | fixed in drop 4: `out=$(run_format_registry)` exits inside `$( )` (1, 10); unknown -lf exits non-zero: exit code alone (6); two inline runs exit (stop); unarmed measurement: absence on an empty capture (3) | none |
 | heatmap-palette | 4 | `Results: N passed, M failed` | 120 (6 s) → 120 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | 2 (2 unmarked) / yes (0 s) → 0 / yes | fixed in drop 4: `out=$(run_section)` exits inside `$( )`: stop, failure uncounted (1, 10); run_udm exits (stop); two exits 0 by exit code alone once fixed (acceptance); drop S2-4: run_udm accepted a capture without its heatmap-palette section, so the two exits 0 held on it (14) | none |
-| help-content | 6 | `Results: N passed, M failed[, W warning(s)]` | 114 (5 s) → 114 | 0 / no (0 s) → 32 / yes | 0 / no (0 s) → 32 / yes | 34 (2 unmarked) / yes (1 s) | fixed in drop 6: three top-level exits before any scenario, which also ended `--list` on a stub (stop); description quality and no branch per topic: absence over a stub's source (7); no -uuid row and no long byte word: absence on an empty capture (3); four comparisons of two empty lookups (2) | B (GetOptions read from the source against docs/usage.md; skipped on a stub, whose source declares no options); the docs/usage.md halves of G, H, I, K, L and M, 32 checks (G 2, H 3, I 2, K 3, L 12, M 10), the 32 a stub run passes. J's docs/usage.md rows interpolate the lists the runs print, so they are not run-free |
+| help-content | 6 | `Results: N passed, M failed[, W warning(s)]` | 114 (5 s) → 114 | 0 / no (0 s) → 32 / yes | 0 / no (0 s) → 32 / yes | 34 (2 unmarked) / yes (1 s) → 32 / yes | fixed in drop 6: three top-level exits before any scenario, which also ended `--list` on a stub (stop); description quality and no branch per topic: absence over a stub's source (7); no -uuid row and no long byte word: absence on an empty capture (3); four comparisons of two empty lookups (2); drop S2-6: `help_count` took any non-empty capture as the help text the two absences count in (3) | B (GetOptions read from the source against docs/usage.md; skipped on a stub, whose source declares no options); the docs/usage.md halves of G, H, I, K, L and M, 32 checks (G 2, H 3, I 2, K 3, L 12, M 10), the 32 a stub run passes. J's docs/usage.md rows interpolate the lists the runs print, so they are not run-free |
 | help-layout | 2 | `Results: N passed, M failed` | 6 (0 s) → 6 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | 0 / yes (0 s) | fixed in drop 2: the layout constants missing from the source exit the harness (stop); the --help run unchecked, so the two inspectors pass on an empty capture (4); each inspector's non-zero exit, a misaligned row's included, ended the harness under `set -e` (11); drop S2-2 (D6): its two --help captures in $TMPDIR, removed on a normal exit only | none |
 | histogram-bin-counters | 6 | `Results: N passed, M failed` | 148 (7 s) → 148 | 5 / yes (1 s) → 0 / yes | 5 / yes (1 s) → 0 / yes | 0 / yes (1 s) | fixed in drop 6: four assert_no_line absences on an unchecked capture (3); heatmap_cells_highlighted carries no percentile field: absence on an empty block (3); assert_command evaluates its command in the harness's own shell (15) |  |
 | histogram-colours | 2 | `Results: N passed, M failed` | 21 (2 s) → 21 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | 10 (10 unmarked) / yes (0 s) → 0 / yes | fixed in drop 2: capture_run and the layout-table check exit the harness on a failed run (stop); the run exits 0 asserted by exit code alone (acceptance); drop S2-2: each capture's runtime-warning and width checks hold on a capture without its section-layout section (8, 4) | none |
@@ -527,7 +528,7 @@ index-read-back, also stops before its summary, at its
 | log-level-vocabulary | 5 | `PASS: N FAIL: M` | 58 (3 s) → 58 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | 0 / yes (0 s) | fixed in drop 5: seven scenario runs exit the harness on a failed or empty run, at nine exits (stop) |  |
 | memory-usage | 2 | `Results: N passed, M failed` | 23 (4 s) → 23 | 8 / yes (0 s) → 1 / yes | 8 / yes (0 s) → 1 / yes | 1 / yes (1 s) | fixed in drop 2: absence on an empty capture: no grouping callers, no section, no debug sub-section, nothing on stderr (3); two readings per compile compares 0 with 0 (2); record shape and sample shape hold over no record (4) | debug-samples: input lines (a file the harness writes) |
 | message-control-characters | 2 | `PASS: N FAIL: M` | 11 (1 s) → 11 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | 2 (2 unmarked) / yes (0 s) → 0 / yes | fixed in drop 2: six exits on a failed, empty or CSV-less run (stop); the summary inside the last scenario's block, fixed under D4; drop S2-2: two no-control-character absences over a render without the fixture's messages (3) | none |
-| message-discard | 6 | `Results: N passed, M failed` | 82 (18 s) | 0 / yes (1 s) | 0 / yes (0 s) | 0 / yes (0 s) | none (read again in drop 6 with the widened greps) |  |
+| message-discard | 6 | `Results: N passed, M failed` | 82 (18 s) | 0 / yes (1 s) | 0 / yes (0 s) | 0 / yes (0 s) | none (read again in drop 6 with the widened greps); drop S2-6: four absences read standard output, which `run_messages` does not check, and the selection comparison held on two CSVs without a message row (3, 2) |  |
 | message-expose | 5 | `Results: N passed, M failed` | 62 (13 s) | 0 / yes (0 s) | 0 / yes (1 s) | 0 / yes (1 s) | none (read again in drop 5 with the widened greps) |  |
 | message-grouping | 4 | `Results: N passed, M failed` | 51 (19 s) | 0 / yes (0 s) | 0 / yes (0 s) | 0 / yes (0 s) | none under this issue's condition (read again with drop 3's greps); a selection defect, § Observations, fixed under D4 |  |
 | message-grouping-notices | 2 | `Results: N passed, M failed` | 4 (2 s) | 0 / yes (0 s) | 0 / yes (0 s) | 0 / yes (0 s) | none |  |
@@ -1225,7 +1226,7 @@ harness's `--list` (§ Drop 8); the checker makes its own stubs.
 - [x] **S2-AC2.** The soft-wrap known failures carry no entry their check
       passes; #497 says which capture stopped wrapping and why.
       *Assertable*: S2's proof and the comment.
-- [ ] **S2-AC3.** No contract or comment in a harness names a record that is
+- [x] **S2-AC3.** No contract or comment in a harness names a record that is
       not kept in the repository (D6 widened it from contracts).
       *Assertable*: a grep for `MEMORY.md`, `repo memory` and `feedback_`
       over `tests/` finds nothing (the contract fixed in drop S2-1, the two
@@ -1428,23 +1429,43 @@ nothing to `$TMPDIR`. The checker passes their scenarios, 22 checks. The
 same 8 runs from the scratchpad worktree at 89ac5a19 report the same summary,
 exit status, passed and failed counts as the main checkout.
 
+### Drop S2-6
+
+Stage 1's drop 6 harnesses, four, read whole for the third question with the
+review-gate greps of shapes 2, 3, 4 and 14 beside the noise-stub baseline,
+and for D6. Two have checks that hold on a run that printed something other
+than what they read; two have none: histogram-bin-counters (every absence
+goes through `assert_no_line`, which needs the section, or carries its
+consumer block in the same command; every value is compared to a literal or
+to a side required non-empty) and udm-specs (`assert_absent` needs the
+section and a notices section; every count is compared to a literal, and
+every comparison of two lookups has a side required non-empty). The proofs
+run the committed harness from the scratchpad worktree at 3a2eed1e, the
+fixed one from the main checkout.
+
+| Harness | Case | Change | Proof (as AC6) |
+|---|---|---|---|
+| help-content | "no -uuid row in --help" and "no long byte word in --help units" read their capture through `help_count`, which took exit 0 and a non-empty capture as the help text it counts in (shape 3) | `help_count` takes the anchor of the help text it reads, `^OPTIONS$` for `--help` and `^Units: ` for `--help units`, and on a capture without it returns its sentinel, naming the anchor | noise stub: committed 2 unmarked passes, fixed 0 |
+| message-discard | four absences read standard output, which `run_messages` does not check (it needs the two CSVs): no thread-pool table under `-d thread`, no udm-counting line naming the switched-off metric, and the `udm: name=lat` absence of both "switches lat off" checks; "the same lines are selected" compared two counts of CSV lines, equal when neither CSV holds a message row (shapes 3, 2). The noise stub writes no CSV, so it reaches none of them | each absence needs what it reads, in the same command: the render's column header row (`check_column_header`), or the `-V` section whole, both delimiters (`has_section`); the comparison needs a message row on the first side | a copy of the real tool whose standard output is cut to its notices section and whose MESSAGES CSV is cut to its header row: committed 5 passed, fixed 0, each failure naming the missing anchor |
+| help-content (D6) | the test log's comment cites "repo memory (feedback_test_logs.md)" | names `docs/test-logs.md`, which marks the 2025-03-21 access log corrupt | read; a grep for `MEMORY.md`, `repo memory` and `feedback_` over `tests/` finds nothing (S2-AC3) |
+
+Runs, every scenario named, from the main checkout: the two changed
+harnesses keep their passed counts on the real `ltl` (help-content 114,
+message-discard 82), and every run against the failing, silent and noise
+stubs reaches its summary and exits 1, help-content passing only its 32
+run-free `docs/usage.md` checks and message-discard nothing. The eight runs
+add nothing to `$TMPDIR`. The checker passes their scenarios, 22 checks.
+
 ### Resuming stage 2
 
-Where the work stands, 2026-10-25, after drop S2-5's worktree
-confirmation:
+Where the work stands, 2026-10-25, after drop S2-6's commit:
 
-- **Done**: drops S2-1 to S2-5, each with its record above; S2-2 to S2-5
+- **Done**: drops S2-1 to S2-6, each with its record above; S2-2 to S2-5
   confirmed from a worktree.
 - **Next, in order**:
-  1. Drop S2-6, stage 1's drop 6 harnesses (message-discard, help-content,
-     histogram-bin-counters, udm-specs). The noise baseline names
-     help-content's two absences, "no -uuid row in --help" and "no long byte
-     word in --help units", both read through `help_count`, which accepts any
-     non-empty capture. The planned fix gives `help_count` an anchor naming
-     the help text it reads: `OPTIONS` for `--help`, `Units:` for
-     `--help units`. D6: help-content's `TEST_LOG` comment cites
-     "repo memory (feedback_test_logs.md)"; it names `docs/test-logs.md`
-     instead, as doc-examples' does.
+  1. Drop S2-6's worktree confirmation: the eight runs of § Drop S2-6 from
+     the worktree moved to drop S2-6's commit, compared with the main
+     checkout's; recorded here, committed, pushed, and #747 told.
   2. Drop S2-7, stage 1's drop 7 harnesses (statistics-demand,
      duration-display, filter-summary, format-detection, explain,
      index-read-back). Noise baseline: explain 200 unmarked passes,
@@ -1464,7 +1485,9 @@ confirmation:
   that; a comment on #747.
 - **The scratchpad** (the session's, lost with it): the three stubs
   (`stubs/{failing,silent,noise}/ltl`, the noise one printing
-  `an unrelated line` and exiting 0); the worktree `wt747` with its `logs`
+  `an unrelated line` and exiting 0); the doctored copies of the real tool
+  (`doctored/{warn,nonotices,sectionless}/ltl`, § Drop S2-1 and § Drop S2-6);
+  the worktree `wt747` with its `logs`
   symlink to the main checkout's corpus; the noise baseline
   (`s2/noise-base/`, `s2/noise-base-unmarked.txt`, one block of unmarked
   PASS lines per harness); and per drop `s2/dN/` holding its scenario lists,
