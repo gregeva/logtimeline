@@ -15,6 +15,10 @@
 #       warning lines plus asserts/produced_by/contract) to stderr and
 #       returns 1 otherwise. The CALLER decides what a failure means in its
 #       own accounting (per-scenario counter, hard exit, ...).
+#       A return of 0 says nothing about whether the run happened: the empty
+#       stderr of a run that failed holds no warning. A caller that counts it
+#       as a pass checks the run's exit status and its output first
+#       (tests/HARNESS-DESIGN.md Trap 13).
 #
 # This file is meant to be sourced, not executed directly.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

@@ -169,7 +169,7 @@ if scenario_wanted producer/fixture-tracked; then
 current_scenario="producer/fixture-tracked"
 if ( cd "$REPO_DIR" && git ls-files --error-unmatch tests/fixtures/classification-states.txt > /dev/null 2>&1 ) \
    && grep -q 'classification-states.txt' "$REPO_DIR/docs/test-logs.md"; then
-    pass_with "fixture is tracked and recorded in docs/test-logs.md"
+    pass_with "fixture is tracked and recorded in docs/test-logs.md [run-free: the git index and docs/test-logs.md]"
 else
     fail_with "fixture tracked and recorded" 'the synthetic fixture is committed as .txt and described in docs/test-logs.md' 'repository' "$SPEC acceptance criterion 1"
 fi
@@ -187,10 +187,11 @@ else
         "$(grep -E '^  (format|unmatched_lines):' "$TMP_DIR/unpinned.out" | tr '\n' ' ')"
 fi
 run_ltl help --help formats
-if [[ "$(cat "$TMP_DIR/help.rc")" == 0 ]] && ! grep -q "$FORMAT" "$TMP_DIR/help.out"; then
+if [[ "$(cat "$TMP_DIR/help.rc")" == 0 ]] && grep -q '^Log formats ltl recognises' "$TMP_DIR/help.out" && ! grep -q "$FORMAT" "$TMP_DIR/help.out"; then
     pass_with "--help formats does not list $FORMAT"
 else
-    fail_with "--help formats omits the verification entry" 'a verification-only entry never appears in user-facing prose' 'print_help_formats() in ltl' "$SPEC D12"
+    fail_with "--help formats omits the verification entry" 'a verification-only entry never appears in user-facing prose; the listing is printed, so its absence is read against it' 'print_help_formats() in ltl' "$SPEC D12" \
+        "exit: $(cat "$TMP_DIR/help.rc")" "listing printed: $(grep -c '^Log formats ltl recognises' "$TMP_DIR/help.out" || true)"
 fi
 run_ltl badpin "${COMMON[@]}" -n 0 -lf nonsense "$FIXTURE"
 if [[ "$(cat "$TMP_DIR/badpin.rc")" != 0 ]] && grep -q 'Known formats:' "$TMP_DIR/badpin.err" && ! grep -q "$FORMAT" "$TMP_DIR/badpin.err"; then
@@ -266,10 +267,11 @@ expect_key "$TMP_DIR/day1rows.out" pct_eligible 0 'mixed alone withholds the run
 expect_key "$TMP_DIR/day1none.out" mixed 0 '-n 0 on the same subset: nothing is mixed (F5)'
 expect_key "$TMP_DIR/day1none.out" pct_eligible 1 '-n 0 on the same subset: the shares print by the ordinary rule'
 expect_key "$TMP_DIR/day1none.out" success_pct 50.000 'the printed share is over the classified pair'
-if ! grep -qE '\-n 0|top_n_messages == 0|top_n_messages eq' <(grep -n 'mixed' "$LTL"); then
+if grep -q '^sub resolve_message_classification_states' "$LTL" && ! grep -qE '\-n 0|top_n_messages == 0|top_n_messages eq' <(grep -n 'mixed' "$LTL"); then
     pass_with "no -n 0 branch in the MIXED bookkeeping (F5)"
 else
-    fail_with "no -n 0 branch" 'a run that retains no messages needs no special case' 'resolve_message_classification_states() in ltl' "$SPEC F5, acceptance criterion 13"
+    fail_with "no -n 0 branch" 'a run that retains no messages needs no special case' 'resolve_message_classification_states() in ltl' "$SPEC F5, acceptance criterion 13" \
+        "sub resolve_message_classification_states in the source read ($LTL): $(grep -c '^sub resolve_message_classification_states' "$LTL" || true)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -293,10 +295,12 @@ else
         "$(printf '%s\n' "$summary_plain" | grep -E 'SUCCESS CLASSIFIED' | sed -E 's/ +/ /g')"
 fi
 run_ltl summaryclean "${COMMON[@]}" -n 0 --terminal-width 200 -i 'catalog fetch|upload' "${PIN[@]}" "$FIXTURE"
-if ! sed -E 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/summaryclean.out" | grep -qE 'CLASSIFICATION CONFLICT|MIXED'; then
+if [[ "$(cat "$TMP_DIR/summaryclean.rc")" == 0 ]] && grep -q 'SUCCESS CLASSIFIED' "$TMP_DIR/summaryclean.out" \
+   && ! sed -E 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/summaryclean.out" | grep -qE 'CLASSIFICATION CONFLICT|MIXED'; then
     pass_with "a clean run prints neither the conflict nor the mixed row"
 else
-    fail_with "rows absent when zero" 'the new rows print only when non-zero' 'print_summary_table() in ltl' "$SPEC § Surfaces to update"
+    fail_with "rows absent when zero" 'the new rows print only when non-zero, read against a run that printed its summary' 'print_summary_table() in ltl' "$SPEC § Surfaces to update" \
+        "exit: $(cat "$TMP_DIR/summaryclean.rc")" "SUCCESS CLASSIFIED rows: $(grep -c 'SUCCESS CLASSIFIED' "$TMP_DIR/summaryclean.out" || true)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -319,7 +323,8 @@ else
     check_cells() {
         # check_cells DAY WANT_SUCCESS WANT_FAILURE LABEL CONTRACT
         local day="$1" ws="$2" wf="$3" label="$4" contract="$5" gs gf
-        gs=$(cell_text "^ $day" success_pct); gf=$(cell_text "^ $day" failure_pct)
+        gs=$(cell_text "^ $day" success_pct) || gs=""
+        gf=$(cell_text "^ $day" failure_pct) || gf=""
         if [[ "$gs" == "$ws" && "$gf" == "$wf" ]]; then
             pass_with "$label (success '$gs', failure '$gf')"
         else
@@ -393,8 +398,8 @@ else
     fail_with "STATS CSV conflicts column" 'the per-bucket outcome columns gain conflicts beside successes and failures' 'write_stats_csv() in ltl' "$SPEC § Surfaces to update" "header: $(head -1 "${stats:-/dev/null}" | cut -c1-120)"
 fi
 if [[ -n "$msgs" ]]; then
-    col=$(head -1 "$msgs" | tr ',' '\n' | grep -nx conflicts | cut -d: -f1)
-    row=$(grep 'index rebuild' "$msgs" | head -1)
+    col=$(head -1 "$msgs" | tr ',' '\n' | grep -nx conflicts | cut -d: -f1) || col=""
+    row=$(grep 'index rebuild' "$msgs" | head -1) || row=""
     got=$(printf '%s\n' "$row" | "$PERL" -MText::CSV -e 'my $c = Text::CSV->new; my $r = $c->getline(\*STDIN); print $r->[$ARGV[0]-1] // "?"' "${col:-0}")
     if [[ -n "$col" && "$got" == 2 ]]; then
         pass_with "MESSAGES CSV conflicts = 2 for the all-conflict row"
@@ -410,10 +415,11 @@ fi
 
 if scenario_wanted regression-guard/short-circuit; then
 current_scenario="regression-guard/short-circuit"
-if ! grep -qF '"($f) ? 2 : ($s) ? 1 : 0"' "$LTL"; then
+if grep -q '^sub format_classification_src' "$LTL" && ! grep -qF '"($f) ? 2 : ($s) ? 1 : 0"' "$LTL"; then
     pass_with "the failure-first short-circuit is retired from the compiled classifier"
 else
-    fail_with "short-circuit retired" 'a line satisfying both criteria is evaluated on both and filed as a conflict' 'format_classification_src() in ltl' "$CLS_CONTRACT; $SPEC D3"
+    fail_with "short-circuit retired" 'a line satisfying both criteria is evaluated on both and filed as a conflict' 'format_classification_src() in ltl' "$CLS_CONTRACT; $SPEC D3" \
+        "sub format_classification_src in the source read ($LTL): $(grep -c '^sub format_classification_src' "$LTL" || true)"
 fi
 fi
 

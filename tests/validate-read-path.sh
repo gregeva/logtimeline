@@ -29,9 +29,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# Always the script itself, never an override: this harness chooses both paths
-# explicitly, counts the markers in the source and injects faults into a copy.
-LTL="$REPO_DIR/ltl"
+# Taken from the environment like every other harness, so a run against an
+# ltl that fails can be pointed here. The release gate's second pass, which
+# points LTL at a copy of ltl with the read-path threshold at 0, leaves this
+# harness out: it chooses both paths explicitly itself, and checks the default
+# threshold (features/621-generated-read-loop-body.md D3 as amended;
+# features/747-harness-checks-on-a-failed-run.md D1).
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -147,10 +151,13 @@ fail_with() {
     failures+=("$current_scenario :: $label")
 }
 
-# check <label> <actual> <expected> <asserts> <produced_by> <contract>
+# check <label> <actual> <expected> <asserts> <produced_by> <contract> [run_free]
+# run_free names the input of a check that does not depend on $LTL; the PASS
+# line then ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 check() {
     if [[ -n "$2" && "$2" == "$3" ]]; then
-        pass_with "$1 ($2)"
+        pass_with "$1 ($2)${7:+ [run-free: $7]}"
     else
         fail_with "$1" "$4" "$5" "$6" "expected: $3" "actual:   ${2:-MISSING-ANCHOR}"
     fi
@@ -196,6 +203,24 @@ file_value() {
 paths() {
     awk '/^=== read-path ===$/ { in_s = 1; next } /^=== END read-path ===$/ { in_s = 0 }
          in_s && /^  path: / { printf "%s%s", sep, substr($0, 9); sep = " " }' "$1"
+}
+# completed <run dir>...: each run exited 0 and wrote its read-path section, so
+# what they wrote can be compared; otherwise prints which did not and returns 1.
+# Two runs that fail alike write the same nothing (tests/HARNESS-DESIGN.md
+# Trap 13).
+completed() {
+    local dir rc why=""
+    for dir in "$@"; do
+        rc=$(cat "$dir/rc" 2>/dev/null || echo none)
+        if [[ "$rc" != 0 ]]; then
+            why+="$(basename "$dir") exited $rc; "
+        elif [[ -z "$(section_value "$dir/out" threshold_bytes)" ]]; then
+            why+="$(basename "$dir") wrote no read-path section; "
+        fi
+    done
+    [[ -z "$why" ]] && return 0
+    echo "${why%; }"
+    return 1
 }
 
 # normalise <run dir>: every output the run wrote, with what is measured per
@@ -249,8 +274,16 @@ altered_ltl() {
             if ($loop && !$done) { my $was = $_; eval $edit; die $@ if $@; $done = 1 if $_ ne $was }
         }
         die "altered_ltl: the edit changed nothing\n" unless $done;
-        print @l;' "$LTL" "$edit" > "$dir/$name"
+        print @l;' "$LTL" "$edit" > "$dir/$name" || return 1
     chmod +x "$dir/$name"
+}
+
+# no_altered_ltl <name>: the copy could not be made, so the scenario's checks,
+# which all run it, are skipped; the failure is counted once here.
+no_altered_ltl() {
+    fail_with "a copy of ltl edited inside its per-line loop ($1)" 'The harness finds the per-line loop of read_and_process_logs() in the ltl it is given and edits one line of it' 'read_and_process_logs() in ltl' "$C_FALLBACK" \
+        "the edit found no loop line to change in $LTL"
+    echo "  SKIP  $current_scenario :: its checks (no edited copy of ltl to run)"
 }
 
 # ---------------------------------------------------------------------------
@@ -276,7 +309,11 @@ scenario_paths_by_size() {
     check "threshold 0" "$(paths "$d/zero/out")|$(section_value "$d/zero/out" threshold_bytes)" "generated generated|0 (option)" \
         'With the threshold at 0 every file with a line takes the generated body' 'read_path_wants_generated() in ltl' "$C_PATH"
     run_ltl "$d/all-standard" "$LTL" -ni -bs 5 -D -V read-path "$SMALL" "$LARGE"
-    if diff -q <(normalise "$d/default") <(normalise "$d/all-standard") > /dev/null; then
+    local why
+    if ! why=$(completed "$d/default" "$d/all-standard"); then
+        fail_with "mixed sizes: output equals an all-standard run" 'A run over files on different paths gives the all-standard output' 'read_and_process_logs() in ltl' "$C_IDENTITY" \
+            "not compared: $why"
+    elif diff -q <(normalise "$d/default") <(normalise "$d/all-standard") > /dev/null; then
         pass_with "mixed sizes: output equals an all-standard run"
     else
         fail_with "mixed sizes: output equals an all-standard run" 'A run over files on different paths gives the all-standard output' 'read_and_process_logs() in ltl' "$C_IDENTITY" \
@@ -312,7 +349,7 @@ scenario_threshold_values() {
 scenario_identity() {
     current_scenario="identity"
     echo "[$current_scenario]"
-    local d="$TMP_DIR/$current_scenario" shape label rest opts family file diffs=0 kept_file="$TMP_DIR/kept-markers"
+    local d="$TMP_DIR/$current_scenario" shape label rest opts family file diffs=0 compared=0 kept_file="$TMP_DIR/kept-markers"
     : > "$kept_file"
     for shape in "${SHAPES[@]}"; do
         label="${shape%%=*}"; rest="${shape#*=}"; opts="${rest%@*}"; family="${rest##*@}"
@@ -330,6 +367,7 @@ scenario_identity() {
             continue
         fi
         sed -n 's/^marker: \([0-9]*\) op=[a-z]* kept=yes$/\1/p' "$d/$label/generated/out" >> "$kept_file"
+        compared=$((compared + 1))
         if [[ "$(cat "$d/$label/generated/rc")" != "$(cat "$d/$label/standard/rc")" ]] \
            || ! diff -q <(normalise "$d/$label/generated") <(normalise "$d/$label/standard") > /dev/null; then
             diffs=$((diffs + 1))
@@ -338,7 +376,13 @@ scenario_identity() {
                 "diff: $(diff <(normalise "$d/$label/generated") <(normalise "$d/$label/standard") | head -6 | tr '\n' ' ')"
         fi
     done
-    [[ "$diffs" -eq 0 ]] && pass_with "${#SHAPES[@]} option shapes: generated output equals standard output"
+    # The shapes whose generated run fell back were counted above and never
+    # compared; the whole is claimed only when every shape was compared.
+    if [[ "$compared" -ne "${#SHAPES[@]}" ]]; then
+        echo "  SKIP  $current_scenario :: ${#SHAPES[@]} option shapes compared ($compared were)"
+    elif [[ "$diffs" -eq 0 ]]; then
+        pass_with "${#SHAPES[@]} option shapes: generated output equals standard output"
+    fi
 
     # Every marker of the loop, counted from the source, is kept by a shape.
     local all missing
@@ -376,7 +420,8 @@ scenario_fallback() {
     local d="$TMP_DIR/$current_scenario"
     mkdir -p "$d"
     # The term of an `and` marker renamed, so it no longer matches its condition.
-    altered_ltl "$d" ltl-altered 's/^(\s*#\@and )!\$disable_progress$/$1!\$disable_progress_renamed/'
+    altered_ltl "$d" ltl-altered 's/^(\s*#\@and )!\$disable_progress$/$1!\$disable_progress_renamed/' \
+        || { no_altered_ltl ltl-altered; return; }
     run_ltl "$d/fallback" "$d/ltl-altered" -ni -bs 5 --generated-loop-threshold=0 -V read-path,notices "$SMALL" "$LARGE"
     run_ltl "$d/standard" "$d/ltl-altered" -ni -bs 5 -D -V read-path "$SMALL" "$LARGE"
     check "a mismatched marker falls back" "$(section_value "$d/fallback/out" generated_text)|$(section_value "$d/fallback/out" fallback_reason)|$(paths "$d/fallback/out")" "failed|marker_mismatch|standard standard" \
@@ -385,7 +430,11 @@ scenario_fallback() {
         'A file that fell back records it' 'read_path_fall_back() in ltl' "$C_FALLBACK"
     check "one notice for the run" "$(grep -c '^  kind: read-path-fallback$' "$d/fallback/out")|$(grep -c 'faster read path' "$d/fallback/err")" "1|0" \
         'The fallback raises one notice a run, however many files fell back, drawn in the notices panel and not on stderr' 'read_path_fall_back() in ltl' "$C_FALLBACK; features/412-notice-surfaces.md § Migration"
-    if diff -q <(normalise "$d/fallback") <(normalise "$d/standard") > /dev/null; then
+    local why
+    if ! why=$(completed "$d/fallback" "$d/standard"); then
+        fail_with "fallback output equals -D output" 'A fallback loses speed, never output' 'read_and_process_logs() in ltl' "$C_FALLBACK" \
+            "not compared: $why"
+    elif diff -q <(normalise "$d/fallback") <(normalise "$d/standard") > /dev/null; then
         pass_with "fallback output equals -D output"
     else
         fail_with "fallback output equals -D output" 'A fallback loses speed, never output' 'read_and_process_logs() in ltl' "$C_FALLBACK" \
@@ -398,18 +447,26 @@ scenario_exit_and_line() {
     echo "[$current_scenario]"
     local d="$TMP_DIR/$current_scenario" line g s
     mkdir -p "$d"
-    altered_ltl "$d" ltl-die 's/^(        while \(1\) \{\n)$/$1            die "read-path probe" if \$line_number == 5;\n/'
-    altered_ltl "$d" ltl-warn 's/^(        while \(1\) \{\n)$/$1            my \$probe_undef; my \$probe_text = "x" . \$probe_undef if \$line_number == 5;\n/'
-    line=$(grep -n 'read-path probe' "$d/ltl-die" | cut -d: -f1)
+    altered_ltl "$d" ltl-die 's/^(        while \(1\) \{\n)$/$1            die "read-path probe" if \$line_number == 5;\n/' \
+        || { no_altered_ltl ltl-die; return; }
+    altered_ltl "$d" ltl-warn 's/^(        while \(1\) \{\n)$/$1            my \$probe_undef; my \$probe_text = "x" . \$probe_undef if \$line_number == 5;\n/' \
+        || { no_altered_ltl ltl-warn; return; }
+    line=$(grep -n 'read-path probe' "$d/ltl-die" | cut -d: -f1) || line=""
     EXPECT_WARNING=1 run_ltl "$d/die-generated" "$d/ltl-die" -ni -bs 5 --generated-loop-threshold=0 "$SMALL"
     EXPECT_WARNING=1 run_ltl "$d/die-standard" "$d/ltl-die" -ni -bs 5 -D "$SMALL"
-    g="$(cat "$d/die-generated/rc")|$(grep -o "read-path probe at [^ ]* line [0-9]*" "$d/die-generated/err" | sed 's/ at .*\/\([^/]*\) line / at \1 line /')"
-    s="$(cat "$d/die-standard/rc")|$(grep -o "read-path probe at [^ ]* line [0-9]*" "$d/die-standard/err" | sed 's/ at .*\/\([^/]*\) line / at \1 line /')"
-    check "a die exits alike" "$g" "$s" \
-        'A die in the generated body exits with the status and message it has on the standard path' 'read_path_text() and read_and_process_logs() in ltl' "$C_EXIT"
+    g="$(cat "$d/die-generated/rc")|$(grep -o "read-path probe at [^ ]* line [0-9]*" "$d/die-generated/err" | sed 's/ at .*\/\([^/]*\) line / at \1 line /' || true)"
+    s="$(cat "$d/die-standard/rc")|$(grep -o "read-path probe at [^ ]* line [0-9]*" "$d/die-standard/err" | sed 's/ at .*\/\([^/]*\) line / at \1 line /' || true)"
+    # Two runs that never reached the probe exit alike too; both name it first.
+    if [[ -z "${g#*|}" || -z "${s#*|}" ]]; then
+        fail_with "a die exits alike" 'A die in the generated body exits with the status and message it has on the standard path' 'read_path_text() and read_and_process_logs() in ltl' "$C_EXIT" \
+            "the probe's die is missing: generated '$g', standard '$s'"
+    else
+        check "a die exits alike" "$g" "$s" \
+            'A die in the generated body exits with the status and message it has on the standard path' 'read_path_text() and read_and_process_logs() in ltl' "$C_EXIT"
+    fi
     check "a die names its source line" "${g#*line }" "$line" \
         'The generated body reports a die at the statement'"'"'s source line' 'read_path_text() in ltl (#line directive)' "$C_EXIT"
-    line=$(grep -n 'probe_undef; my' "$d/ltl-warn" | cut -d: -f1)
+    line=$(grep -n 'probe_undef; my' "$d/ltl-warn" | cut -d: -f1) || line=""
     EXPECT_WARNING=1 run_ltl "$d/warn-generated" "$d/ltl-warn" -ni -bs 5 --generated-loop-threshold=0 "$SMALL"
     check "a warning names its source line" "$(grep -o 'uninitialized value \$probe_undef in concatenation (.) or string at [^ ]* line [0-9]*' "$d/warn-generated/err" | sed 's/.* line //')" "$line" \
         'A warning raised in the generated body names the statement'"'"'s source line' 'read_path_text() in ltl (#line directive)' "$C_EXIT"
@@ -419,13 +476,19 @@ scenario_help_rows() {
     current_scenario="help-rows"
     echo "[$current_scenario]"
     local help
-    help=$("$LTL" --help 2>&1 | sed -E 's/\x1b\[[0-9;]*m//g')
+    help=$("$LTL" --help 2>&1 | sed -E 's/\x1b\[[0-9;]*m//g') || help=""
     check "-D in --help" "$(grep -cE '^\s*-D, +--debug ' <<< "$help")" "1" \
         '-D, --debug has a --help row' 'print_help() in ltl' "$C_HELP"
     check "-D in docs/usage.md" "$(grep -c '^| `-D, --debug` |' "$REPO_DIR/docs/usage.md")" "1" \
-        '-D, --debug has a docs/usage.md row' 'docs/usage.md' "$C_HELP"
-    check "the threshold hidden" "$(grep -c 'generated-loop-threshold' <<< "$help")|$(grep -c 'generated-loop-threshold' "$REPO_DIR/docs/usage.md")" "0|0" \
-        '--generated-loop-threshold is hidden: in neither --help nor docs/usage.md' 'print_help() in ltl, docs/usage.md' "$C_HELP"
+        '-D, --debug has a docs/usage.md row' 'docs/usage.md' "$C_HELP" 'docs/usage.md'
+    # An absence read on a --help that printed no option table holds; the -D
+    # row, checked above, is the table's evidence.
+    if ! grep -qE '^\s*-D, +--debug ' <<< "$help"; then
+        echo "  SKIP  $current_scenario :: the threshold hidden (no --help option table to read)"
+    else
+        check "the threshold hidden" "$(grep -c 'generated-loop-threshold' <<< "$help")|$(grep -c 'generated-loop-threshold' "$REPO_DIR/docs/usage.md")" "0|0" \
+            '--generated-loop-threshold is hidden: in neither --help nor docs/usage.md' 'print_help() in ltl, docs/usage.md' "$C_HELP"
+    fi
 }
 
 scenario_register paths-by-size \

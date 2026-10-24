@@ -100,6 +100,25 @@ emit_fail() {
     failures+=("$label")
 }
 
+# run_unusable <out> <rc> <label>: the run exited non-zero, or wrote no
+# -V histogram-percentile-ticks section. One failure is counted and the caller
+# skips every check that reads the run: an inspector finds no tick out of
+# place in a capture that holds none (tests/HARNESS-DESIGN.md Trap 13).
+run_unusable() {
+    local out="$1" rc="$2" label="$3"
+    if [[ "$rc" -eq 0 ]] && grep -q '^=== histogram-percentile-ticks ===' "$out"; then
+        return 1
+    fi
+    emit_fail \
+        label       "ltl run ($label)" \
+        asserts     'The run exits 0 and writes the histogram and the -V histogram-percentile-ticks section the checks read' \
+        produced_by 'print_histograms() and emit_histogram_tick_inputs_verbose() in ltl' \
+        contract    'tests/HARNESS-DESIGN.md Trap 13 - a check made against a run that did not happen is skipped, its cause counted once' \
+        detail      "exit $rc, $(wc -c < "$out" | tr -d ' ') bytes"
+    echo "  SKIP: the checks of this run ($label)"
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Inspector: parse one ltl run's output, extract per-histogram axis-tick and
 # legend-entry counts, plus structural sanity checks. Output is plain text
@@ -349,7 +368,8 @@ assert_tick_positions() {
         OK:*)
             note_pass "tick columns exactly match the mapping recomputed from -V inputs (${verdict#OK:}) ($label)" ;;
         SKIP:*)
-            note_pass "tick position check not applicable (${verdict#SKIP:}) ($label)" ;;
+            # A check not made is not a pass (Trap 6): it prints SKIP and counts nothing.
+            echo "  SKIP: tick position check not applicable (${verdict#SKIP:}) ($label)" ;;
         MISSING:*)
             emit_fail \
                 label       "tick position inputs ($label)" \
@@ -377,10 +397,12 @@ test_single_width() {
     local out
     out=$(mktemp)
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -V histogram-percentile-ticks -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    local rc=0
+    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -V histogram-percentile-ticks -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || rc=$?
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi
+    if run_unusable "$out" "$rc" "-hgw $hgw"; then rm -f "$out"; return 0; fi
 
     local report
     report=$(inspect_output "$out")
@@ -452,10 +474,12 @@ test_multi_histogram() {
     local out
     out=$(mktemp)
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -V histogram-percentile-ticks -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || true
+    local rc=0
+    "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -V histogram-percentile-ticks -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || rc=$?
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi
+    if run_unusable "$out" "$rc" "multi"; then rm -f "$out"; return 0; fi
 
     local report
     report=$(inspect_output "$out")

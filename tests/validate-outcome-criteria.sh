@@ -55,8 +55,11 @@ TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
 
 pass=0; fail=0; failures=(); current_scenario=""
 
+# assert_command ... [reads "CAPTURE ..."]: a check that reads captures is
+# skipped, and counts nothing, when one of them failed; capture() counted that
+# failure once (tests/HARNESS-DESIGN.md Trap 13).
 assert_command() {
-    local command label asserts produced_by contract
+    local command label asserts produced_by contract reads=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -64,6 +67,7 @@ assert_command() {
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            reads)       reads="$2";       shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -72,6 +76,13 @@ assert_command() {
     : "${asserts:?assert_command requires asserts}"
     : "${produced_by:?assert_command requires produced_by}"
     : "${contract:?assert_command requires contract}"
+    local cap
+    for cap in $reads; do
+        if ! captured "$cap"; then
+            echo "  SKIP  $current_scenario :: $label (its run failed: $(basename "$cap"))"
+            return 0
+        fi
+    done
     local cmd_out cmd_rc
     set +e
     cmd_out=$(eval "$command" 2>&1); cmd_rc=$?
@@ -93,7 +104,9 @@ assert_command() {
 
 # capture OUTFILE EXTRA_ARGS... — one counter-shaped run: coarsest bucket, no
 # empty buckets, minimal messages table, classification block requested.
-# Non-zero exit or empty capture is a hard failure.
+# A non-zero exit or an empty capture is one failure, counted here; the exit
+# status is kept in OUTFILE.rc, and the checks that read the capture are
+# skipped (captured()).
 capture() {
     local outfile="$1"; shift
     local rc
@@ -102,23 +115,42 @@ capture() {
         > "$outfile" 2> "$outfile.stderr"
     rc=$?
     set -e
+    echo "$rc" > "$outfile.rc"
     if [[ $rc -ne 0 || ! -s "$outfile" ]]; then
-        echo "ERROR: capture failed (rc=$rc) for: $*" >&2
-        cat "$outfile.stderr" >&2
-        exit 1
+        echo "  FAIL  $current_scenario :: capture $(basename "$outfile") (exit $rc, $(wc -c < "$outfile" | tr -d ' ') bytes): $*"
+        echo "        asserts:     every capture run exits 0 and writes its output"
+        echo "        produced_by: ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+        sed 's/^/        | /' "$outfile.stderr" | head -5
+        fail=$((fail + 1)); failures+=("$current_scenario :: capture $(basename "$outfile")")
     fi
 }
 
+# captured CAPTURE: the run exited 0 and wrote its output.
+captured() { [[ "$(cat "$1.rc" 2>/dev/null)" == 0 && -s "$1" ]]; }
+
+# refused_as_unknown OPTION [ARG]: ltl exits non-zero and its error names
+# OPTION as an unknown option. A refusal is its exit code and its message,
+# since any failure exits non-zero (tests/HARNESS-DESIGN.md Trap 13).
+refused_as_unknown() {
+    local option="$1" err="$TMP_DIR/refused.err"
+    if "$LTL" "$@" -ni "$ACCESS_FIXTURE" > /dev/null 2> "$err"; then
+        echo "$option was accepted"; return 1
+    fi
+    grep -qF "unknown option '$option'" "$err" || { echo "$option was refused without naming it: $(head -3 "$err" | tr '\n' ' ')"; return 1; }
+}
+
 # cls_key CAPTURE KEY -> the value of one classification-block key; a missing
-# block or key is a hard failure, never an empty string.
+# block or key is a hard failure, never an empty string, and names the capture
+# so that two lookups that both fail never compare equal.
 cls_key() {
     local capture="$1" key="$2"
     grep -qE '^=== format-detection / classification ===$' "$capture" || {
-        echo "MISSING-CLASSIFICATION-BLOCK"; return 1; }
+        echo "MISSING-CLASSIFICATION-BLOCK-IN-$(basename "$capture")"; return 1; }
     local v
     v=$(sed -n '/^=== format-detection \/ classification ===/,/^=== END format-detection \/ classification ===/p' "$capture" \
         | sed -n "s/^$key: //p" | head -1)
-    [[ -n "$v" ]] || { echo "MISSING-KEY-$key"; return 1; }
+    [[ -n "$v" ]] || { echo "MISSING-KEY-$key-IN-$(basename "$capture")"; return 1; }
     echo "$v"
 }
 
@@ -137,6 +169,17 @@ highlighted_count() {
 # 0 unclassified. Diagnostics fixture: 4 lines — 2 ERROR (failure), 2 INFO
 # (unclassified); the format declares no success rule. GC fixture: the format
 # declines classification, so every included line is unclassified.
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector),
+# parsed before the captures so that a listing or a refusal runs nothing.
+scenario_register outcome-filters \
+                  outcome-highlights \
+                  inert-outcomes \
+                  index-signature \
+                  option-surface \
+                  runtime-warnings
+scenario_parse_args "$@"
+
+current_scenario="captures"
 B="$TMP_DIR/base.out";        capture "$B"    -lf "$ACCESS_FORMAT" "$ACCESS_FIXTURE"
 IF="$TMP_DIR/inc-fail.out";   capture "$IF"   -if -lf "$ACCESS_FORMAT" "$ACCESS_FIXTURE"
 IS="$TMP_DIR/inc-succ.out";   capture "$IS"   -is -lf "$ACCESS_FORMAT" "$ACCESS_FIXTURE"
@@ -153,20 +196,12 @@ GB="$TMP_DIR/gc-base.out";    capture "$GB"   "$GC_FIXTURE"
 GEFES="$TMP_DIR/gc-both.out"; capture "$GEFES" -ef -es "$GC_FIXTURE"
 
 # ---------------------------------------------------------------------------
-# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
-scenario_register outcome-filters \
-                  outcome-highlights \
-                  inert-outcomes \
-                  index-signature \
-                  option-surface \
-                  runtime-warnings
-scenario_parse_args "$@"
-
 if scenario_wanted outcome-filters; then
 current_scenario="outcome-filters"
 
 assert_command \
     label "-if keeps only the 6 failure-classified lines; -is only the 9 successes (AC1)" \
+    reads "$IF $IS" \
     command "[[ \$(cls_key '$IF' lines_included) == 6 && \$(cls_key '$IF' failures) == 6 && \$(cls_key '$IF' successes) == 0 && \$(cls_key '$IS' lines_included) == 9 && \$(cls_key '$IS' successes) == 9 && \$(cls_key '$IS' failures) == 0 ]]" \
     asserts "an include filter admits only lines whose classification outcome is the named one; every downstream statistic, the classification counters included, is computed over that subset" \
     produced_by "the outcome-filter block in read_and_process_logs(), reading the \$line_outcome the scan block set" \
@@ -174,6 +209,7 @@ assert_command \
 
 assert_command \
     label "-ef removes the failures from all statistics: 9 included, failure counter 0 (AC2)" \
+    reads "$EF" \
     command "[[ \$(cls_key '$EF' lines_included) == 9 && \$(cls_key '$EF' failures) == 0 && \$(cls_key '$EF' successes) == 9 ]]" \
     asserts "an exclude filter drops its named outcome before any counter increments, so the classification counters report 0 for the excluded outcome rather than remembering the dropped lines" \
     produced_by "the outcome-filter block in read_and_process_logs(), ahead of the include-point accounting" \
@@ -181,6 +217,7 @@ assert_command \
 
 assert_command \
     label "-ef -es leaves exactly the unclassified remainder: 0 here, 2 on the diagnostics fixture, equal to the unfiltered unclassified count (AC3)" \
+    reads "$EFES $DEFES $DB" \
     command "[[ \$(cls_key '$EFES' lines_included) == 0 && \$(cls_key '$DEFES' lines_included) == \$(cls_key '$DB' unclassified) && \$(cls_key '$DEFES' unclassified) == \$(cls_key '$DB' unclassified) ]]" \
     asserts "excluding both outcomes keeps precisely the lines that classified to neither — the answer to the unclassified-lines notice's implicit question" \
     produced_by "the outcome-filter block in read_and_process_logs(); unclassified lines (outcome 0) survive every exclude" \
@@ -188,6 +225,7 @@ assert_command \
 
 assert_command \
     label "summary shares survive outcome filtering and agree with the bucket columns: -if reads 0 (0%) / 6 (100%), -ef reads 9 (100%) / 0 (0%) (architect bug report 2026-09-01)" \
+    reads "$IF $EF" \
     command "s=\$(sed -E \$'s/\\x1b\\[[0-9;]*m//g' '$IF' | grep -E '^ *SUCCESS CLASSIFIED') && f=\$(sed -E \$'s/\\x1b\\[[0-9;]*m//g' '$IF' | grep -E '^ *FAILURE CLASSIFIED') && [[ \$s == *'0 (0%)'* && \$f == *'6 (100%)'* ]] && s2=\$(sed -E \$'s/\\x1b\\[[0-9;]*m//g' '$EF' | grep -E '^ *SUCCESS CLASSIFIED') && f2=\$(sed -E \$'s/\\x1b\\[[0-9;]*m//g' '$EF' | grep -E '^ *FAILURE CLASSIFIED') && [[ \$s2 == *'9 (100%)'* && \$f2 == *'0 (0%)'* ]] || { echo \"if: \$s / \$f\"; echo \"ef: \$s2 / \$f2\"; false; }" \
     asserts "the failure-only share suppression is a test of the declared rules, not the surviving data: on a format declaring both rules an outcome filter that zeroes one count leaves the shares printing over the classified denominator, consistent with the per-bucket percentage columns" \
     produced_by "the share_denominator predicate in print_summary_table(), reading \$cls_success_declared" \
@@ -201,6 +239,7 @@ current_scenario="outcome-highlights"
 
 assert_command \
     label "-hf highlights the 6 failures through the existing mechanism and changes nothing about the analysed population (AC4)" \
+    reads "$HF $B" \
     command "[[ \$(highlighted_count '$HF') == 6 && \$(cls_key '$HF' lines_included) == \$(cls_key '$B' lines_included) && \$(cls_key '$HF' successes) == \$(cls_key '$B' successes) && \$(cls_key '$HF' failures) == \$(cls_key '$B' failures) ]]" \
     asserts "an outcome highlight marks its subset via the same tagging and counters as -h <regex> (the HIGHLIGHTED summary row is that mechanism's own marker) while every population counter stays identical to the unhighlighted run" \
     produced_by "the outcome family in the highlight decision in read_and_process_logs() ('-HL' category tagging)" \
@@ -208,6 +247,7 @@ assert_command \
 
 assert_command \
     label "-hs highlights the 9 successes (AC4)" \
+    reads "$HS $B" \
     command "[[ \$(highlighted_count '$HS') == 9 && \$(cls_key '$HS' lines_included) == \$(cls_key '$B' lines_included) ]]" \
     asserts "the success side of the outcome highlight uses the same mechanism and leaves the population untouched" \
     produced_by "the outcome family in the highlight decision in read_and_process_logs()" \
@@ -215,6 +255,7 @@ assert_command \
 
 assert_command \
     label "-hf -h ' 404 ' AND-composes: only the 4 failing 404 lines highlight (AC5)" \
+    reads "$HFH" \
     command "[[ \$(highlighted_count '$HFH') == 4 ]]" \
     asserts "with several highlight criteria given, an entry highlights only if it satisfies all of them — the outcome family is a third independent constraint alongside the regex and numeric families" \
     produced_by "the AND-composed highlight condition in read_and_process_logs()" \
@@ -228,6 +269,7 @@ current_scenario="inert-outcomes"
 
 assert_command \
     label "no success rule: -es drops nothing, -is admits nothing, and neither errs (AC9)" \
+    reads "$DES $DB $DIS" \
     command "[[ \$(cls_key '$DES' lines_included) == \$(cls_key '$DB' lines_included) && \$(cls_key '$DIS' lines_included) == 0 ]] && ! grep -qiE 'error|unknown option' '$DES.stderr' '$DIS.stderr'" \
     asserts "on a format that declares no rule for the named outcome the option simply drops nothing (exclude) or matches nothing (include) — no error, no notice, no special-casing" \
     produced_by "the outcome-filter block in read_and_process_logs(); a never-produced outcome value never matches" \
@@ -235,6 +277,7 @@ assert_command \
 
 assert_command \
     label "declining format (java_gc_g1): -ef -es keeps every included line (AC9)" \
+    reads "$GEFES $GB" \
     command "[[ \$(cls_key '$GEFES' lines_included) == \$(cls_key '$GB' lines_included) ]] && ! grep -qiE 'error|unknown option' '$GEFES.stderr'" \
     asserts "on a format that declines classification entirely every line is unclassified, so the excludes are inert and the run is unchanged" \
     produced_by "the outcome-filter block in read_and_process_logs()" \
@@ -261,14 +304,14 @@ current_scenario="option-surface"
 
 assert_command \
     label "the retired long names are rejected as unknown options (AC7)" \
-    command "! '$LTL' --exclude-file /dev/null -ni '$ACCESS_FIXTURE' >/dev/null 2>&1 && ! '$LTL' --include-file /dev/null -ni '$ACCESS_FIXTURE' >/dev/null 2>&1 && ! '$LTL' --highlight-file /dev/null -ni '$ACCESS_FIXTURE' >/dev/null 2>&1 && ! '$LTL' --include-session -ni '$ACCESS_FIXTURE' >/dev/null 2>&1 && ! '$LTL' --include-query-string -ni '$ACCESS_FIXTURE' >/dev/null 2>&1" \
+    command "refused_as_unknown --exclude-file /dev/null && refused_as_unknown --include-file /dev/null && refused_as_unknown --highlight-file /dev/null && refused_as_unknown --include-session && refused_as_unknown --include-query-string" \
     asserts "the hard break holds: no alias keeps --exclude-file/--include-file/--highlight-file/--include-session/--include-query-string parsing" \
     produced_by "the GetOptions specs in adapt_to_command_line_options()" \
     contract "features/455-success-failure-filter-highlight-criteria.md D2/D4 (hard break, no aliases)" \
 
 assert_command \
     label "the renamed forms parse: -hses, -xs, -xqs, and the pattern files as -ipf/-epf/-hpf (AC7/AC8)" \
-    command "printf 'zzz-no-match\\n' > '$TMP_DIR/pat.txt' && '$LTL' --disable-progress -bs 1440 -oe -n 1 -ni -hses -xs -xqs -ipf '$TMP_DIR/pat.txt' -epf '$TMP_DIR/pat.txt' -hpf '$TMP_DIR/pat.txt' -lf '$ACCESS_FORMAT' '$ACCESS_FIXTURE' >/dev/null 2>'$TMP_DIR/renamed.err'" \
+    command "printf 'zzz-no-match\\n' > '$TMP_DIR/pat.txt' && '$LTL' --disable-progress -bs 1440 -oe -n 1 -ni -hses -xs -xqs -ipf '$TMP_DIR/pat.txt' -epf '$TMP_DIR/pat.txt' -hpf '$TMP_DIR/pat.txt' -lf '$ACCESS_FORMAT' '$ACCESS_FIXTURE' >'$TMP_DIR/renamed.out' 2>'$TMP_DIR/renamed.err' && perl -ne 's/\\e\\[[0-9;]*m//g; \$read = 1 if /^ +LINES READ +15 /; END { print \"no LINES READ 15 row: the run read nothing\\n\" unless \$read; exit !\$read }' '$TMP_DIR/renamed.out'" \
     asserts "every renamed option is accepted under its new short and long form in one run (the bound variables are unchanged, so acceptance plus the rename diff carries the behavioural equivalence)" \
     produced_by "the GetOptions specs in adapt_to_command_line_options()" \
     contract "features/455-success-failure-filter-highlight-criteria.md D2/D3/D4, AC7/AC8; tests/validate-help-content.sh enforces the two-surface parity" \
@@ -282,6 +325,7 @@ for cap in "$B" "$IF" "$IS" "$EF" "$EFES" "$HF" "$HFH" "$HS" "$DB" "$DEFES" "$DE
     label_name=$(basename "$cap")
     assert_command \
         label "no runtime warnings on stderr ($label_name)" \
+    reads "$cap" \
         command "assert_no_runtime_warnings '$cap.stderr' '$label_name'" \
         asserts "no ' at ltl line N' unguarded data path fires on any scenario run" \
         produced_by "any sub touched by this feature" \

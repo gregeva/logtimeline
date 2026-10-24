@@ -120,7 +120,8 @@ assert_command() {
 
 # capture_run OUTFILE ARGS... — one render with ANSI intact and
 # -V section-layout, stderr to OUTFILE.stderr. A non-zero exit or an empty
-# capture is a hard failure. The run's stderr is then checked for Perl runtime
+# capture is one failure, counted here, and returns 1 so the scenario skips
+# the checks that read it. The run's stderr is then checked for Perl runtime
 # warnings and the whole capture for lines wider than the terminal; both are
 # counted as assertions of the scenario that asked for the capture.
 capture_run() {
@@ -133,9 +134,14 @@ capture_run() {
     rc=$?
     set -e
     if [[ $rc -ne 0 || ! -s "$outfile" ]]; then
-        echo "ERROR: capture failed (rc=$rc) for: $*" >&2
-        sed 's/^/    /' "$outfile.stderr" >&2
-        exit 1
+        echo "  FAIL  $current_scenario :: capture failed (exit $rc, $(wc -c < "$outfile" | tr -d ' ') bytes): $*"
+        echo "        asserts:     the render this scenario reads exits 0 and prints"
+        echo "        produced_by: ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+        sed 's/^/        | /' "$outfile.stderr" | head -5
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: capture failed")
+        return 1
     fi
 
     if assert_no_runtime_warnings "$outfile.stderr" "$current_scenario"; then
@@ -321,7 +327,7 @@ report_for() {
 legend_text_black() {
     local bg_label="$1"; shift
     local cap="$TMP_DIR/legend-$current_scenario.out"
-    capture_run "$cap" -hg duration "$@"
+    capture_run "$cap" -hg duration "$@" || return 0
     report_for "$cap" || return 0
     assert_command \
         label "the highlighted duration percentile row has black text (256:0) on every non-blank cell, $bg_label" \
@@ -349,10 +355,16 @@ fi
 if scenario_wanted legend-matches-timeline; then
 current_scenario="legend-matches-timeline"
 cap="$TMP_DIR/legend-timeline.out"
-capture_run "$cap" -hg duration -lbg --debug-layout
-grep -q '^--- Layout Engine Debug' "$cap.stderr" || {
-    echo "ERROR: no Layout Engine Debug table on stderr of the --debug-layout run" >&2; exit 1; }
-if report_for "$cap" "$cap.stderr"; then
+if ! capture_run "$cap" -hg duration -lbg --debug-layout; then
+    :
+elif ! grep -q '^--- Layout Engine Debug' "$cap.stderr"; then
+    echo "  FAIL  $current_scenario :: no Layout Engine Debug table on stderr of the --debug-layout run"
+    echo "        asserts:     a --debug-layout run prints the layout table the timeline cells are cut by"
+    echo "        produced_by: print_bar_graph() in ltl (--debug-layout)"
+    echo "        contract:    tests/HARNESS-DESIGN.md section Asserting rendered output"
+    fail=$((fail + 1))
+    failures+=("$current_scenario :: no layout table")
+elif report_for "$cap" "$cap.stderr"; then
     assert_command \
         label "the highlighted duration row's text colour equals the text on the timeline's highlighted duration fill (-lbg)" \
         command "b=\$(sed -nE 's/^band metric=duration fill=([^ ]+) text=([^ ]+) .*/\\1 \\2/p' '$cap.report'); t=\$(sed -nE 's/^timeline metric=duration fill=([^ ]+) text=([^ ]+) cells=([1-9][0-9]*)\$/\\1 \\2/p' '$cap.report'); echo \"band: \$b\"; echo \"timeline: \$t\"; [[ -n \$b && -n \$t && \$b == \"\$t\" && \$t != *,* ]]" \
@@ -365,8 +377,7 @@ fi
 if scenario_wanted legend-each-metric; then
 current_scenario="legend-each-metric"
 cap="$TMP_DIR/legend-metrics.out"
-capture_run "$cap" -hg duration,bytes -lbg
-if report_for "$cap"; then
+if capture_run "$cap" -hg duration,bytes -lbg && report_for "$cap"; then
     for spec in duration:226 bytes:46; do
         m="${spec%%:*}"; c="${spec##*:}"
         assert_command \
@@ -404,7 +415,7 @@ set -e
 CONTRACT_719="features/histogram-charts.md Acceptance Criteria 27; Decisions Log, A highlight that matches none of a metric's values draws no overlay"
 assert_command \
     label "the run exits 0" \
-    command "echo \"exit status: $rc\"; sed 's/^/stderr: /' '$cap.stderr'; [[ $rc -eq 0 ]]" \
+    command "echo \"exit status: $rc\"; sed 's/^/stderr: /' '$cap.stderr'; [[ $rc -eq 0 ]] && grep -q '^=== section-layout ===\$' '$cap'" \
     asserts "a histogram of a user-defined metric drawn under a highlight that matches none of that metric's lines completes like any other run" \
     produced_by "print_histograms() in ltl (reads each metric's highlighted bars; absent for a user-defined metric no highlighted line carried)" \
     contract "$CONTRACT_719"

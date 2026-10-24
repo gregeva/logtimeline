@@ -65,28 +65,61 @@ fail_with() {
     failures+=("$current_scenario :: $label")
 }
 
-# check <label> <actual> <expected> <asserts> <produced_by> <contract>
+# check <label> <actual> <expected> <asserts> <produced_by> <contract> [run_free]
+# run_free names the input of a check that does not depend on $LTL; the PASS
+# line then ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 check() {
     if [[ -n "$2" && "$2" == "$3" ]]; then
-        pass_with "$1 ($2)"
+        pass_with "$1 ($2)${7:+ [run-free: $7]}"
     else
         fail_with "$1" "$4" "$5" "$6" "expected: $3" "actual:   ${2:-MISSING-ANCHOR}"
     fi
 }
 
 # run_ltl <tag> <args...>: one ltl run in the harness's own directory; stdout
-# and stderr land in $TMP_DIR/<tag>.out and .err. A Perl runtime warning on
-# stderr, or a non-zero exit, is a failure.
+# and stderr land in $TMP_DIR/<tag>.out and .err, the exit status in .rc. A
+# Perl runtime warning on stderr, a non-zero exit, or an empty standard output
+# is a failure.
 run_ltl() {
     local tag="$1"; shift
     local rc=0
     ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$TMP_DIR/$tag.out" 2> "$TMP_DIR/$tag.err" || rc=$?
+    echo "$rc" > "$TMP_DIR/$tag.rc"
     if [[ "$rc" -ne 0 ]]; then
         fail=$((fail + 1)); failures+=("$current_scenario :: $tag exit $rc")
-        echo "  FAIL  $current_scenario :: $tag exited $rc"; sed 's/^/        /' "$TMP_DIR/$tag.err" | head -5
+        echo "  FAIL  $current_scenario :: $tag exited $rc"
+        echo "        asserts:     the run exits 0 and writes the output its checks read"
+        echo "        produced_by: ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+        sed 's/^/        /' "$TMP_DIR/$tag.err" | head -5
+    elif [[ ! -s "$TMP_DIR/$tag.out" ]]; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: $tag printed nothing")
+        echo "  FAIL  $current_scenario :: $tag exited 0 and printed nothing"
+        echo "        asserts:     the run exits 0 and writes the output its checks read"
+        echo "        produced_by: ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
     fi
     if ! assert_no_runtime_warnings "$TMP_DIR/$tag.err" "$current_scenario/$tag"; then
         fail=$((fail + 1)); failures+=("$current_scenario :: $tag perl-runtime-warnings-on-stderr")
+    fi
+}
+
+# produced <tag> <pattern> <label>: the run <tag> exited 0, printed, and its
+# output holds <pattern>: the evidence a check of an absence, a count of 0 or
+# the shape of every record needs, since each holds on a run that printed
+# nothing (tests/HARNESS-DESIGN.md Trap 13). A failed run was counted once by
+# run_ltl, so the check is skipped; a run without the evidence fails it.
+produced() {
+    local tag="$1" pattern="$2" label="$3"
+    if [[ "$(cat "$TMP_DIR/$tag.rc")" != 0 || ! -s "$TMP_DIR/$tag.out" ]]; then
+        echo "  SKIP  $current_scenario :: $label (run $tag failed)"
+        return 1
+    fi
+    if ! grep -qE "$pattern" "$TMP_DIR/$tag.out"; then
+        fail_with "$label" 'The run writes what this check reads' 'emit_memory_usage_verbose() in ltl' "$C_SECTION" \
+            "run $tag holds no line matching: $pattern"
+        return 1
     fi
 }
 
@@ -151,8 +184,10 @@ scenario_grouping() {
         'A grouped run counts readings under grouping_checkpoint and grouping_final_pass' \
         'run_consolidation_checkpoint() and process_final_pass_window() in ltl' "$C_SECTION"
     run_ltl ungrouped -bs 1440 -oe -mem -V memory-usage "$ACCESS_FIXTURE"
-    check "no grouping callers without -g" "$(site_names ungrouped | tr ',' '\n' | grep -c '^grouping_' || true)" "0" \
-        'An ungrouped run lists no grouping caller' 'emit_memory_usage_verbose() in ltl' "$C_SECTION"
+    if produced ungrouped '^site: ' 'no grouping callers without -g'; then
+        check "no grouping callers without -g" "$(site_names ungrouped | tr ',' '\n' | grep -c '^grouping_' || true)" "0" \
+            'An ungrouped run lists no grouping caller' 'emit_memory_usage_verbose() in ltl' "$C_SECTION"
+    fi
     check "totals are the caller sums" "$(fact grouped readings)|$(fact grouped readings_us)" "$(sums grouped)" \
         'readings and readings_us equal the sums of the site lines' 'emit_memory_usage_verbose() in ltl' "$C_SECTION"
 }
@@ -171,9 +206,11 @@ scenario_compiles() {
     scan=$(site csv format_scan_compile readings); csv=$(site csv csv_block_compile readings)
     check "csv block readings" "${csv:-}" "2" \
         'The CSV block compile reads memory before and after' 'compile_csv_block() in ltl' "$C_SECTION"
-    check "two readings per compile" "$(( ${scan:-0} + ${csv:-0} ))" "$(( ${compiled:-0} * 2 ))" \
-        'format_scan_compile and csv_block_compile readings together are twice the compiles format-registry counts' \
-        'compile_format_scan_sub() and compile_csv_block() in ltl' "$C_SECTION"
+    if produced csv '^scan_subs_compiled: [0-9]' 'two readings per compile'; then
+        check "two readings per compile" "$(( ${scan:-0} + ${csv:-0} ))" "$(( ${compiled:-0} * 2 ))" \
+            'format_scan_compile and csv_block_compile readings together are twice the compiles format-registry counts' \
+            'compile_format_scan_sub() and compile_csv_block() in ltl' "$C_SECTION"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -183,16 +220,20 @@ scenario_section_off() {
     current_scenario="section-off"
     echo "[$current_scenario]"
     run_ltl off -bs 1440 -oe -mem -V benchmark-data "$ACCESS_FIXTURE"
-    check "no section" "$(grep -c '^=== memory-usage' "$TMP_DIR/off.out" || true)" "0" \
-        'No memory-usage section prints unless it is selected or -mem debug is given' \
-        'emit_memory_usage_verbose() in ltl' "$C_GATE"
+    if produced off '^=== benchmark-data ===$' 'no section'; then
+        check "no section" "$(grep -c '^=== memory-usage' "$TMP_DIR/off.out" || true)" "0" \
+            'No memory-usage section prints unless it is selected or -mem debug is given' \
+            'emit_memory_usage_verbose() in ltl' "$C_GATE"
+    fi
     check "no benchmark-data rows" "$(bench off TIMING memory/readings)|$(bench off COUNTS memory_readings)|$(bench off TIMING total | sed 's/.*/present/')" "||present" \
         'benchmark-data carries no memory-reading rows while the section is off' \
         'print_verbose_output() in ltl' "$C_GATE"
     run_ltl nodebug -bs 1440 -oe -mem -V memory-usage "$ACCESS_FIXTURE"
-    check "no debug sub-section or debug callers" "$(grep -c '^=== memory-usage / debug ===$' "$TMP_DIR/nodebug.out" || true)|$(site_names nodebug | tr ',' '\n' | grep -c '^debug_' || true)" "0|0" \
-        'Without -mem debug there is no debug sub-section and no debug reading' \
-        'memory_debug_sample() and memory_debug_decomposition() in ltl' "$C_GATE"
+    if produced nodebug '^=== memory-usage ===$' 'no debug sub-section or debug callers'; then
+        check "no debug sub-section or debug callers" "$(grep -c '^=== memory-usage / debug ===$' "$TMP_DIR/nodebug.out" || true)|$(site_names nodebug | tr ',' '\n' | grep -c '^debug_' || true)" "0|0" \
+            'Without -mem debug there is no debug sub-section and no debug reading' \
+            'memory_debug_sample() and memory_debug_decomposition() in ltl' "$C_GATE"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -206,17 +247,21 @@ scenario_debug() {
     check "section and sub-section without -V" "$(grep -c '^=== memory-usage ===$' "$TMP_DIR/debug.out" || true)|$(grep -c '^=== memory-usage / debug ===$' "$TMP_DIR/debug.out" || true)" "1|1" \
         '-mem debug requests the memory-usage section and prints its debug sub-section' \
         'adapt_to_command_line_options() and emit_memory_usage_verbose() in ltl' "$C_DEBUG"
-    check "nothing on stderr" "$(grep -c . "$TMP_DIR/debug.err" || true)" "0" \
-        'The diagnostic readings no longer go to stderr' 'memory_debug_decomposition() in ltl' "$C_DEBUG"
+    if produced debug '^=== memory-usage ===$' 'nothing on stderr'; then
+        check "nothing on stderr" "$(grep -c . "$TMP_DIR/debug.err" || true)" "0" \
+            'The diagnostic readings no longer go to stderr' 'memory_debug_decomposition() in ltl' "$C_DEBUG"
+    fi
     check "decomposition per phase boundary" "$(debug_records debug | awk -F'\t' '$1 == "decomposition" { print $3 }' | paste -sd, -)" \
         "startup,after_read,after_bucket_init,after_stats,after_normalize,after_bar_graph,after_message_summary,after_summary_table,end" \
         'One decomposition record per phase boundary the run reached, from startup to end, in order' \
         'memory_debug_decomposition() from the pipeline_* steps in ltl' "$C_DEBUG"
     check "decomposition readings match the records" "$(site debug debug_decomposition readings)" "$(debug_records debug | grep -c '^decomposition' || true)" \
         'Each decomposition record is one reading under debug_decomposition' 'memory_debug_decomposition() in ltl' "$C_DEBUG"
-    check "record shape" "$(debug_records debug | awk -F'\t' 'NF != 8 { bad++ } $1 == "decomposition" && ($7 != "-" || $8 != "-") { bad++ } END { print bad + 0 }')" "0" \
-        'Every record has the eight columns; a decomposition carries - for structure and bytes' \
-        'emit_memory_usage_verbose() in ltl' "$C_DEBUG"
+    if produced debug $'^decomposition\t' 'record shape'; then
+        check "record shape" "$(debug_records debug | awk -F'\t' 'NF != 8 { bad++ } $1 == "decomposition" && ($7 != "-" || $8 != "-") { bad++ } END { print bad + 0 }')" "0" \
+            'Every record has the eight columns; a decomposition carries - for structure and bytes' \
+            'emit_memory_usage_verbose() in ltl' "$C_DEBUG"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -227,14 +272,16 @@ scenario_debug_samples() {
     echo "[$current_scenario]"
     perl -e 'local $/; my $lines = <STDIN>; print $lines x 12500' < "$ACCESS_FIXTURE" > "$TMP_DIR/repeated.txt"
     check "input lines" "$(wc -l < "$TMP_DIR/repeated.txt" | tr -d ' ')" "150000" \
-        'The input carries exactly two 75,000-line strides' 'the harness' "$C_DEBUG"
+        'The input carries exactly two 75,000-line strides' 'the harness' "$C_DEBUG" 'a file the harness writes'
     run_ltl samples -bs 1440 -oe -mem debug "$TMP_DIR/repeated.txt"
     check "read-loop samples" "$(debug_records samples | awk -F'\t' '$1 == "sample" && $3 == "read_lines"' | wc -l | tr -d ' ')" "2" \
         'One sample record every 75,000 lines read' 'memory_debug_sample() from read_and_process_logs() in ltl' "$C_DEBUG"
     check "sample readings match the records" "$(site samples debug_sample readings)" "$(debug_records samples | grep -c '^sample' || true)" \
         'Each sample record is one reading under debug_sample' 'memory_debug_sample() in ltl' "$C_DEBUG"
-    check "sample shape" "$(debug_records samples | awk -F'\t' '$1 == "sample" && ($5 != "-" || $6 != "-") { bad++ } END { print bad + 0 }')" "0" \
-        'A sample carries - for named_sum and unattributed' 'emit_memory_usage_verbose() in ltl' "$C_DEBUG"
+    if produced samples $'^sample\t' 'sample shape'; then
+        check "sample shape" "$(debug_records samples | awk -F'\t' '$1 == "sample" && ($5 != "-" || $6 != "-") { bad++ } END { print bad + 0 }')" "0" \
+            'A sample carries - for named_sum and unattributed' 'emit_memory_usage_verbose() in ltl' "$C_DEBUG"
+    fi
 }
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,10 @@ use Getopt::Long qw(GetOptionsFromArray :config no_ignore_case no_auto_abbrev);
 use Text::ParseWords qw(shellwords);
 
 my $repo_root = abs_path( File::Spec->catdir( dirname( abs_path(__FILE__) ), '..' ) );
+# Always the repository's own ltl, never the one LTL names: a harness run
+# points LTL at a variant of ltl, or at one that fails on purpose, and no such
+# ltl may draw a documentation image
+# (features/747-harness-checks-on-a-failed-run.md D1).
 my $ltl       = File::Spec->catfile( $repo_root, 'ltl' );
 my $png_source = File::Spec->catfile( $repo_root, 'process', 'capture-png.swift' );
 

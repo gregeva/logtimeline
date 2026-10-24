@@ -131,15 +131,16 @@ run_ltl() {
     echo "$outfile"
 }
 
-# Same shape against the collision fixture. The exit status is recorded rather
-# than swallowed, because one scenario's subject is that the run no longer dies.
-LAST_EXIT=0
+# Same shape against the collision fixture. The exit status is recorded beside
+# the capture (<capture>.rc) rather than swallowed, because one scenario's
+# subject is that the run no longer dies; callers run this inside $( ), so a
+# variable set here would not reach them (HARNESS-DESIGN.md Trap 12).
 run_collision() {
     local outfile
     outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
     set +e
     "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs,notices "$@" "$COLLISION_FIXTURE" > "$outfile" 2>"$outfile.stderr"
-    LAST_EXIT=$?
+    echo $? > "$outfile.rc"
     set -e
     notice_lines "$outfile" > "$outfile.notices"
     echo "$outfile"
@@ -196,7 +197,11 @@ assert_line() {
     fi
 }
 
-# Fixed-string absence assertion: the line must NOT appear.
+# Fixed-string absence assertion: the line must NOT appear. Every run here asks
+# for -V udm-specs, so the absence is read only when the capture (or, for a
+# <capture>.notices file, the capture behind it) holds the section, and a
+# notices file that found no notices section holds MISSING-SECTION rather
+# than nothing (HARNESS-DESIGN.md Trap 13, shape 3).
 assert_absent() {
     local outfile="$1"
     shift
@@ -212,7 +217,15 @@ assert_absent() {
     done
     : "${pattern:?}" ; : "${asserts:?}" ; : "${produced_by:?}" ; : "${contract:?}"
 
-    if grep -qF -- "$pattern" "$outfile"; then
+    if ! grep -qF '=== udm-specs ===' "${outfile%.notices}" || grep -qx 'MISSING-SECTION' "$outfile"; then
+        echo "  FAIL  $current_scenario"
+        echo "        must be absent: $pattern (nothing to read the absence against: no udm-specs section, or no notices section)"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: absent: $pattern (no section)")
+    elif grep -qF -- "$pattern" "$outfile"; then
         echo "  FAIL  $current_scenario"
         echo "        must be absent: $pattern"
         echo "        asserts:     $asserts"
@@ -240,7 +253,9 @@ assert_command() {
     done
     : "${command:?}" ; : "${label:?}" ; : "${asserts:?}" ; : "${produced_by:?}" ; : "${contract:?}"
 
-    if eval "$command" > /dev/null 2>&1; then
+    # In a subshell: an unbound name or an exit in the command ends that, not
+    # the harness (HARNESS-DESIGN.md shape 15).
+    if ( eval "$command" ) > /dev/null 2>&1; then
         echo "  PASS  $current_scenario :: $label"
         pass=$((pass + 1))
     else
@@ -769,7 +784,7 @@ scenario_collision_identical() {
         produced_by 'parse_udm_configs() (duplicate-argument drop) in ltl' \
         contract    "$CONTRACT_482"
     assert_command \
-        command     "[ '$LAST_EXIT' = 0 ]" \
+        command     "[ \"\$(cat '$out.rc')\" = 0 ] && grep -q '=== END udm-specs ===' '$out'" \
         label       'the run exits 0 where it previously died with a division by zero' \
         asserts     'D7: the duplicate drop removes the second config that read an already-freed distinct set' \
         produced_by 'parse_udm_configs() (duplicate-argument drop) + calculate_all_statistics() in ltl' \
@@ -912,7 +927,7 @@ scenario_delta_shorthand_canonical() {
         produced_by 'udm_function_field() in ltl' \
         contract    "$CONTRACT_482"
     assert_command \
-        command     "[ \"\$(grep '^udm: name=' '$shorthand' | sed 's/ spec=.*//')\" = \"\$(grep '^udm: name=' '$expanded' | sed 's/ spec=.*//')\" ]" \
+        command     "[ -n \"\$(grep '^udm: name=' '$shorthand')\" ] && [ \"\$(grep '^udm: name=' '$shorthand' | sed 's/ spec=.*//')\" = \"\$(grep '^udm: name=' '$expanded' | sed 's/ spec=.*//')\" ]" \
         label       'both spellings resolve to the same pair of names' \
         asserts     'Two spellings of one spec produce one naming outcome' \
         produced_by 'resolve_udm_metric_names() + udm_function_field() in ltl' \
@@ -941,7 +956,7 @@ scenario_collision_csv_and_export() {
     fi
 
     local stats
-    stats=$(ls "$work"/*STATS*.csv 2>/dev/null | head -1)
+    stats=$(ls "$work"/*STATS*.csv 2>/dev/null | head -1) || stats=""
     assert_command \
         command     "[ -n '$stats' ] && [ -f '$stats' ]" \
         label       'the STATS CSV was written' \
@@ -967,20 +982,20 @@ scenario_collision_csv_and_export() {
         produced_by 'udm_csv_columns() + normalize_data_for_output() in ltl' \
         contract    "$CONTRACT_482"
     assert_command \
-        command     "[ \"\$(head -1 '$stats' | tr ',' '\\n' | grep -c '^rows')\" = \"\$(head -1 '$stats' | tr ',' '\\n' | grep '^rows' | sort -u | grep -c .)\" ]" \
+        command     "[ -s '$stats' ] && [ \"\$(head -1 '$stats' | tr ',' '\\n' | grep -c '^rows')\" = \"\$(head -1 '$stats' | tr ',' '\\n' | grep '^rows' | sort -u | grep -c .)\" ]" \
         label       'no UDM column name repeats in the STATS CSV header' \
         asserts     'D12: resolved-name uniqueness makes column ids unique by construction' \
         produced_by 'udm_csv_columns() + normalize_data_for_output() in ltl' \
         contract    "$CONTRACT_482"
     assert_command \
-        command     "[ \"\$(head -2 '$stats' | tail -1 | tr ',' '\\n' | grep -c .)\" -le \"\$(head -1 '$stats' | tr ',' '\\n' | grep -c .)\" ]" \
+        command     "[ -s '$stats' ] && [ \"\$(head -2 '$stats' | tail -1 | tr ',' '\\n' | grep -c .)\" -le \"\$(head -1 '$stats' | tr ',' '\\n' | grep -c .)\" ]" \
         label       'the STATS CSV data row fits its header' \
         asserts     'One resolution sub means the header and the row beneath it cannot disagree about shape' \
         produced_by 'udm_csv_columns() in ltl' \
         contract    "$CONTRACT_482"
 
     local yaml
-    yaml=$(ls "$work"/*AGGREGATE*.yaml 2>/dev/null | head -1)
+    yaml=$(ls "$work"/*AGGREGATE*.yaml 2>/dev/null | head -1) || yaml=""
     assert_command \
         command     "[ -n '$yaml' ] && [ -f '$yaml' ]" \
         label       'the YAML aggregate export was written' \
@@ -1105,7 +1120,7 @@ COLUMNAR
     local ratio_exit=$?
     set -e
     assert_command \
-        command     "[ '$ratio_exit' = 0 ]" \
+        command     "[ '$ratio_exit' = 0 ] && grep -q 'TOP OVERALL MESSAGES' '$out'" \
         label       'two identical ratio specs exit 0 on the columnar path too' \
         asserts     'D5/D7: the duplicate drop stops the division by zero on both extraction paths' \
         produced_by 'parse_udm_configs() (duplicate-argument drop) in ltl' \
@@ -1135,7 +1150,7 @@ scenario_milliseconds_replacement() {
         set -e
         check_capture_warnings "$out"
         assert_command \
-            command     "[ '$ec' = 0 ]" \
+            command     "[ '$ec' = 0 ] && grep -q '=== END udm-specs ===' '$out'" \
             label       "ltl exits 0 on $(basename "$fixture")" \
             asserts     'The replacement metric runs cleanly on the fixture' \
             produced_by 'parse_udm_configs() and read_and_process_logs() in ltl' \
@@ -1168,14 +1183,14 @@ scenario_byte_unit_one_meaning() {
         ( cd "$work/$i" && "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -o -V udm-specs \
             -udm 'v:KB:max' "$BYTE_FIXTURE" ) > "$out" 2>"$out.stderr" || true
         check_capture_warnings "$out"
-        stats=$(ls "$work/$i"/*STATS*.csv 2>/dev/null | head -1)
+        stats=$(ls "$work/$i"/*STATS*.csv 2>/dev/null | head -1) || stats=""
         printf '%s|%s|%s\n' \
             "$(grep -o 'unit=[^ ]*' "$out" | head -1)" \
             "$(grep -o 'max=[^ ]*' "$out" | head -1)" \
             "$( [ -n "$stats" ] && head -1 "$stats" | tr ',' '\n' | grep '^v_.*_max$' )" >> "$TMP_DIR/one-meaning.results"
     done
     assert_command \
-        command     "[ \"\$(grep -c . '$TMP_DIR/one-meaning.results')\" = 20 ] && [ \"\$(sort -u '$TMP_DIR/one-meaning.results' | grep -c .)\" = 1 ]" \
+        command     "[ \"\$(grep -cE '^unit=[^|]+[|]max=[^|]+[|][^|]+\$' '$TMP_DIR/one-meaning.results')\" = 20 ] && [ \"\$(sort -u '$TMP_DIR/one-meaning.results' | grep -c .)\" = 1 ]" \
         label       'twenty runs of -udm v:KB:max report one unit, one value and one column name' \
         asserts     'The same -udm command gives the same unit, value and CSV column on every run' \
         produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
@@ -1244,7 +1259,7 @@ scenario_byte_unit_canonical_token() {
             asserts     "-udm v:$spelling reports the canonical token kB" \
             produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
             contract    "$CONTRACT_608"
-        stats=$(ls "$work"/*STATS*.csv 2>/dev/null | head -1)
+        stats=$(ls "$work"/*STATS*.csv 2>/dev/null | head -1) || stats=""
         assert_command \
             command     "[ -n '$stats' ] && head -1 '$stats' | tr ',' '\\n' | grep -qx 'v_kB_max'" \
             label       "-udm v:$spelling names the STATS column v_kB_max" \
@@ -1252,7 +1267,7 @@ scenario_byte_unit_canonical_token() {
             produced_by 'parse_udm_configs() + udm_csv_columns() in ltl' \
             contract    "$CONTRACT_608"
         assert_command \
-            command     "! grep -qE '^(Note|Warning)' '$out.stderr'" \
+            command     "grep -qF '  read_as: unit=kB(bytes)' '$out' && ! grep -qE '^(Note|Warning)' '$out.stderr'" \
             label       "-udm v:$spelling prints no notice or warning" \
             asserts     'A non-canonical spelling of a byte unit is accepted silently' \
             produced_by 'parse_udm_configs() in ltl' \
@@ -1297,7 +1312,7 @@ scenario_time_unit_long_spellings() {
             produced_by 'parse_udm_configs() + time_unit_canonical() in ltl' \
             contract    "$CONTRACT_525_D6"
         assert_command \
-            command     "! grep -qE '^(Note|Warning)' '$out.stderr'" \
+            command     "grep -qF '  read_as: unit=$want(time)' '$out' && ! grep -qE '^(Note|Warning)' '$out.stderr'" \
             label       "-udm v:$spelling prints no notice or warning" \
             asserts     'A long spelling of a time unit is accepted silently' \
             produced_by 'parse_udm_configs() in ltl' \
@@ -1456,7 +1471,7 @@ nn_messages_csv() {
     mkdir -p "$work"
     ( cd "$work" && "$LTL" --disable-progress -ni -bs 1440 -oe -o "$@" "$NN_FIXTURE" ) \
         > "$work.out" 2>"$work.out.stderr" || true
-    ls "$work"/*MESSAGES*.csv 2>/dev/null | head -1
+    { ls "$work"/*MESSAGES*.csv 2>/dev/null || true; } | head -1
 }
 
 # ---------------------------------------------------------------------------

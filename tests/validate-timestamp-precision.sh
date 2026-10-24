@@ -338,7 +338,16 @@ else
         "heading: $last" "export: $obs" "index: $idx" "bucket rows labelled 10:06:14.000 holding the line: $label"
 fi
 four=$(cat "$d/plain.txt" "$d/ltl-index.csv" "$d"/*-LTL-AGGREGATE.yaml | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{4,}' || true)
-if [[ -z "$four" ]]; then
+# The absence is read over the heading, the index and the export, so each must
+# hold a timestamp first; a run that failed was counted by run_in.
+if [[ "$(cat "$d/rc.txt")" != 0 ]]; then
+    echo "  SKIP  $current_scenario :: no timestamp carries a four-digit fraction (the run failed)"
+elif [[ "$last" == MISSING-ANCHOR:* || "$obs" == MISSING-ANCHOR:* || "$idx" == MISSING-ANCHOR:* ]]; then
+    fail_with "no timestamp carries a four-digit fraction" \
+        "a rounded millisecond never overflows into a fourth digit (.1000): the carry goes into the second" \
+        'format_timestamp() in ltl' "$CONTRACT_D7" \
+        "nothing to read: heading: $last" "export: $obs" "index: $idx"
+elif [[ -z "$four" ]]; then
     pass_with "no timestamp carries a four-digit fraction"
 else
     fail_with "no timestamp carries a four-digit fraction" \
@@ -594,9 +603,10 @@ fi
 # ---------------------------------------------------------------------------
 # The bucket key's scale (D14, D20)
 # ---------------------------------------------------------------------------
-# labels DIR — the timeline's bucket labels, in order.
+# labels DIR — the timeline's bucket labels, in order; nothing when the run
+# drew none, which the check reading them asserts on.
 labels() {
-    grep -oE '^ [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.]+' "$1/plain.txt" | sed 's/^ //'
+    { grep -oE '^ [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.]+' "$1/plain.txt" || true; } | sed 's/^ //'
 }
 
 if scenario_wanted keyscale/architect-pair; then
@@ -608,8 +618,8 @@ run_in pair-tp "${PAIR[@]}" -bs 100ms -tp ms "$THREE"
 same_run "-bs 100ms -tp ms renders as -ms -bs 100" "$TMP_DIR/pair-ms" "$TMP_DIR/pair-tp" \
     "the deprecated -ms -bs 100 is reproduced by -bs 100ms -tp ms: the timeline and the heading are byte-identical" \
     'read_and_process_logs() and print_bar_graph() in ltl (bucket key at millisecond scale)' "$CONTRACT_D5; $CONTRACT_D14"
-stats_ms=$(ls "$TMP_DIR"/pair-ms/*-LTL-STATS-*.csv 2>/dev/null | head -1)
-stats_tp=$(ls "$TMP_DIR"/pair-tp/*-LTL-STATS-*.csv 2>/dev/null | head -1)
+stats_ms=$(ls "$TMP_DIR"/pair-ms/*-LTL-STATS-*.csv 2>/dev/null | head -1) || stats_ms=""
+stats_tp=$(ls "$TMP_DIR"/pair-tp/*-LTL-STATS-*.csv 2>/dev/null | head -1) || stats_tp=""
 if [[ -n "$stats_ms" && -n "$stats_tp" ]] && diff -q "$stats_ms" "$stats_tp" > /dev/null; then
     pass_with "the STATS CSVs of the pair are byte-identical"
 else
@@ -617,7 +627,7 @@ else
         "the pair's STATS CSV rows, timestamps included, are the same" \
         'print_bar_graph() in ltl (STATS CSV rows)' "$CONTRACT_D5; $CONTRACT_D14" "ms: ${stats_ms:-none}" "tp: ${stats_tp:-none}"
 fi
-second=$(labels "$TMP_DIR/pair-tp" | grep '^2026-01-26 10:00:02\.' | sed 's/.*\.//' | tr '\n' ' ')
+second=$(labels "$TMP_DIR/pair-tp" | { grep '^2026-01-26 10:00:02\.' || true; } | sed 's/.*\.//' | tr '\n' ' ')
 if [[ "$second" == ".000 .100 .200 .300 .400 .500 .600 .700 .800 .900 " || "$second" == "000 100 200 300 400 500 600 700 800 900 " ]]; then
     pass_with "the second 10:00:02 has ten buckets, .000 to .900"
 else
@@ -726,7 +736,12 @@ readers=$(perl -ne '
     next if /^\s*#/;
     print "$sub:$.: $_" if $sub =~ /^(read_and_process_logs|initialize_empty_time_windows|print_bar_graph|write_aggregate_export)$/ && /\$print_(milli)?seconds\b/;
 ' "$LTL")
-if [[ -z "$readers" ]]; then
+if ! grep -qE '^sub read_and_process_logs\b' "$LTL"; then
+    fail_with "no bucket-key site reads -s or -ms" \
+        "the key's scale is read from \$bucket_key_scale wherever a key is formed or rendered; the deprecated switches set the precision and the bare -bs unit only" \
+        'read_and_process_logs(), initialize_empty_time_windows(), print_bar_graph(), write_aggregate_export() in ltl' "$CONTRACT_D14" \
+        "no read_and_process_logs() in $LTL: nothing was scanned"
+elif [[ -z "$readers" ]]; then
     pass_with "no bucket-key site reads -s or -ms"
 else
     fail_with "no bucket-key site reads -s or -ms" \

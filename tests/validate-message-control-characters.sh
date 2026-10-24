@@ -120,6 +120,23 @@ assert_command() {
     fi
 }
 
+# run_failed REASON: the scenario's run gave nothing to read. One failure is
+# counted and scenario_ok cleared, so the scenario's checks are skipped and the
+# harness goes on to its summary (tests/HARNESS-DESIGN.md Trap 13).
+run_failed() {
+    {
+        echo "  FAIL  $current_scenario :: $1"
+        echo "        asserts:     the scenario's ltl run exits 0 and writes the render, and under -o the messages CSV, that its checks read"
+        echo "        produced_by: read_and_process_logs() and print_message_summary() in ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13 - a check made against a run that did not happen is skipped, its cause counted once"
+    } >&2
+    fail=$((fail + 1)); failures+=("$current_scenario :: $1")
+    scenario_ok=0
+}
+skip_checks() {
+    echo "  SKIP  $current_scenario :: its checks (the run gave nothing to read)"
+}
+
 # ---------------------------------------------------------------------------
 # Checkers. Each exits non-zero with a diagnostic when the invariant is broken,
 # and treats "anchor not found" as a hard failure (HARNESS-DESIGN.md §
@@ -281,14 +298,12 @@ VSECTIONS="$TMP_DIR/vsections.txt"
 sed -n '/^=== message-grouping/,/^=== END message-grouping ===/p' "$RENDER" > "$VSECTIONS"
 sed '/^=== message-grouping/,/^=== END message-grouping ===/d' "$RENDER" > "$TABLE"
 
+scenario_ok=1
 if [[ "${render_status[0]}" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited ${render_status[0]} while rendering" >&2
+    run_failed "ltl exited ${render_status[0]} while rendering"
     sed 's/^/        /' "$STDERR" >&2
-    exit 1
-fi
-if [[ ! -s "$RENDER" ]]; then
-    echo "  FAIL  $current_scenario :: rendered output is empty" >&2
-    exit 1
+elif [[ ! -s "$RENDER" ]]; then
+    run_failed "rendered output is empty"
 fi
 
 # Runtime-warning cleanliness (HARNESS-DESIGN.md § Runtime-warning cleanliness).
@@ -297,11 +312,11 @@ if ! assert_no_runtime_warnings "$STDERR" "$current_scenario"; then
 fi
 
 MESSAGES_CSV=$(find "$TMP_DIR" -name '*-LTL-MESSAGES-*.csv' -print -quit)
-if [[ -z "$MESSAGES_CSV" ]]; then
-    echo "  FAIL  $current_scenario :: anchor not found: no messages CSV emitted by -o" >&2
-    exit 1
+if [[ "$scenario_ok" -eq 1 && -z "$MESSAGES_CSV" ]]; then
+    run_failed "anchor not found: no messages CSV emitted by -o"
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 assert_command \
     command     "check_render_columns '$TABLE'" \
     label       'every messages-table row occupies the same number of terminal columns' \
@@ -344,6 +359,9 @@ assert_command \
     asserts     'The -V message-grouping cluster-membership records are line-oriented and use 0x1f to separate category from canonical key. A raw 0x1f inside a message key would forge that boundary, so a cluster line must carry exactly one separator and a member line none.' \
     produced_by 'read_and_process_logs() in ltl — the control-character normalisation on the ingest path; records emitted by group_similar_messages() in ltl' \
     contract    'features/447-message-control-character-normalisation.md § D2 — one normalisation at ingest serves every consumer of the key'
+else
+    skip_checks
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario 2: ungrouped. Without -g each message keeps its own row, so the
@@ -370,20 +388,19 @@ set +e
 render2_status=("${PIPESTATUS[@]}")
 set -e
 
+scenario_ok=1
 if [[ "${render2_status[0]}" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited ${render2_status[0]} while rendering" >&2
+    run_failed "ltl exited ${render2_status[0]} while rendering"
     sed 's/^/        /' "$STDERR2" >&2
-    exit 1
-fi
-if [[ ! -s "$RENDER2" ]]; then
-    echo "  FAIL  $current_scenario :: rendered output is empty" >&2
-    exit 1
+elif [[ ! -s "$RENDER2" ]]; then
+    run_failed "rendered output is empty"
 fi
 
 if ! assert_no_runtime_warnings "$STDERR2" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 assert_command \
     command     "check_render_columns '$RENDER2'" \
     label       'every messages-table row occupies the same number of terminal columns' \
@@ -404,6 +421,9 @@ assert_command \
     asserts     'C0 control characters other than the record separator must not reach the rendered surface. Each corrupts it differently: CR returns the cursor to column zero so the rest of the row overwrites its own start, and ESC is executed by the terminal as an ANSI sequence, re-colouring everything printed after it.' \
     produced_by 'read_and_process_logs() in ltl — the control-character normalisation on the ingest path' \
     contract    'features/447-message-control-character-normalisation.md § D1 — normalisation happens at ingest, so no render path can reintroduce it'
+else
+    skip_checks
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario 3: a line no format matches contributes no message. The record
@@ -432,16 +452,17 @@ set +e
 render3_status=("${PIPESTATUS[@]}")
 set -e
 
+scenario_ok=1
 if [[ "${render3_status[0]}" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited ${render3_status[0]} while rendering" >&2
+    run_failed "ltl exited ${render3_status[0]} while rendering"
     sed 's/^/        /' "$STDERR3" >&2
-    exit 1
 fi
 
 if ! assert_no_runtime_warnings "$STDERR3" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 assert_command \
     command     "$PERL -e 'my (\$read, \$incl); open my \$fh, \"<\", \$ARGV[0] or die; while (<\$fh>) { \$read = \$1 if /LINES READ\\s+(\\d+)/; \$incl = \$1 if /LINES INCLUDED\\s+(\\d+)/ } close \$fh; unless (defined \$read && defined \$incl) { print \"anchor not found: LINES READ / LINES INCLUDED absent\\n\"; exit 1 } if (\$read != 3 || \$incl != 2) { print \"expected 3 read / 2 included, got \$read / \$incl\\n\"; exit 1 } print \"3 read, 2 included\\n\"; exit 0' '$RENDER3'" \
     label       'the space-led unmatched line is read but not counted as a message' \
@@ -462,6 +483,10 @@ assert_command \
     asserts     'The matched line carries a TAB, so the normalisation must still run on it; the unmatched line must not reintroduce a control character. Both hold only if the gate admits matched lines and excludes unmatched ones.' \
     produced_by 'read_and_process_logs() in ltl — the control-character normalisation on the ingest path' \
     contract    'features/447-message-control-character-normalisation.md § D1 — normalisation happens at ingest'
+else
+    skip_checks
+fi
+fi
 
 echo
 echo "─────────────────────────────────────────"
@@ -474,5 +499,3 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
-fi
-

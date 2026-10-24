@@ -186,7 +186,21 @@ PL
     local name status detail
     local -a expected=(one-declaration twelve-bound-rows bound-scalars-only-in-declaration bound-names-only-in-declaration
                        bare-number-list numeric-options-declared rows-read-by-parse one-number-unit-split)
+    # An absence over a source without the declaration holds too (a stub's
+    # source has none of it): the three absences need @quantity_options found
+    # first, whose own check counts its absence (tests/HARNESS-DESIGN.md Trap 13).
+    local declared=no
+    if [[ "$(awk -F'\t' '$1 == "CHECK" && $2 == "one-declaration" { print $3 }' "$report")" == ok ]]; then
+        declared=yes
+    fi
     for name in "${expected[@]}"; do
+        case "$name" in
+            bound-scalars-only-in-declaration|bound-names-only-in-declaration|one-number-unit-split)
+                if [[ "$declared" != yes ]]; then
+                    echo "  SKIP  $current_scenario :: $name (no @quantity_options in the source read)"
+                    continue
+                fi ;;
+        esac
         status=""; detail=""
         IFS=$'\t' read -r _ _ status detail < <(awk -F'\t' -v n="$name" '$1 == "CHECK" && $2 == n' "$report") || true
         if [[ "$status" == ok ]]; then
@@ -273,7 +287,11 @@ scenario_bare_unchanged() {
     current_scenario="bare-unchanged"
     echo "[$current_scenario]"
     run_ltl bare -ni -bs 1440 -oe -V runtime-config,filter-summary,option-resolution "${BARE_ARGS[@]}" "$BOUNDARY_FIXTURE"
-    check "exit" "$rc" 0 'A bare number on every unit-bearing option runs' 'adapt_to_command_line_options() in ltl' 'features/605-input-units.md section 4 D7'
+    # A run that printed nothing exits 0 too: the section it was asked for is
+    # the evidence it ran.
+    local section=no
+    if grep -q '^=== option-resolution ===$' "$TMP_DIR/bare.out"; then section=yes; fi
+    check "exit" "$rc|$section" "0|yes" 'A bare number on every unit-bearing option runs, and writes the option-resolution section' 'adapt_to_command_line_options() in ltl' 'features/605-input-units.md section 4 D7'
     local i long typed
     for i in "${!BARE_LONGS[@]}"; do
         long="${BARE_LONGS[$i]}"; typed="${BARE_ARGS[$((2 * i + 1))]}"
@@ -307,9 +325,15 @@ scenario_unit_equivalent() {
         run_ltl "u-$opt-bare" -ni -bs 1440 -oe -V filter-summary,option-resolution "-$opt" "$bare" "$BOUNDARY_FIXTURE"
         check "-$opt $with resolves to $bare" "$(block_value "u-$opt-unit" "$long" resolved)" "$bare" \
             'A value with a unit resolves to its equivalent in the option'"'"'s base unit' 'resolve_quantity_option() in ltl' "$CONTRACT_UNITS"
+        # Two runs that both lack the counts compare equal ("/" and "/"):
+        # each must carry its excluded_numeric first.
+        local counted_unit counted_bare
+        counted_unit="$(line_value "u-$opt-unit" excluded_numeric)/$(line_value "u-$opt-unit" lines_highlighted)"
+        counted_bare="$(line_value "u-$opt-bare" excluded_numeric)/$(line_value "u-$opt-bare" lines_highlighted)"
+        [[ "$counted_unit" == /* || "$counted_bare" == /* ]] && counted_unit=""
         check "-$opt $with counts as -$opt $bare" \
-            "$(line_value "u-$opt-unit" excluded_numeric)/$(line_value "u-$opt-unit" lines_highlighted)" \
-            "$(line_value "u-$opt-bare" excluded_numeric)/$(line_value "u-$opt-bare" lines_highlighted)" \
+            "$counted_unit" \
+            "$counted_bare" \
             'A value with a unit filters and highlights exactly as the bare equivalent does' \
             'read_and_process_logs() in ltl, reading the resolved scalar' 'features/605-input-units.md section 6 AC7'
     done
@@ -361,7 +385,9 @@ scenario_printed_spellings_accepted() {
     current_scenario="printed-spellings-accepted"
     echo "[$current_scenario]"
     local list="$TMP_DIR/spellings.txt"
-    perl - "$LTL" > "$list" <<'PL'
+    # || true: the reader dies on a source without the ladders, and the empty
+    # list is the failure counted below.
+    perl - "$LTL" > "$list" <<'PL' || true
 use strict; use warnings;
 open my $fh, '<', $ARGV[0] or die "cannot read $ARGV[0]: $!\n";
 my $src = do { local $/; <$fh> };

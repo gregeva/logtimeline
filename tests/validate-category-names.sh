@@ -118,8 +118,10 @@ assert_command() {
     fi
 }
 
-# Capture one ltl render into $1 (stdout, ANSI stripped) and $1.stderr, failing
-# hard on a non-zero exit or an empty capture (HARNESS-DESIGN.md Trap 1).
+# Capture one ltl render into $1 (stdout, ANSI stripped) and $1.stderr. A
+# non-zero exit or an empty capture is one failure, counted here, and returns 1
+# so the scenario skips the checks that read it (HARNESS-DESIGN.md Trap 1,
+# Trap 13).
 capture_render() {
     local outfile="$1"; shift
     local stderrfile="$outfile.stderr"
@@ -128,13 +130,21 @@ capture_render() {
     local status=("${PIPESTATUS[@]}")
     set -e
     if [[ "${status[0]}" -ne 0 ]]; then
-        echo "  FAIL  $current_scenario :: ltl exited ${status[0]} while rendering" >&2
-        sed 's/^/        /' "$stderrfile" >&2
-        exit 1
+        echo "  FAIL  $current_scenario :: ltl exited ${status[0]} while rendering"
+        echo "        asserts:     the run exits 0 and writes the output its checks read"
+        echo "        produced_by: ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+        sed 's/^/        /' "$stderrfile"
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl exited ${status[0]}")
+        return 1
     fi
     if [[ ! -s "$outfile" ]]; then
-        echo "  FAIL  $current_scenario :: rendered output is empty" >&2
-        exit 1
+        echo "  FAIL  $current_scenario :: rendered output is empty"
+        echo "        asserts:     the run exits 0 and writes the output its checks read"
+        echo "        produced_by: ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+        fail=$((fail + 1)); failures+=("$current_scenario :: empty render")
+        return 1
     fi
     if ! assert_no_runtime_warnings "$stderrfile" "$current_scenario"; then
         fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
@@ -289,8 +299,8 @@ current_scenario="http-status-families"
 echo "[$current_scenario]"
 
 RENDER="$TMP_DIR/families.txt"
-capture_render "$RENDER" --disable-progress -ni -lf "$ACCESS_FORMAT" \
-    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -h orders "$FAMILIES_FIXTURE"
+if capture_render "$RENDER" --disable-progress -ni -lf "$ACCESS_FORMAT" \
+    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -h orders "$FAMILIES_FIXTURE"; then
 
 FAMILY_CONTRACT='features/463-friendly-log-level-category-names.md § D1 — the shipped descriptive names for the HTTP status families'
 
@@ -337,6 +347,7 @@ assert_command \
     asserts     'The legend strip is repeated on every timeline row and shares its horizontal budget with the bar graph, so it stays on the short raw category name. The descriptive text is a summary-table surface only; letting it into the legend would consume the width the timeline exists to show.' \
     produced_by 'print_bar_graph() in ltl — the per-bucket legend strip' \
     contract    'features/463-friendly-log-level-category-names.md § D3 — the legend and the CSV keep the raw category name'
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: the longest shipped name fills the category cell exactly.
@@ -353,8 +364,8 @@ current_scenario="longest-name-fills-the-column"
 echo "[$current_scenario]"
 
 WIDEST_RENDER="$TMP_DIR/widest.txt"
-capture_render "$WIDEST_RENDER" --disable-progress -ni -lf "$ACCESS_FORMAT" \
-    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -h upload "$FAMILIES_FIXTURE"
+if capture_render "$WIDEST_RENDER" --disable-progress -ni -lf "$ACCESS_FORMAT" \
+    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -h upload "$FAMILIES_FIXTURE"; then
 
 while read -r raw total descriptive; do
     assert_command \
@@ -367,6 +378,7 @@ done <<'ROWS'
 1xx-HL 1 1xx Informational (HL)
 1xx 1 1xx Informational
 ROWS
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: the CSV contract is unchanged by the descriptive names.
@@ -387,10 +399,13 @@ set +e
 csv_rc=$?
 set -e
 if [[ "$csv_rc" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited $csv_rc while writing the CSV" >&2
-    sed 's/^/        /' "$CSV_STDERR" >&2
-    exit 1
-fi
+    echo "  FAIL  $current_scenario :: ltl exited $csv_rc while writing the CSV"
+    echo "        asserts:     the run exits 0 and writes the output its checks read"
+    echo "        produced_by: ltl"
+    echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+    sed 's/^/        /' "$CSV_STDERR"
+    fail=$((fail + 1)); failures+=("$current_scenario :: ltl exited $csv_rc")
+else
 if ! assert_no_runtime_warnings "$CSV_STDERR" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
@@ -401,6 +416,7 @@ assert_command \
     asserts     'The CSV is a machine-readable contract consumed by external tooling and by the column-rules validator, so its column names stay the raw category names and their -HL twins. A descriptive name reaching a header would rename columns that downstream consumers address by name.' \
     produced_by 'build_stats_csv_columns() in ltl — the STATS CSV declaration, one entry per column with its name and precision family; print_bar_graph() writes its rows' \
     contract    'features/463-friendly-log-level-category-names.md § D3 — the legend and the CSV keep the raw category name; tests/csv-output/rules/stats-columns.tsv declares the raw columns'
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: a category with no descriptive name shows its own name unchanged.
@@ -414,8 +430,8 @@ current_scenario="unmapped-categories-keep-their-own-name"
 echo "[$current_scenario]"
 
 LEVELS_RENDER="$TMP_DIR/levels.txt"
-capture_render "$LEVELS_RENDER" --disable-progress -ni \
-    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" "$LEVELS_FIXTURE"
+if capture_render "$LEVELS_RENDER" --disable-progress -ni \
+    -bs 1440 -oe -n 1 --terminal-width "$WIDTH" "$LEVELS_FIXTURE"; then
 
 for level in FATAL ERROR WARN INFO DEBUG TRACE; do
     assert_command \
@@ -425,6 +441,8 @@ for level in FATAL ERROR WARN INFO DEBUG TRACE; do
         produced_by 'category_display_name() in ltl, rendered by print_summary_table()' \
         contract    'features/463-friendly-log-level-category-names.md § R2 — a category with no entry displays its own name unchanged'
 done
+fi
+fi
 
 echo
 echo "─────────────────────────────────────────"
@@ -437,5 +455,3 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
-fi
-

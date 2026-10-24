@@ -210,7 +210,18 @@ for row in "${EQUIVALENCES[@]}"; do
     fi
 
     if [[ "$mode" == "full" ]]; then
-        if diff -q <(timeline_text "$TMP_DIR/a.out") <(timeline_text "$TMP_DIR/b.out") > /dev/null; then
+        # Two runs that fail alike print the same nothing: a failed run was
+        # counted above, and an empty one fails here (tests/HARNESS-DESIGN.md
+        # Trap 13).
+        if [[ "$(cat "$TMP_DIR/a.rc")" != 0 || "$(cat "$TMP_DIR/b.rc")" != 0 ]]; then
+            echo "  SKIP  $current_scenario :: timeline byte-identical (a run failed, counted above)"
+        elif [[ -z "$(timeline_text "$TMP_DIR/a.out")" || -z "$(timeline_text "$TMP_DIR/b.out")" ]]; then
+            fail_with "timeline byte-identical for '$args_a' and '$args_b'" \
+                "the rendered timeline of a unit-form bucket width is byte-identical to the bare-number form (the echoed options line excepted)" \
+                'print_bar_graph() in ltl, fed by the resolved bucket width' \
+                "$CONTRACT_D3; $CONTRACT_D4" \
+                "a run printed no timeline: a $(wc -c < "$TMP_DIR/a.out" | tr -d ' ') bytes, b $(wc -c < "$TMP_DIR/b.out" | tr -d ' ') bytes"
+        elif diff -q <(timeline_text "$TMP_DIR/a.out") <(timeline_text "$TMP_DIR/b.out") > /dev/null; then
             pass_with "timeline byte-identical for '$args_a' and '$args_b'"
         else
             fail_with "timeline byte-identical for '$args_a' and '$args_b'" \
@@ -302,12 +313,15 @@ fi
 if scenario_wanted rejection/bare-number-control; then
 current_scenario="rejection/bare-number-control"
 run_ltl c "${COMMON[@]}" -bs 5 "$SPAN_FIXTURE"
-if [[ "$(cat "$TMP_DIR/c.rc")" == 0 ]]; then
+# A run that printed nothing exits 0 too: the fixture's first timeline row is
+# the evidence the run was made.
+if [[ "$(cat "$TMP_DIR/c.rc")" == 0 ]] && grep -qE '^ *2025-05-07 10:00 ' <(timeline_text "$TMP_DIR/c.out"); then
     pass_with "a bare number is never rejected"
 else
     fail_with "a bare number is never rejected" \
-        "-bs 5 keeps today's meaning and exit code" \
-        'adapt_to_command_line_options() in ltl' "$CONTRACT_D3" "exit: $(cat "$TMP_DIR/c.rc")"
+        "-bs 5 keeps today's meaning and exit code, and the run draws its timeline" \
+        'adapt_to_command_line_options() in ltl' "$CONTRACT_D3" "exit: $(cat "$TMP_DIR/c.rc")" \
+        "timeline row for 2025-05-07 10:00: $(grep -cE '^ *2025-05-07 10:00 ' <(timeline_text "$TMP_DIR/c.out")) found"
 fi
 fi
 
@@ -404,7 +418,11 @@ fi
 if scenario_wanted one-mechanism/ru-week-matches-bs-week; then
 current_scenario="one-mechanism/ru-week-matches-bs-week"
 mkdir -p "$TMP_DIR/csv" && cp "$SPAN_FIXTURE" "$TMP_DIR/csv/span.txt"
+# set +e: the subshell inherits errexit, and a failed run would end it, and
+# the harness with it, before the checks below read what it left.
+set +e
 ( cd "$TMP_DIR/csv" && "$LTL" "${COMMON[@]}" -bs 1w -ru w -o span.txt > run.out 2> run.err; echo $? > run.rc )
+set -e
 if ! assert_no_runtime_warnings "$TMP_DIR/csv/run.err" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: runtime warnings")
 fi

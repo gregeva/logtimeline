@@ -201,6 +201,13 @@ run_test() {
         failures+=("$name :: perl-runtime-warnings-on-stderr")
         return
     fi
+    # An empty capture is reported as that, ahead of the width and reference
+    # checks: the width check fails it too, but would name the wrong cause.
+    if [[ ! -s "$tmpfile" ]]; then
+        emit_regression_fail "$name" "captured output is empty (regression target produced nothing; stderr below)" "$stderrfile"
+        return
+    fi
+
     # Soft-wrap cleanliness: a render that is byte-identical to its reference
     # still fails the reader if it is wider than the terminal, because the wrap
     # displaces every line below it. Only scenarios at or above the supported
@@ -229,11 +236,6 @@ run_test() {
             return
         fi
     fi
-    if [[ ! -s "$tmpfile" ]]; then
-        emit_regression_fail "$name" "captured output is empty (regression target produced nothing; stderr below)" "$stderrfile"
-        return
-    fi
-
     if diff -q "$reffile" "$tmpfile" > /dev/null 2>&1; then
         echo "  PASS  $name"
         pass=$((pass + 1))

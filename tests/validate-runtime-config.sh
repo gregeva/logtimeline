@@ -97,22 +97,38 @@ assert_line() {
     fi
 }
 
-# Self-documenting assertion: no line matching `pattern` is present.
+# Self-documenting assertion: no line matching `pattern` is present. The
+# absence is read only against a run that wrote what it is read in: a line
+# matching `evidence` must be present first, in `outfile` or in the file named
+# by `in` (HARNESS-DESIGN.md Trap 13, shape 3).
 assert_no_line() {
     local outfile="$1"
     shift
-    local pattern asserts produced_by contract
+    local pattern evidence in asserts produced_by contract
     while [[ $# -gt 0 ]]; do
         case "$1" in
             pattern)     pattern="$2";     shift 2 ;;
+            evidence)    evidence="$2";    shift 2 ;;
+            in)          in="$2";          shift 2 ;;
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
             *) echo "assert_no_line: unknown field '$1'"; exit 2 ;;
         esac
     done
+    : "${evidence:?assert_no_line requires evidence}"
+    in="${in:-$outfile}"
 
-    if grep -qE "$pattern" "$outfile"; then
+    if ! grep -qaE "$evidence" "$in"; then
+        echo "  FAIL  $current_scenario"
+        echo "        pattern:     !$pattern (nothing to read the absence against)"
+        echo "        evidence:    $evidence (not found in $in)"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: !$pattern (no evidence)")
+    elif grep -qE "$pattern" "$outfile"; then
         echo "  FAIL  $current_scenario"
         echo "        pattern:     !$pattern (unexpectedly present)"
         echo "        asserts:     $asserts"
@@ -126,28 +142,36 @@ assert_no_line() {
     fi
 }
 
-# Self-documenting equality assertion on exit code.
+# Self-documenting equality assertion on exit code. Any failure exits non-zero
+# and a run that printed nothing exits 0, so the exit code holds only beside a
+# line the run writes: `evidence`, a pattern found in the file named by `in`
+# (its message, or a line every run of its shape prints; HARNESS-DESIGN.md
+# shapes 6 and 14).
 assert_exit() {
     local actual="$1"
     local expected="$2"
     shift 2
-    local asserts produced_by contract
+    local evidence in asserts produced_by contract
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            evidence)    evidence="$2";    shift 2 ;;
+            in)          in="$2";          shift 2 ;;
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
             *) echo "assert_exit: unknown field '$1'"; exit 2 ;;
         esac
     done
+    : "${evidence:?assert_exit requires evidence}"
+    : "${in:?assert_exit requires in}"
 
-    if [[ "$actual" == "$expected" ]]; then
+    if [[ "$actual" == "$expected" ]] && grep -qaE -- "$evidence" "$in"; then
         echo "  PASS  $current_scenario :: exit=$actual"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario"
-        echo "        expected:    exit=$expected"
-        echo "        actual:      exit=$actual"
+        echo "        expected:    exit=$expected, and a line matching $evidence in $in"
+        echo "        actual:      exit=$actual$(grep -qaE -- "$evidence" "$in" || echo ", no such line")"
         echo "        asserts:     $asserts"
         echo "        produced_by: $produced_by"
         echo "        contract:    $contract"
@@ -282,6 +306,7 @@ scenario_pushback_silent() {
     for option in -hm -hg -g -mem; do
         run_ltl "pushback$option" -bs 1440 -oe -V runtime-config,format-detection "$option" "$METRIC_FIXTURE"
         assert_exit "$RUN_EXIT" 0 \
+            evidence    '^=== runtime-config ===$' in "$RUN_STDOUT" \
             asserts     "ltl $option <file> reads the file: a value outside $option's vocabulary is a file argument." \
             produced_by "$PRODUCED_BY_PUSHBACK" \
             contract    "$CONTRACT_PUSHBACK"
@@ -291,7 +316,7 @@ scenario_pushback_silent() {
             produced_by "$PRODUCED_BY_PUSHBACK; the file-argument expansion loop in adapt_to_command_line_options()" \
             contract    "$CONTRACT_PUSHBACK"
         assert_command \
-            command     "[ ! -s '$RUN_STDERR' ] && ! grep -q 'Continue with these options' '$RUN_STDOUT'" \
+            command     "grep -q '^=== runtime-config ===\$' '$RUN_STDOUT' && [ ! -s '$RUN_STDERR' ] && ! grep -q 'Continue with these options' '$RUN_STDOUT'" \
             label       "ltl $option <file> raises no notice and says nothing on stderr" \
             asserts     'The pushback is silent for every optional-operand option: a file after the option is the normal invocation.' \
             produced_by "$PRODUCED_BY_PUSHBACK" \
@@ -309,13 +334,14 @@ scenario_pushback_silent() {
 
     run_ltl "pushback-V" -bs 1440 -oe -V "$METRIC_FIXTURE"
     assert_exit "$RUN_EXIT" 0 \
+        evidence    '^=== runtime-config ===$' in "$RUN_STDOUT" \
         asserts     'ltl -V <file> reads the file with every section.' \
         produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
     assert_line "$RUN_STDOUT" pattern '^=== statistics-demand ===$' \
         asserts 'A pushed-back -V value leaves -V bare: every section is emitted.' \
         produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
     assert_command \
-        command     "[ ! -s '$RUN_STDERR' ] && ! grep -q 'Continue with these options' '$RUN_STDOUT'" \
+        command     "grep -q '^=== runtime-config ===\$' '$RUN_STDOUT' && [ ! -s '$RUN_STDERR' ] && ! grep -q 'Continue with these options' '$RUN_STDOUT'" \
         label       'ltl -V <file> raises no notice and says nothing on stderr' \
         asserts     'The -V pushback is silent, as every option'"'"'s is.' \
         produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
@@ -336,6 +362,7 @@ scenario_pushback_not_a_file() {
         IFS='|' read -r option value message <<< "$entry"
         run_ltl "not-a-file$option" -bs 1440 -oe "$option" "$value" "$METRIC_FIXTURE"
         assert_exit "$RUN_EXIT" 2 \
+            evidence    "^Error: '.*' matches no file" in "$RUN_STDERR" \
             asserts     "ltl $option $value <file>: the value is given back as a file argument and selects no file, so the run stops at file resolution." \
             produced_by "$PRODUCED_BY_PUSHBACK; file_argument_problem() in ltl" \
             contract    "$CONTRACT_PUSHBACK"
@@ -353,6 +380,7 @@ scenario_list_member_unknown() {
     echo "[$current_scenario]"
     run_ltl "list-V" -bs 1440 -oe -V format-detection,foo "$METRIC_FIXTURE"
     assert_exit "$RUN_EXIT" 1 \
+        evidence    "^Error: 'foo' given to -V/--verbose" in "$RUN_STDERR" \
         asserts     'A -V comma list with a known section is the option'"'"'s; its unknown member stops the run.' \
         produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
     assert_command \
@@ -363,6 +391,7 @@ scenario_list_member_unknown() {
 
     run_ltl "list-V-known" -bs 1440 -oe -V format-detection,csv-output "$METRIC_FIXTURE"
     assert_exit "$RUN_EXIT" 0 \
+        evidence    '^=== format-detection ===$' in "$RUN_STDOUT" \
         asserts     'A -V comma list of known sections is taken whole.' \
         produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
 }
@@ -384,7 +413,7 @@ scenario_optional_operand_source() {
         produced_by 'settle_optional_operand() in ltl' \
         contract    "$CONTRACT_PUSHBACK; docs/architecture-patterns.md § Optional-operand options and the filename pushback"
     assert_command \
-        command     "! grep -qF 'm{[/.]} || -e \$name' '$LTL'" \
+        command     "grep -qE '^sub adapt_to_command_line_options\\b' '$LTL' && ! grep -qF 'm{[/.]} || -e \$name' '$LTL'" \
         label       '-V keeps no path test of its own' \
         asserts     'The -V settlement no longer guesses whether a value looks like a path; the helper decides by the section vocabulary alone.' \
         produced_by 'adapt_to_command_line_options() in ltl (the -V settlement)' \
@@ -412,6 +441,7 @@ scenario_error_unknown_metric_lists() {
 
     run_ltl "metric-list-hg" -bs 1440 -oe -udm x::max -hg duration,foo "$METRIC_FIXTURE"
     assert_exit "$RUN_EXIT" 1 \
+        evidence    "^Error: 'foo' given to -hg/--histogram is not a metric" in "$RUN_STDERR" \
         asserts     'An -hg comma list naming a metric and a word that is none is a rejection, exit 1, before any file is read.' \
         produced_by 'settle_optional_operand() in ltl (the -hg settlement), reported via print_usage()' \
         contract    "$contract"
@@ -429,6 +459,7 @@ scenario_error_unknown_metric_lists() {
 
     run_ltl "metric-list-hg-no-udm" -bs 1440 -oe -hg duration,foo "$METRIC_FIXTURE"
     assert_exit "$RUN_EXIT" 1 \
+        evidence    "^Error: 'foo' given to -hg/--histogram is not a metric" in "$RUN_STDERR" \
         asserts     'Without -udm the same comma list is the same rejection: whether -udm was given changes nothing about the rule.' \
         produced_by 'settle_optional_operand() in ltl (the -hg settlement)' \
         contract    "$contract"
@@ -457,6 +488,7 @@ scenario_udm_position() {
     local after="$RUN_STDOUT" after_exit="$RUN_EXIT"
     run_ltl "udm-before" -bs 1440 -oe -udm 'sz::max:/" 200 ([0-9]+) /' -hg duration,sz "$METRIC_FIXTURE"
     assert_exit "$after_exit" 0 \
+        evidence    'sz Distribution' in "$after" \
         asserts     '-hg naming a user-defined metric before its -udm is accepted.' \
         produced_by 'parse_udm_configs() ahead of settle_optional_operand() in adapt_to_command_line_options()' \
         contract    "$contract"
@@ -485,7 +517,7 @@ TIME_NOTICE='^deprecated-spelling \| time \| is deprecated as a metric name \(gi
 run_section_only() {
     local label="$1" section="$2"; shift 2
     local hide
-    hide=$(printf '%s\n' title timeline histogram options messages summary | grep -vx "$section" | paste -sd, -)
+    hide=$(printf '%s\n' title timeline histogram options messages summary | grep -vx "$section" | paste -sd, -) || hide=""
     run_ltl "$label" -bs 1440 -oe --terminal-width 200 --hide "$hide" "$@"
 }
 
@@ -627,6 +659,7 @@ scenario_deprecated_metric_spellings() {
         '-so size raises exactly one deprecation notice naming size and bytes' 'record_deprecation() and print_deprecation_notices() in ltl'
     assert_no_line "$bytes_dir/run.notices" \
         pattern     'deprecated|MISSING-SECTION' \
+        evidence    '^=== notices ===$' in "$bytes_dir/run.out" \
         asserts     'The canonical name prints no deprecation line.' \
         produced_by 'builtin_metric_name() in ltl' \
         contract    "$CONTRACT_DEPRECATED"
@@ -704,6 +737,7 @@ scenario_error_unknown_exact_percentiles() {
     run_ltl "err-ep" --exact-percentiles "$TEST_LOG"
 
     assert_exit "$RUN_EXIT" 1 \
+        evidence    "unknown option '--exact-percentiles'" in "$RUN_STDERR" \
         asserts     '--exact-percentiles is not a known flag; ltl rejects it as an unknown option and exits non-zero. The flag is no longer part of the CLI surface; opt-out is via the per-surface data-model selector (-dm raw / -hgdm raw / -hmdm raw / -mdm raw / -bdm raw) per Issue #266.' \
         produced_by 'GetOptions parse failure classified by classify_option_error() in adapt_to_command_line_options()' \
         contract    'Issue #266 + Issue #287 - --exact-percentiles was the legacy F2/F3 opt-out; the data-model selectors are the locked replacement.'
@@ -865,6 +899,7 @@ scenario_runtime_config_discard() {
         contract    'features/567-discard-named-values-from-message.md section Decisions D13 and D18'
     assert_no_line "$RUN_STDOUT" \
         pattern     '^omit_durations:' \
+        evidence    '^=== runtime-config / command-line ===$' \
         asserts     'runtime-config reports the configuration the user provided: -d duration is reported by the discard row, and the omit row is not printed for an option the user did not give.' \
         produced_by 'emit_runtime_config_verbose() in ltl - the rows are emitted from %option_provenance, which records what was supplied' \
         contract    'features/567-discard-named-values-from-message.md section Decisions D18, revised 2026-09-19'
@@ -895,6 +930,7 @@ scenario_error_unknown_so() {
 
     run_ltl "err-so" -so invalidfield "$TEST_LOG"
     assert_exit "$RUN_EXIT" 1 \
+        evidence    'invalid sort type' in "$RUN_STDERR" \
         asserts     '-so with an unknown enum value is a hard error and exits with code 1.' \
         produced_by 'adapt_to_command_line_options() in ltl (sort-on enum validation), via print_usage() exit 1' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - hard-error paths pin current exit code; exit-code policy normalization is deferred to a separate ticket per scoping decision'
@@ -954,6 +990,7 @@ scenario_runtime_config_timestamp_precision() {
     run_ltl "rc-tp-absent" -V runtime-config "$TEST_LOG"
     assert_no_line "$RUN_STDOUT" \
         pattern     '^timestamp_precision:' \
+        evidence    '^=== runtime-config / command-line ===$' \
         asserts     'A run that does not supply -tp emits no timestamp-precision row: defaults are documented, not duplicated in the section.' \
         produced_by 'emit_runtime_config_verbose() in ltl (provenance partitioning)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
@@ -965,6 +1002,7 @@ scenario_error_unknown_du() {
 
     run_ltl "err-du" -du x "$TEST_LOG"
     assert_exit "$RUN_EXIT" 1 \
+        evidence    'Invalid duration unit' in "$RUN_STDERR" \
         asserts     '-du with an unknown enum value is a hard error (exit 1 via print_usage).' \
         produced_by 'adapt_to_command_line_options() in ltl (duration-unit enum validation)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
@@ -982,6 +1020,7 @@ scenario_error_unknown_ru() {
 
     run_ltl "err-ru" -ru x "$TEST_LOG"
     assert_exit "$RUN_EXIT" 1 \
+        evidence    'Invalid rate unit' in "$RUN_STDERR" \
         asserts     '-ru with an unknown enum value is a hard error (exit 1 via print_usage).' \
         produced_by 'adapt_to_command_line_options() in ltl (rate-unit enum validation)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
@@ -1003,6 +1042,7 @@ scenario_error_no_files() {
     # exit codes across error paths is out of scope per the deferred exit-code
     # policy decision in features/231-cli-validation-coverage.md § 8.
     assert_exit "$RUN_EXIT" 2 \
+        evidence    'unable to open any files' in "$RUN_STDERR" \
         asserts     'A non-existent file path is a hard error after glob expansion produces no matches (exit 2, distinct from the print_usage exit-1 paths).' \
         produced_by 'adapt_to_command_line_options() in ltl (post-glob @in_files empty check)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - exit-code disparity (1 vs 2) intentionally pinned; harmonization deferred to a separate ticket'
@@ -1020,6 +1060,7 @@ scenario_no_warning_on_clean_run() {
 
     run_ltl "clean" -bs 60 "$TEST_LOG"
     assert_exit "$RUN_EXIT" 0 \
+        evidence    'LINES READ' in "$RUN_STDOUT" \
         asserts     'A run with valid flags and a valid file exits 0.' \
         produced_by 'normal ltl execution' \
         contract    'baseline'
@@ -1027,6 +1068,7 @@ scenario_no_warning_on_clean_run() {
     # None of the silent-override warnings should fire on a clean run.
     assert_no_line "$RUN_STDERR" \
         pattern     "matches no file|is not a metric|given to" \
+        evidence    'LINES READ' in "$RUN_STDOUT" \
         asserts     'A clean run produces none of the silent-override warnings. This guards against the warnings firing on inputs they were not designed for.' \
         produced_by 'adapt_to_command_line_options() in ltl' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - warnings are gated on specific input shapes'
@@ -1038,6 +1080,7 @@ scenario_info_version_wins_over_parse_error() {
 
     run_ltl "info-ver" --version -b 5 "$TEST_LOG"
     assert_exit "$RUN_EXIT" 0 \
+        evidence    '^Version: ' in "$RUN_STDOUT" \
         asserts     'An informational option (--version) short-circuits before GetOptions runs, so an otherwise-fatal malformed companion option (-b, unknown post no_auto_abbrev) never triggers a parse error; the version prints and the process exits 0.' \
         produced_by 'dispatch_informational_options() in adapt_to_command_line_options() in ltl (pre-parse @ARGV scan)' \
         contract    'Issue #309 - informational options take precedence over option parsing and validation.'
@@ -1055,6 +1098,7 @@ scenario_info_help_beats_version() {
 
     run_ltl "info-help-ver" --help --version "$TEST_LOG"
     assert_exit "$RUN_EXIT" 0 \
+        evidence    'USAGE' in "$RUN_STDOUT" \
         asserts     'When multiple informational options are given, the fixed priority is help > explain > version regardless of command-line position; --help --version prints help and exits 0.' \
         produced_by 'dispatch_informational_options() in ltl (fixed help>explain>version priority)' \
         contract    'Issue #309 - informational-option precedence order.'
@@ -1072,6 +1116,7 @@ scenario_error_unknown_short_b() {
 
     run_ltl "err-b" -b 5 "$TEST_LOG"
     assert_exit "$RUN_EXIT" 1 \
+        evidence    "unknown option '-b'" in "$RUN_STDERR" \
         asserts     'With no_auto_abbrev, -b is no longer a unique-prefix abbreviation of any long option; it is a clean unknown option (not "ambiguous", not silently accepted) and exits 1.' \
         produced_by 'GetOptions parse failure classified by classify_option_error() in ltl' \
         contract    'Issue #309 - no_auto_abbrev + option-error classification.'

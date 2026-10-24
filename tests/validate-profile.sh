@@ -279,8 +279,11 @@ run_mode() {
     # The fixture applies no exclude/duration filters, so every matched line is
     # either folded-and-included or dropped on an excluded day.
     local incl drop
-    incl=$(grep -aE '^samples_included: ' "$section" | sed 's/^samples_included: //')
-    drop=$(grep -aE '^samples_dropped: '  "$section" | sed 's/^samples_dropped: //')
+    # A key the section lacks leaves the value empty, which the check below
+    # fails; without the fallback the lookup would end the harness here
+    # (tests/HARNESS-DESIGN.md Trap 13).
+    incl=$(grep -aE '^samples_included: ' "$section" | sed 's/^samples_included: //') || incl=""
+    drop=$(grep -aE '^samples_dropped: '  "$section" | sed 's/^samples_dropped: //') || drop=""
     if [[ "$incl" =~ ^[0-9]+$ && "$drop" =~ ^[0-9]+$ ]] && (( incl + drop == total )); then
         echo "  PASS  $current_scenario :: samples_included + samples_dropped = $total (total)"
         pass=$((pass + 1))

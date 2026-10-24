@@ -65,6 +65,12 @@ fail=0
 failures=()
 current_scenario=""
 
+# The checks that read only what the tool wrote (its trace, its images, the
+# files it left or removed) pass whatever $LTL does: the tool runs the
+# repository's ltl (features/747-harness-checks-on-a-failed-run.md D1), so their
+# PASS lines say so (tests/HARNESS-DESIGN.md section The failed-run checker).
+TOOL_OUTPUT="the screenshot tool's output"
+
 pass_with() { echo "  PASS  $current_scenario :: $1"; pass=$((pass + 1)); }
 fail_with() {
     echo "  FAIL  $current_scenario :: $1"
@@ -78,8 +84,14 @@ fail_with() {
 
 # assert_command: PASS when the command exits 0 (tests/HARNESS-DESIGN.md
 # section When the assertion isn't a simple line grep).
+# A check given `reads "CAPTURE ..."` is skipped, and counts nothing, when the
+# harness's own run of ltl for one of them failed; capture_ltl() counted that
+# failure once (tests/HARNESS-DESIGN.md Trap 13).
+# A check whose input does not depend on $LTL names it in `run_free`, and its
+# PASS line ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 assert_command() {
-    local command label asserts produced_by contract detail
+    local command label asserts produced_by contract detail reads="" run_free=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -87,12 +99,21 @@ assert_command() {
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            reads)       reads="$2";       shift 2 ;;
+            run_free)    run_free="$2";    shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
     : "${command:?}" "${label:?}" "${asserts:?}" "${produced_by:?}" "${contract:?}"
+    local cap
+    for cap in $reads; do
+        if [[ "$(cat "$cap.rc" 2>/dev/null)" != 0 ]]; then
+            echo "  SKIP  $current_scenario :: $label (its run of ltl failed: $(basename "$cap"))"
+            return 0
+        fi
+    done
     if detail=$(eval "$command" 2>&1); then
-        pass_with "$label${detail:+ ($(echo "$detail" | tail -1))}"
+        pass_with "$label${detail:+ ($(echo "$detail" | tail -1))}${run_free:+ [run-free: $run_free]}"
     else
         fail_with "$label" "$asserts" "$produced_by" "$contract" "command: $command
 $detail"
@@ -120,15 +141,30 @@ check_warnings() {
 # expected cells, section rows and heatmap columns come from here, not from the
 # tool. -ni per Invocation coherence (it changes the options row only, which no
 # crop reads).
+# A non-zero exit or an empty capture is one failure, counted here; $out.rc
+# records the outcome, and the checks that read the capture are skipped.
 capture_ltl() {
-    local trace="$1" out="$2" args
+    local trace="$1" out="$2" args rc=0
     args=$(sed -n 's/^trace: capture run: ltl //p' "$trace")
-    [[ -n "$args" ]] || { echo "no capture run in the trace $trace"; return 1; }
+    if [[ -z "$args" ]]; then
+        echo none > "$out.rc"
+        fail_with "a capture run in the trace ($(basename "$trace"))" 'The tool traces the ltl command of its capture run' \
+            'run_recipe() in process/capture-screenshots.pl' 'tests/HARNESS-DESIGN.md Trap 13' "no capture run in the trace $trace"
+        return 0
+    fi
     # shellcheck disable=SC2086
-    ( cd "$REPO_DIR" && "$LTL" -ni --debug-layout -V section-layout $args ) > "$out" 2> "$out.stderr"
+    ( cd "$REPO_DIR" && "$LTL" -ni --debug-layout -V section-layout $args ) > "$out" 2> "$out.stderr" || rc=$?
     # The -V block prints after the last row, so rows keep their numbers.
     sed -n '/^=== section-layout ===$/,/^=== END section-layout ===$/p' "$out" > "$out.layout"
     check_warnings "$out"
+    [[ $rc -eq 0 && ! -s "$out" ]] && rc=empty
+    echo "$rc" > "$out.rc"
+    if [[ "$rc" != 0 ]]; then
+        fail_with "ltl's own run for the comparison ($(basename "$out"))" \
+            'The harness runs ltl on the command the tool traced, and the run exits 0 and prints the rows the image is compared with' \
+            'ltl' 'tests/HARNESS-DESIGN.md Trap 13' "exit: $rc" "stderr: $(head -3 "$out.stderr" | tr '\n' ' ')"
+    fi
+    return 0
 }
 
 # A section's first and last row from the harness's own section-layout.
@@ -180,12 +216,14 @@ if scenario_wanted "$current_scenario"; then
     sum_last=$(( sv_last > sf_last ? sv_last : sf_last ))
     assert_command \
         command     "[[ \"\$(traced_crop '$out' 'sections=timeline start=+3 end=-1 cols=100,-25 label=a')\" == '$((tl_first + 3)) $((tl_last - 1)) 100 175' ]]" \
+        reads       "$TMP_DIR/cells.ltl" \
         label       "timeline start=+3 end=-1 cols=100,-25 at width 200: rows $((tl_first + 3))-$((tl_last - 1)), columns 100-174" \
         asserts     'A crop runs from its first section start row plus the start offset to its last row plus the end offset, rows as -V section-layout reports them; cols 100,-25 at width 200 is columns 100 up to 25 before the right edge' \
         produced_by 'resolve_crop() in process/capture-screenshots.pl, reading print_section_layout() in ltl' \
         contract    "$CONTRACT D2, D3"
     assert_command \
         command     "[[ \"\$(traced_crop '$out' 'sections=summary-values,summary-files label=b')\" == '$sv_first $sum_last 0 200' ]]" \
+        reads       "$TMP_DIR/cells.ltl" \
         label       "summary-values,summary-files: rows $sv_first-$sum_last, to the longer of the two side-by-side parts" \
         asserts     'A crop naming side-by-side parts ends at the largest last row among them' \
         produced_by 'resolve_crop() in process/capture-screenshots.pl' \
@@ -195,6 +233,7 @@ if scenario_wanted "$current_scenario"; then
         file="$TMP_DIR/c-$(echo "$spec" | sed -E 's/sections=([^ ]*).*label=([a-z]+)/\1-\2/; s/,/+/g').svg"
         assert_command \
             command     "perl '$CELLS' chars '$file' '$TMP_DIR/cells.ltl' $first $last $cf $cs 0,0,0,0" \
+            reads       "$TMP_DIR/cells.ltl" \
             label       "characters of '$spec' equal ltl's rows $first-$last, columns $cf-$((cs - 1))" \
             asserts     'Every cell of the image carries the character ltl printed in that row and column: the crop is a slice of the output, placed on the cell grid' \
             produced_by 'render_svg() and build_grid() in process/capture-screenshots.pl' \
@@ -214,6 +253,7 @@ if scenario_wanted "$current_scenario"; then
         read -r first last cf cs <<< "$(traced_crop "$out" '')" || true
         assert_command \
             command     "perl '$CELLS' colours '$TMP_DIR/k$bg.svg' '$TMP_DIR/colours-$bg.ltl' $first $last $cf $cs 0,0,0,0" \
+            reads       "$TMP_DIR/colours-$bg.ltl" \
             label       "$bg: every colour ltl names is drawn in one colour, 256-colour indices at their xterm values" \
             asserts     'Each foreground and background colour ltl printed maps to exactly one colour in the image, through the tool colour table; indices 16 to 255 at the standard xterm values; the default background is the image background' \
             produced_by 'palette_for() and build_grid() in process/capture-screenshots.pl' \
@@ -232,6 +272,7 @@ if scenario_wanted "$current_scenario"; then
     read -r first last cf cs <<< "$(traced_crop "$out" 'sections=histogram')" || true
     assert_command \
         command     "perl '$CELLS' ticks '$TMP_DIR/t-histogram.svg' '$TMP_DIR/ticks.ltl' $first $last $cf $cs 0,0,0,0" \
+        reads       "$TMP_DIR/ticks.ltl" \
         label       'every percentile tick on the histogram axis sits in the column ltl printed it' \
         asserts     'The tick glyphs on the histogram axis row are in the same columns in the image as in ltl output, whose columns tests/validate-histogram-ticks.sh asserts' \
         produced_by 'render_svg() in process/capture-screenshots.pl; the axis row of print_histogram() in ltl' \
@@ -248,13 +289,14 @@ if scenario_wanted "$current_scenario"; then
     capture_ltl "$out" "$TMP_DIR/heat.ltl"
     args=$(sed -n 's/^trace: capture run: ltl //p' "$out")
     # shellcheck disable=SC2086
-    ( cd "$REPO_DIR" && "$LTL" -ni -V heatmap-palette $args ) > "$TMP_DIR/heat.palette" 2> "$TMP_DIR/heat.palette.stderr"
+    ( cd "$REPO_DIR" && "$LTL" -ni -V heatmap-palette $args ) > "$TMP_DIR/heat.palette" 2> "$TMP_DIR/heat.palette.stderr" || true
     check_warnings "$TMP_DIR/heat.palette"
     active=$(sed -n 's/^gradient_active: //p' "$TMP_DIR/heat.palette")
     gradient=$(sed -n "s/^gradient_$active: //p" "$TMP_DIR/heat.palette")
     read -r first last cf cs <<< "$(traced_crop "$out" 'sections=timeline')" || true
     assert_command \
         command     "[[ -n '$gradient' ]] && perl '$CELLS' heatmap '$TMP_DIR/h-timeline.svg' '$TMP_DIR/heat.ltl' $first $last $cf $cs 0,0,0,0 '$TMP_DIR/heat.ltl.stderr' '$gradient'" \
+        reads       "$TMP_DIR/heat.ltl" \
         label       "heatmap cells use only the $active gradient ($gradient) and every one is in the image" \
         asserts     'Every heatmap cell ltl printed, located by the layout engine column offsets, carries a colour of the gradient -V heatmap-palette reports, and the image carries each of them' \
         produced_by 'print_heatmap_row() in ltl; render_svg() in process/capture-screenshots.pl' \
@@ -277,7 +319,8 @@ if scenario_wanted "$current_scenario"; then
             label       "$bg: both runs get $flag and the image is drawn on $fill" \
             asserts     'The background a screenshot states is forced on ltl in both runs, never detected, and the image is drawn on the matching background' \
             produced_by 'run_recipe() and render_svg() in process/capture-screenshots.pl' \
-            contract    "$CONTRACT criterion 4, D7"
+            contract    "$CONTRACT criterion 4, D7" \
+            run_free    "$TOOL_OUTPUT"
     done
     out="$TMP_DIR/bg-default"
     run_tool "$out" --name bd --out-dir "$TMP_DIR" --trace --crop 'sections=options' -- -ni -bs 1440 -oe -n 1 "$FIXTURE" || true
@@ -287,7 +330,8 @@ if scenario_wanted "$current_scenario"; then
         label       'no background given: dark (-dbg)' \
         asserts     'A screenshot that does not state its background is dark' \
         produced_by 'main() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT D7"
+        contract    "$CONTRACT D7" \
+        run_free    "$TOOL_OUTPUT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -306,7 +350,8 @@ if scenario_wanted "$current_scenario"; then
             label       "a crop naming the $state section $section fails, names it, and writes no image" \
             asserts     'A crop naming a section the report gives as hidden or absent is an error naming the section, not an empty image' \
             produced_by 'resolve_crop() in process/capture-screenshots.pl' \
-            contract    "$CONTRACT criterion 5, D2"
+            contract    "$CONTRACT criterion 5, D2" \
+            run_free    "$TOOL_OUTPUT"
     done
 fi
 
@@ -332,7 +377,8 @@ if scenario_wanted "$current_scenario"; then
             label       "$name: ltl gets --terminal-width $w --terminal-height $h" \
             asserts     'The terminal size reaching ltl is the tool command line value, else the manifest entry, else 211 x 53' \
             produced_by 'main() and run_manifest() in process/capture-screenshots.pl' \
-            contract    "$CONTRACT criterion 6, D11"
+            contract    "$CONTRACT criterion 6, D11" \
+            run_free    "$TOOL_OUTPUT"
     done
 fi
 
@@ -350,7 +396,8 @@ if scenario_wanted "$current_scenario"; then
         label       'four crops: ltl run exactly twice, four images named in layers' \
         asserts     'One execution yields one image per crop, all cut from one capture run after one probe run, named BASE[-sections][-label]' \
         produced_by 'run_recipe() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT criterion 7, D19 naming"
+        contract    "$CONTRACT criterion 7, D19 naming" \
+        run_free    "$TOOL_OUTPUT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -369,7 +416,8 @@ if scenario_wanted "$current_scenario"; then
         label       'two entries, both regenerated; a quoted ltl argument and a YAML list of sections read as written' \
         asserts     'A manifest run regenerates every entry; the ltl string is split as a shell splits it' \
         produced_by 'run_manifest() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT criterion 8, D19"
+        contract    "$CONTRACT criterion 8, D19" \
+        run_free    "$TOOL_OUTPUT"
     out="$TMP_DIR/batch-only"
     mkdir -p "$TMP_DIR/batch-only-out"
     run_tool "$out" --manifest "$manifest" --only two --out-dir "$TMP_DIR/batch-only-out" || true
@@ -379,7 +427,8 @@ if scenario_wanted "$current_scenario"; then
         label       '--only two regenerates that entry alone' \
         asserts     'A manifest run with --only NAME regenerates that entry and no other' \
         produced_by 'run_manifest() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT D19"
+        contract    "$CONTRACT D19" \
+        run_free    "$TOOL_OUTPUT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -398,6 +447,7 @@ if scenario_wanted "$current_scenario"; then
         read -r first last cf cs <<< "$(traced_crop "$out" 'sections=timeline,histogram')" || true
         assert_command \
             command     "perl '$CELLS' edges '$TMP_DIR/e-timeline+histogram.svg' '$TMP_DIR/edges.ltl' $first $last $cf $cs 0,0,0,0" \
+            reads       "$TMP_DIR/edges.ltl" \
             label       'every full block of the timeline and the histogram, as Quick Look displays it, fills its own columns' \
             asserts     'Drawn as font text, a full block sits within its cell columns as displayed: sampled 1.5 device pixels inside its left and right edges it is its own colour' \
             produced_by 'render_svg() in process/capture-screenshots.pl (textLength per run, full blocks drawn last)' \
@@ -423,7 +473,8 @@ if scenario_wanted "$current_scenario"; then
         label       'ltl ran in the named folder, read logs/access.txt there, and the file list shows logs/access.txt as written' \
         asserts     'An ad hoc run with --dir runs ltl in that folder: an input named relative to it is read, and the summary file list shows the path as written, not as a path from the repository root' \
         produced_by 'run_ltl() and main() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT criterion 13, D21"
+        contract    "$CONTRACT criterion 13, D21" \
+        run_free    "$TOOL_OUTPUT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -447,7 +498,8 @@ if scenario_wanted "$current_scenario"; then
         label       'dir: env runs ltl in env beside the manifest, from the repository root' \
         asserts     'A manifest entry dir is resolved against the manifest file folder, whatever folder the tool runs from' \
         produced_by 'run_manifest() and resolve_dir() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT criterion 14, D21"
+        contract    "$CONTRACT criterion 14, D21" \
+        run_free    "$TOOL_OUTPUT"
     printf 'screenshots:\n  - name: mm\n    dir: missing\n    ltl: -bs 1440 -oe -n 1 logs/access.txt\n' > "$mdir/missing.yaml"
     mkdir -p "$TMP_DIR/mm-out"
     for case in manifest adhoc; do
@@ -464,7 +516,8 @@ if scenario_wanted "$current_scenario"; then
             label       "$case: a dir that is not a folder is an error naming it, nothing run, no image" \
             asserts     'A run folder that does not exist is refused before ltl runs, naming the folder' \
             produced_by 'resolve_dir() in process/capture-screenshots.pl' \
-            contract    "$CONTRACT criterion 14, D21"
+            contract    "$CONTRACT criterion 14, D21" \
+            run_free    "$TOOL_OUTPUT"
     done
 fi
 
@@ -488,13 +541,15 @@ if scenario_wanted "$current_scenario"; then
         label       'the run wrote its -o files in the folder and the tool removed them, not the earlier export' \
         asserts     'The files -o wrote in a named folder are removed after each run, and only those' \
         produced_by 'remove_output_files() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT criterion 15, D22"
+        contract    "$CONTRACT criterion 15, D22" \
+        run_free    "$TOOL_OUTPUT"
     assert_command \
         command     "[[ \"\$(output_files_in '$folder')\" == '$keep' ]] && cmp -s '$folder/$keep' '$TMP_DIR/kept.orig'" \
         label       'afterwards the folder holds the earlier export alone, unchanged' \
         asserts     'A file matching the output names that was in the named folder before the run is still there, unchanged, and no file of the run is left' \
         produced_by 'output_files() and remove_output_files() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT criterion 15, D22"
+        contract    "$CONTRACT criterion 15, D22" \
+        run_free    "$TOOL_OUTPUT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -510,7 +565,8 @@ if scenario_wanted "$current_scenario"; then
         cp "$REPO_DIR/$FIXTURE" "$folder/access.txt"
         real=$(cd "$folder" && pwd -P)
         if [[ "$case" == existing ]]; then
-            ( cd "$folder" && "$LTL" --disable-progress -idx -bs 1440 -oe -n 1 access.txt ) > "$TMP_DIR/index-seed" 2> "$TMP_DIR/index-seed.stderr"
+            # A failed seed leaves no index, which the check below fails.
+            ( cd "$folder" && "$LTL" --disable-progress -idx -bs 1440 -oe -n 1 access.txt ) > "$TMP_DIR/index-seed" 2> "$TMP_DIR/index-seed.stderr" || true
             check_warnings "$TMP_DIR/index-seed"
         fi
         had_index=$([[ -s "$folder/ltl-index.csv" ]] && echo yes || echo no)
@@ -524,7 +580,8 @@ if scenario_wanted "$current_scenario"; then
                 label       'a folder without an index: ltl wrote one, the tool removed it' \
                 asserts     'In a named folder, an ltl-index.csv the recipe runs created is removed afterwards' \
                 produced_by 'run_recipe() in process/capture-screenshots.pl' \
-                contract    "$CONTRACT criterion 19, D26"
+                contract    "$CONTRACT criterion 19, D26" \
+                run_free    "$TOOL_OUTPUT"
         else
             assert_command \
                 command     "[[ $status -eq 0 && $had_index == yes ]] && ! grep -qF 'ltl-index.csv' '$out' && [[ -s '$folder/ltl-index.csv' ]]" \
@@ -551,7 +608,8 @@ if scenario_wanted "$current_scenario"; then
         label       'ad hoc: a crop 90 cells wide with the default padding is 677 units wide, and each SVG has its PNG of the same size' \
         asserts     'Every SVG is a whole number of units wide, a fractional width rounded up into the right margin (94 cells x 7.2 = 676.8 becomes 677), and has a PNG of the same name whose pixel size is the SVG size' \
         produced_by 'render_svg(), draw_pngs() in process/capture-screenshots.pl; process/capture-png.swift' \
-        contract    "$CONTRACT criterion 16, D24, D25"
+        contract    "$CONTRACT criterion 16, D24, D25" \
+        run_free    "$TOOL_OUTPUT"
     manifest="$TMP_DIR/png-size.yaml"
     printf 'screenshots:\n  - name: q\n    ltl: -ni -bs 1440 -oe -n 1 -hg duration %s\n    pad: 1,3\n    crops:\n      - sections: histogram\n      - sections: summary-values\n        cols: 0,47\n' "$FIXTURE" > "$manifest"
     out="$TMP_DIR/png-size-manifest.run"
@@ -563,7 +621,8 @@ if scenario_wanted "$current_scenario"; then
         label       'manifest: each of its two SVGs has its PNG of the same size' \
         asserts     'A manifest run writes a PNG of the same name and size beside every SVG' \
         produced_by 'run_recipe() and draw_pngs() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT criterion 16, D24"
+        contract    "$CONTRACT criterion 16, D24" \
+        run_free    "$TOOL_OUTPUT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -586,7 +645,8 @@ if scenario_wanted "$current_scenario"; then
                 label       "$bg: corners are the background and every full block is its colour at its cell centre" \
                 asserts     'The PNG is the SVG drawn one pixel per unit: its size is the SVG size, its corners the image background, and each full block, sampled at the centre of its cell, is its own colour, so nothing is shifted or scaled' \
                 produced_by 'process/capture-png.swift, run by draw_pngs() in process/capture-screenshots.pl' \
-                contract    "$CONTRACT criterion 17, D24, D25"
+                contract    "$CONTRACT criterion 17, D24, D25" \
+                run_free    "$TOOL_OUTPUT"
         done
     fi
 fi
@@ -609,7 +669,8 @@ if scenario_wanted "$current_scenario"; then
         label       'no swiftc on the PATH: an error naming it, ltl not run, no image' \
         asserts     'The PNG needs the Swift compiler; without it the tool stops with an error naming it before ltl runs, and writes no image' \
         produced_by 'prepare_png_helper() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT criterion 18, D24"
+        contract    "$CONTRACT criterion 18, D24" \
+        run_free    "$TOOL_OUTPUT"
 fi
 
 # The text colour of the dark profile, Terminal.app Clear Dark (%profiles in
@@ -629,12 +690,14 @@ if scenario_wanted "$current_scenario"; then
     read -r first last cf cs <<< "$(traced_crop "$out" 'sections=notices')" || true
     assert_command \
         command     "perl '$CELLS' faint '$TMP_DIR/f-notices.svg' '$TMP_DIR/faint.ltl' ${first:-0} ${last:-0} ${cf:-0} ${cs:-0} 0,0,0,0 '$DARK_TEXT'" \
+        reads       "$TMP_DIR/faint.ltl" \
         label       'the panel heading description: faint cells drawn halfway between their colour and the background' \
         asserts     'Text ltl prints faint (SGR 2) is drawn halfway between the colour it names and the background, as Terminal.app draws it, never at full strength' \
         produced_by 'build_grid() and faint_of() in process/capture-screenshots.pl' \
         contract    "$CONTRACT D27"
     assert_command \
         command     "perl '$CELLS' colours '$TMP_DIR/f-notices.svg' '$TMP_DIR/faint.ltl' ${first:-0} ${last:-0} ${cf:-0} ${cs:-0} 0,0,0,0" \
+        reads       "$TMP_DIR/faint.ltl" \
         label       'every colour of the panel, faint and full, drawn consistently' \
         asserts     'Each colour ltl names, faint or not, is drawn in one colour throughout the image' \
         produced_by 'build_grid() in process/capture-screenshots.pl' \
@@ -681,7 +744,8 @@ if scenario_wanted "$current_scenario"; then
             label       'one run of ltl, in the pane, with the steps traced' \
             asserts     'A pane capture runs ltl once, in a tmux pane, with no probe run' \
             produced_by 'run_recipe() and run_pane() in process/capture-screenshots.pl' \
-            contract    "$CONTRACT D27"
+            contract    "$CONTRACT D27" \
+            run_free    "$TOOL_OUTPUT"
         assert_command \
             command     "grep -q 'Continue with these options?' '$TMP_DIR/pane.own' && perl '$CELLS' chars '$TMP_DIR/p.svg' '$TMP_DIR/pane.own' 1 53 0 211 0,0,0,0" \
             label       'the image is the pane: the question over the run, every cell as tmux holds it' \
@@ -699,7 +763,8 @@ if scenario_wanted "$current_scenario"; then
             label       'the pane image flagged for a check, with its PNG' \
             asserts     'Every pane image is flagged for a sensitive-content check and has its PNG of the same size' \
             produced_by 'run_recipe() in process/capture-screenshots.pl' \
-            contract    "$CONTRACT D27, D23"
+            contract    "$CONTRACT D27, D23" \
+            run_free    "$TOOL_OUTPUT"
     fi
 fi
 
@@ -719,7 +784,8 @@ if scenario_wanted "$current_scenario"; then
             label       "$tag: refused with '$message', no image" \
             asserts     'A pane crop naming sections or offsets, a step that is neither sleep:N nor a key, and steps with no wait are refused before any image is written' \
             produced_by 'parse_pane() and run_recipe() in process/capture-screenshots.pl' \
-            contract    "$CONTRACT D27"
+            contract    "$CONTRACT D27" \
+            run_free    "$TOOL_OUTPUT"
     done
 fi
 

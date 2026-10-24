@@ -137,7 +137,7 @@ assert_int_le() {
         return
     fi
     local value
-    value=$(grep -E "^${key}: [0-9]+\$" "$outfile" | sed -E "s/^${key}: //")
+    value=$(grep -E "^${key}: [0-9]+\$" "$outfile" | sed -E "s/^${key}: //") || value=""
     if [[ "$value" -le "$max" && "$value" -ge "$min" ]]; then
         echo "  PASS  $current_scenario :: $key=$value (in [$min,$max])"
         pass=$((pass + 1))
@@ -173,39 +173,48 @@ check_capture_warnings() {
 # bucket with no empty buckets and the smallest table (`-bs 1440 -oe -n 1
 # -osum`), on the smallest fixture carrying the format under assertion.
 #
-# HARNESS-DESIGN.md Trap 1: preserve stderr, check exit code.
+# HARNESS-DESIGN.md Trap 1: preserve stderr, check exit code. Called directly,
+# never inside $( ): the capture's path is handed back in REGISTRY_OUT, and a
+# failed run is one failure counted here in the main shell, its caller
+# returning (Trap 12 and Trap 13).
+REGISTRY_OUT=""
 run_format_registry() {
     local log="$1"
     shift
     local outfile
     outfile="$TMP_DIR/$(basename "$log" | tr -c 'A-Za-z0-9._-' '_')$$.out"
+    REGISTRY_OUT="$outfile"
     set +e
     "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-registry "$@" "$log" > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
     if [[ "$ec" -ne 0 ]]; then
-        echo "FAIL: ltl exited $ec for $log; stderr:" >&2
-        sed 's/^/    /' "$outfile.stderr" >&2
-        exit 1
+        run_failed "ltl exited $ec for $(basename "$log")" "$outfile.stderr"; return 1
     fi
     if [[ ! -s "$outfile" ]]; then
-        echo "FAIL: empty capture for $log" >&2
-        exit 1
+        run_failed "empty capture for $(basename "$log")" "$outfile.stderr"; return 1
     fi
     # HARNESS-DESIGN.md Trap 3: confirm the section header is present before
     # returning the path, so a renamed or removed section fails loudly here
     # rather than as a wall of not-found assertions.
     if ! grep -qE '^=== format-registry ===$' "$outfile"; then
-        echo "FAIL: format-registry section header not found in capture for $log" >&2
-        echo "       capture: $outfile" >&2
-        exit 1
+        run_failed "format-registry section header not found in the capture for $(basename "$log")" "$outfile.stderr"; return 1
     fi
     if ! grep -qE '^=== END format-registry ===$' "$outfile"; then
-        echo "FAIL: format-registry END marker not found in capture for $log" >&2
-        echo "       capture: $outfile" >&2
-        exit 1
+        run_failed "format-registry END marker not found in the capture for $(basename "$log")" "$outfile.stderr"; return 1
     fi
-    echo "$outfile"
+}
+
+# run_failed REASON STDERR: one failure for a run that gave nothing to read;
+# the caller skips its checks.
+run_failed() {
+    echo "  FAIL  $current_scenario :: $1"
+    echo "        asserts:     the run exits 0 and writes the section its checks read"
+    echo "        produced_by: emit_format_registry_verbose() in ltl"
+    echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+    sed 's/^/        | /' "$2" | head -5
+    echo "  SKIP  $current_scenario :: its checks (the run gave nothing to read)"
+    fail=$((fail + 1)); failures+=("$current_scenario :: $1")
 }
 
 # ---------------------------------------------------------------------------
@@ -215,7 +224,8 @@ scenario_inventory() {
     current_scenario="inventory"
     echo "[$current_scenario]"
     local out
-    out=$(run_format_registry "$FIXTURES/tomcat-access.txt")
+    run_format_registry "$FIXTURES/tomcat-access.txt" || return 0
+    out="$REGISTRY_OUT"
     check_capture_warnings "$out"
 
     assert_line "$out" \
@@ -295,7 +305,8 @@ scenario_structure() {
     current_scenario="structure"
     echo "[$current_scenario]"
     local out
-    out=$(run_format_registry "$FIXTURES/tomcat-access.txt")
+    run_format_registry "$FIXTURES/tomcat-access.txt" || return 0
+    out="$REGISTRY_OUT"
     check_capture_warnings "$out"
 
     assert_line "$out" \
@@ -356,7 +367,8 @@ scenario_election_single_format() {
     current_scenario="election-single-format"
     echo "[$current_scenario]"
     local out
-    out=$(run_format_registry "$FIXTURES/tomcat-access.txt")
+    run_format_registry "$FIXTURES/tomcat-access.txt" || return 0
+    out="$REGISTRY_OUT"
     check_capture_warnings "$out"
 
     assert_int_le "$out" \
@@ -388,7 +400,8 @@ scenario_election_mixed_format() {
     current_scenario="election-mixed-format"
     echo "[$current_scenario]"
     local out
-    out=$(run_format_registry "$FIXTURES/mixed.txt")
+    run_format_registry "$FIXTURES/mixed.txt" || return 0
+    out="$REGISTRY_OUT"
     check_capture_warnings "$out"
 
     assert_int_le "$out" \
@@ -413,7 +426,8 @@ scenario_election_pinned() {
     current_scenario="election-pinned"
     echo "[$current_scenario]"
     local out
-    out=$(run_format_registry "$FIXTURES/tomcat-access.txt" -lf access_common_duration)
+    run_format_registry "$FIXTURES/tomcat-access.txt" -lf access_common_duration || return 0
+    out="$REGISTRY_OUT"
     check_capture_warnings "$out"
 
     assert_line "$out" \
@@ -444,14 +458,16 @@ scenario_invalid_pin_no_codegen() {
     local ec=$?
     set -e
 
-    if [[ "$ec" -eq 0 ]]; then
+    # Any failure exits non-zero: the refusal is the exit and its message
+    # (tests/HARNESS-DESIGN.md Trap 13).
+    if [[ "$ec" -eq 0 ]] || ! grep -qE "^Error: Unknown log format 'nonsense' for -lf\." "$outfile.stderr"; then
         echo "  FAIL  $current_scenario"
         echo "        asserts:     An unknown -lf operand is a usage error"
         echo "        produced_by: apply_format_pin() in ltl"
         echo "        contract:    features/log-format-registry.md D49/N9"
-        echo "        (ltl exited 0 for -lf nonsense)"
+        echo "        (ltl exited $ec for -lf nonsense; stderr: $(head -2 "$outfile.stderr" | tr '\n' ' '))"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: unknown -lf exited 0")
+        failures+=("$current_scenario :: unknown -lf not refused with its message")
     else
         echo "  PASS  $current_scenario :: unknown -lf exits non-zero ($ec)"
         pass=$((pass + 1))
@@ -479,16 +495,14 @@ scenario_benchmark_data_reemission() {
         "$FIXTURES/mixed.txt" > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
-    if [[ "$ec" -ne 0 ]]; then
-        echo "FAIL: ltl exited $ec; stderr:" >&2
-        sed 's/^/    /' "$outfile.stderr" >&2
-        exit 1
-    fi
     check_capture_warnings "$outfile"
+    if [[ "$ec" -ne 0 || ! -s "$outfile" ]]; then
+        run_failed "ltl exited $ec, $(wc -c < "$outfile" | tr -d ' ') bytes" "$outfile.stderr"; return 0
+    fi
 
     local section_value bench_value
-    section_value=$(grep -E '^scan_subs_compiled: [0-9]+$' "$outfile" | sed -E 's/^scan_subs_compiled: //')
-    bench_value=$(grep -E '^COUNTS\tformat_scan_subs_compiled\t[0-9]+$' "$outfile" | cut -f3)
+    section_value=$(grep -E '^scan_subs_compiled: [0-9]+$' "$outfile" | sed -E 's/^scan_subs_compiled: //') || section_value=""
+    bench_value=$(grep -E '^COUNTS\tformat_scan_subs_compiled\t[0-9]+$' "$outfile" | cut -f3) || bench_value=""
 
     if [[ -z "$section_value" || -z "$bench_value" ]]; then
         echo "  FAIL  $current_scenario"
@@ -533,12 +547,12 @@ scenario_unarmed_run() {
         "$FIXTURES/tomcat-access.txt" > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
-    if [[ "$ec" -ne 0 ]]; then
-        echo "FAIL: ltl exited $ec; stderr:" >&2
-        sed 's/^/    /' "$outfile.stderr" >&2
-        exit 1
-    fi
     check_capture_warnings "$outfile"
+    # An absence on a run that printed nothing holds: the format-detection
+    # section the run was asked for is its evidence (Trap 13).
+    if [[ "$ec" -ne 0 ]] || ! grep -qE '^=== format-detection ===$' "$outfile"; then
+        run_failed "ltl exited $ec, or wrote no format-detection section" "$outfile.stderr"; return 0
+    fi
 
     if grep -qE '^MEMORY\tformat_scan_subs\t' "$outfile"; then
         echo "  FAIL  $current_scenario"
@@ -572,7 +586,8 @@ scenario_csv_pinned() {
     echo "[$current_scenario]"
     write_csv_fixtures
     local out
-    out=$(run_format_registry "$TMP_DIR/a-first.csv" -lf csv -udm latency)
+    run_format_registry "$TMP_DIR/a-first.csv" -lf csv -udm latency || return 0
+    out="$REGISTRY_OUT"
     check_capture_warnings "$out"
     assert_line "$out" \
         pattern     '^scan_subs_compiled: 2$' \
@@ -591,9 +606,11 @@ scenario_csv_same_shape() {
     echo "[$current_scenario]"
     write_csv_fixtures
     local one two
-    one=$(run_format_registry "$TMP_DIR/a-first.csv" -udm latency)
+    run_format_registry "$TMP_DIR/a-first.csv" -udm latency || return 0
+    one="$REGISTRY_OUT"
     check_capture_warnings "$one"
-    two=$(run_format_registry "$TMP_DIR/b-same.csv" -udm latency "$TMP_DIR/a-first.csv")
+    run_format_registry "$TMP_DIR/b-same.csv" -udm latency "$TMP_DIR/a-first.csv" || return 0
+    two="$REGISTRY_OUT"
     check_capture_warnings "$two"
     assert_line "$one" \
         pattern     '^scan_subs_compiled: 2$' \
@@ -617,7 +634,8 @@ scenario_csv_different_shape() {
     echo "[$current_scenario]"
     write_csv_fixtures
     local out
-    out=$(run_format_registry "$TMP_DIR/b-reordered.csv" -udm latency "$TMP_DIR/a-first.csv")
+    run_format_registry "$TMP_DIR/b-reordered.csv" -udm latency "$TMP_DIR/a-first.csv" || return 0
+    out="$REGISTRY_OUT"
     check_capture_warnings "$out"
     assert_line "$out" \
         pattern     '^scan_subs_compiled: 3$' \
@@ -641,7 +659,8 @@ scenario_csv_day_first() {
     echo "[$current_scenario]"
     write_csv_fixtures
     local out
-    out=$(run_format_registry "$TMP_DIR/day-first.csv" -udm latency)
+    run_format_registry "$TMP_DIR/day-first.csv" -udm latency || return 0
+    out="$REGISTRY_OUT"
     check_capture_warnings "$out"
     assert_line "$out" \
         pattern     '^compiled_orders: csv:csv_ddmm:sep=comma:ts=0:udm=1:msg=-;[^;]+$' \
@@ -655,7 +674,8 @@ scenario_csv_day_first() {
         contract    "$CONTRACT_615; section 5.7 (every generation is counted)"
     cp "$TMP_DIR/day-first.csv" "$TMP_DIR/day-first-2.csv"
     local pair
-    pair=$(run_format_registry "$TMP_DIR/day-first-2.csv" -udm latency "$TMP_DIR/day-first.csv")
+    run_format_registry "$TMP_DIR/day-first-2.csv" -udm latency "$TMP_DIR/day-first.csv" || return 0
+    pair="$REGISTRY_OUT"
     check_capture_warnings "$pair"
     assert_line "$pair" \
         pattern     '^scan_subs_compiled: 5$' \
@@ -689,7 +709,8 @@ scenario_occupant_swap() {
     echo "[$current_scenario]"
     write_occupant_swap_fixtures
     local out
-    out=$(run_format_registry "$TMP_DIR/swap-c-month-first.txt" "$TMP_DIR/swap-a-month-first.txt" "$TMP_DIR/swap-b-day-first.txt")
+    run_format_registry "$TMP_DIR/swap-c-month-first.txt" "$TMP_DIR/swap-a-month-first.txt" "$TMP_DIR/swap-b-day-first.txt" || return 0
+    out="$REGISTRY_OUT"
     check_capture_warnings "$out"
     assert_line "$out" \
         pattern     '^scan_subs_compiled: 2$' \

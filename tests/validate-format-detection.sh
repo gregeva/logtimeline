@@ -94,6 +94,10 @@ assert_line() {
     : "${produced_by:?assert_line requires produced_by}"
     : "${contract:?assert_line requires contract}"
 
+    if failed_run "$outfile"; then
+        echo "  SKIP  $current_scenario :: $pattern (its run failed)"
+        return
+    fi
     if grep -qE "$pattern" "$outfile"; then
         echo "  PASS  $current_scenario :: $pattern"
         pass=$((pass + 1))
@@ -137,6 +141,10 @@ assert_absent() {
         failures+=("$current_scenario :: missing capture for absence check")
         return
     fi
+    if failed_run "$outfile"; then
+        echo "  SKIP  $current_scenario :: absent: $pattern (its run failed)"
+        return
+    fi
     if grep -qE "$pattern" "$outfile"; then
         echo "  FAIL  $current_scenario"
         echo "        pattern:     $pattern (contracted ABSENT, but found)"
@@ -152,12 +160,40 @@ assert_absent() {
     fi
 }
 
-# Runtime-warning cleanliness for a run_format_detection capture (its stderr
-# lives beside the captured stdout as <capture>.stderr). Runs in the main
-# shell so the fail counters persist - a command-substitution subshell could
-# not update them. HARNESS-DESIGN.md section Runtime-warning cleanliness.
-check_capture_warnings() {
+# The run helpers execute inside $( ), where a failure they counted would be
+# lost (HARNESS-DESIGN.md Trap 12), so each records its run's outcome beside
+# the capture as <capture>.rc: the exit code, "empty" when it exited 0 having
+# printed nothing, or "no-section" when the section its checks read is
+# missing. record_run CAPTURE RC writes it.
+record_run() {
+    local capture="$1" rc="$2"
+    if [[ "$rc" == 0 && ! -s "$capture" ]]; then rc=empty; fi
+    echo "$rc" > "$capture.rc"
+}
+
+# failed_run FILE: the run that wrote FILE (or FILE minus .notices) recorded
+# an outcome other than 0. The checks that read it are skipped and count
+# nothing; check_run counted the failure once (HARNESS-DESIGN.md Trap 13).
+failed_run() {
+    local capture="${1%.notices}"
+    [[ -f "$capture.rc" && "$(cat "$capture.rc")" != 0 ]]
+}
+
+# Called in the main shell after each run, so the counters persist: a failed
+# run is one FAIL; a run that completed has its stderr checked for runtime
+# warnings (HARNESS-DESIGN.md section Runtime-warning cleanliness).
+check_run() {
     local capture="$1"
+    if failed_run "$capture"; then
+        echo "  FAIL  $current_scenario :: ltl run failed ($(cat "$capture.rc")): $(basename "$capture")"
+        echo "        asserts:     the scenario's ltl run exits 0 and writes what its checks read"
+        echo "        produced_by: the run as a whole in ltl (stderr names where it stopped)"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13 - a check made against a run that did not happen is skipped, its cause counted once"
+        sed 's/^/        | /' "$capture.stderr" | head -5
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: ltl run failed: $(basename "$capture")")
+        return
+    fi
     if ! assert_no_runtime_warnings "$capture.stderr" "$current_scenario"; then
         fail=$((fail + 1))
         failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
@@ -166,7 +202,7 @@ check_capture_warnings() {
 
 # Helper: run ltl -V format-detection against $1 (log path), forward
 # any extra args ($2..) before the log. Output captured to a temp file
-# whose path is echoed for the caller.
+# whose path is echoed for the caller; the outcome is in <capture>.rc.
 #
 # Invocation shape (HARNESS-DESIGN.md section Invocation coherence): every
 # scenario reads the -V format-detection section or a stderr note - which
@@ -184,33 +220,27 @@ run_format_detection() {
     "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-detection,notices "$@" "$log" > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
-    if [[ "$ec" -ne 0 ]]; then
-        echo "FAIL: ltl exited $ec for $log; stderr:" >&2
-        sed 's/^/    /' "$outfile.stderr" >&2
-        exit 1
-    fi
-    if [[ ! -s "$outfile" ]]; then
-        echo "FAIL: empty capture for $log" >&2
-        exit 1
-    fi
+    record_run "$outfile" "$ec"
     # The notices the run raised, one line each, for the assertions on a notice.
     notice_lines "$outfile" > "$outfile.notices"
-    # HARNESS-DESIGN.md Trap 3: confirm section header present before
-    # returning the file path. A missing header is a hard fail visible
-    # at each scenario's first assertion.
-    if ! grep -qE '^=== format-detection ===$' "$outfile"; then
-        echo "FAIL: format-detection section header not found in capture for $log" >&2
-        echo "       capture: $outfile" >&2
-        exit 1
+    # HARNESS-DESIGN.md Trap 3: a capture without the section header is a
+    # failed run, never one the checks read.
+    if [[ "$(cat "$outfile.rc")" == 0 ]] && ! grep -qE '^=== format-detection ===$' "$outfile"; then
+        echo no-section > "$outfile.rc"
     fi
     echo "$outfile"
 }
 
 
 # assert_command: eval a command; PASS on exit 0. Same self-documenting
-# triple as assert_line (reference: tests/validate-csv-input.sh).
+# triple as assert_line (reference: tests/validate-csv-input.sh). A command
+# that reads run captures names them in `reads "CAPTURE ..."`, and is skipped
+# when one of those runs failed (failed_run).
+# A check whose input does not depend on $LTL names it in `run_free`, and its
+# PASS line ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 assert_command() {
-    local command="" label="" asserts="" produced_by="" contract=""
+    local command="" label="" asserts="" produced_by="" contract="" reads="" run_free=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2"; shift 2 ;;
@@ -218,6 +248,8 @@ assert_command() {
             asserts)     asserts="$2"; shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2"; shift 2 ;;
+            reads)       reads="$2"; shift 2 ;;
+            run_free)    run_free="$2";    shift 2 ;;
             *) echo "assert_command: unknown field '$1'" >&2; exit 2 ;;
         esac
     done
@@ -225,8 +257,17 @@ assert_command() {
     : "${asserts:?assert_command requires asserts}"
     : "${produced_by:?assert_command requires produced_by}"
     : "${contract:?assert_command requires contract}"
-    if eval "$command" >/dev/null 2>&1; then
-        echo "  PASS  $current_scenario :: $label"
+    local capture
+    for capture in $reads; do
+        if failed_run "$capture"; then
+            echo "  SKIP  $current_scenario :: $label (its run failed)"
+            return
+        fi
+    done
+    # In a subshell: an unbound name or an exit in the command ends that, not
+    # the harness (HARNESS-DESIGN.md shape 15).
+    if ( eval "$command" ) >/dev/null 2>&1; then
+        echo "  PASS  $current_scenario :: $label${run_free:+ [run-free: $run_free]}"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario :: $label"
@@ -287,6 +328,7 @@ assert_variant_selection() {
 assert_member_outscores() {
     local out="$1" selected="$2" other="$3"
     assert_command \
+        reads       "$out" \
         command     "perl -ne 'if (/^  candidates: (.*)/) { %s = map { split /=/ } split /,/, \$1; \$f = 1 } END { exit !(\$f && \$s{$selected} > \$s{$other} && \$s{$other} > 0) }' '$out'" \
         label       "candidates: $selected outscores $other, which scores above zero" \
         asserts     "The sample weighs dates valid in one day/month order only: $selected scores higher and $other stays live with a score above zero" \
@@ -329,7 +371,7 @@ scenario_tomcat9_ms() {
     local log="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  format: access_common_duration$' \
@@ -368,7 +410,7 @@ scenario_tomcat_common() {
 
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  format: access_common$' \
@@ -422,7 +464,7 @@ scenario_jboss_enhanced() {
 
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  format: jboss_access$' \
@@ -452,7 +494,7 @@ scenario_apache_httpd_us() {
     # Detection is the subject: the specimen binds the one
     # common-plus-duration format; the unit is -du's business.
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  format: access_common_duration$' \
@@ -484,7 +526,7 @@ scenario_family_shapes() {
                "access-bracketed-us.txt|codebeamer_access_log.2025-10-29.txt|access_common_duration_bracketed|D7: the bracketed shape binds whatever unit the line writes"; do
         IFS='|' read -r fixture staged format why <<< "$row"
         stage_fixture "$fixture" "$staged" || continue; log="$staged_path"
-        out=$(run_format_detection "$log"); check_capture_warnings "$out"
+        out=$(run_format_detection "$log"); check_run "$out"
         assert_line "$out" pattern "^  format: $format\$" \
             asserts "$why" \
             produced_by 'build_format_registry() static order and the generated scan sub in ltl' \
@@ -496,7 +538,7 @@ scenario_family_shapes() {
     # The combined line carries no session: the thread-session shape's
     # all-optional tail no longer exists to swallow a quoted "-" (R13).
     stage_fixture access-combined.txt access.log || return 0; log="$staged_path"
-    out=$(run_format_detection "$log" -V udm-counting); check_capture_warnings "$out"
+    out=$(run_format_detection "$log" -V udm-counting); check_run "$out"
     assert_absent "$out" pattern '^bucket: [0-9]+ sessions=' \
         asserts 'a combined line yields no session: the quoted "-" of the user-agent position is never captured as one (R13)' \
         produced_by 'the access_combined entry in format_registry_specs() (no session field) in ltl' contract "$FAMILY_CONTRACT D4/D14"
@@ -504,7 +546,7 @@ scenario_family_shapes() {
     stage_fixture access-thread-session.txt localhost_access_log.2025-05-05.txt || return 0; log="$staged_path"
     # A counting metric makes the section walk the buckets, where the sessions
     # oracle line is printed.
-    out=$(run_format_detection "$log" -V udm-counting -udm 'st::count:/" ([0-9]{3}) /'); check_capture_warnings "$out"
+    out=$(run_format_detection "$log" -V udm-counting -udm 'st::count:/" ([0-9]{3}) /'); check_run "$out"
     assert_line "$out" pattern '^bucket: [0-9]+ sessions=2 sessions_hl=0$' \
         asserts 'six lines carry a session id over two distinct values and six carry a bare -, which is absent: the sessions count is 2 (R14)' \
         produced_by 'read_and_process_logs() session accumulation in ltl (skips empty and -)' contract "$FAMILY_CONTRACT D14"
@@ -515,7 +557,7 @@ scenario_family_shapes() {
     local tdir="$TMP_DIR/$current_scenario/thread-dash"; mkdir -p "$tdir"
     perl -pe 's/ \S+ (\S+)$/ - $1/ if $. <= 3' "$log" > "$tdir/localhost_access_log.2025-05-05.txt"
     ( cd "$tdir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 20 -o localhost_access_log.2025-05-05.txt > run.out 2> run.out.stderr ) || true
-    check_capture_warnings "$tdir/run.out"
+    check_run "$tdir/run.out"
     assert_command \
         command "m=\$(ls '$tdir'/*-LTL-MESSAGES-*.csv) && grep -qF '\"[503] POST /store/catalog\"' \"\$m\" && ! grep -qF '[-]' \"\$m\"" \
         label 'a - thread writes no thread segment: [503] POST /store/catalog, and no message carries [-]' \
@@ -533,19 +575,19 @@ scenario_family_fields_evidence() {
     echo "[$current_scenario]"
     local log out log_dash out_dash
     stage_fixture access-users-only.txt access.log || return 0; log="$staged_path"
-    out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  fields: user=9/12 session=- thread=-$' \
         asserts 'the evidence block reports the populated identity fields of the selected member over the sampled lines it matched: 9 of 12 users populated; session and thread are not fields of this shape' \
         produced_by 'select_format_variants() (captures kept) and emit_format_detection_evidence_verbose() in ltl' contract "$FAMILY_CONTRACT D8"
     # The same content with - in every user column: no population, no credit.
     log_dash="$TMP_DIR/$current_scenario/dash/access.log"; mkdir -p "$(dirname "$log_dash")"
     perl -pe 's/^(\S+ \S+) \S+ /$1 - /' "$log" > "$log_dash"
-    out_dash=$(run_format_detection "$log_dash"); check_capture_warnings "$out_dash"
+    out_dash=$(run_format_detection "$log_dash"); check_run "$out_dash"
     assert_line "$out_dash" pattern '^  fields: user=0/12 session=- thread=-$' \
         asserts 'with a bare - in every user column no line populates the field' \
         produced_by 'select_format_variants() in ltl' contract "$FAMILY_CONTRACT D8"
     stage_fixture access-users-sessions.txt localhost_access_log.2025-05-05.txt || return 0; log="$staged_path"
-    out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  fields: user=9/12 session=12/12 thread=12/12$' \
         asserts 'all three identity fields are reported for the thread-session shape' \
         produced_by 'select_format_variants() in ltl' contract "$FAMILY_CONTRACT D8"
@@ -558,7 +600,7 @@ scenario_family_pin_names() {
     stage_fixture access-combined.txt access.log || return 0; log="$staged_path"
     for name in access_common access_combined access_combined_duration access_common_duration \
                 access_common_duration_thread_session access_common_duration_bracketed; do
-        out=$(run_format_detection "$log" -lf "$name"); check_capture_warnings "$out"
+        out=$(run_format_detection "$log" -lf "$name"); check_run "$out"
         assert_line "$out" pattern "^format_pin: $name\$" \
             asserts "-lf accepts the family name $name" produced_by 'apply_format_pin() in ltl' contract "$FAMILY_CONTRACT D2 (names are the user-facing vocabulary)"
     done
@@ -578,7 +620,7 @@ scenario_family_bracketed_unit() {
     local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
     cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir/codebeamer_access_log.2025-10-29.txt"
     ( cd "$dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -o codebeamer_access_log.2025-10-29.txt > out 2> out.stderr ) || true
-    check_capture_warnings "$dir/out"
+    check_run "$dir/out"
     local csv; csv=$(ls "$dir"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)
     assert_command \
         command "col=\$(head -1 '$csv' | tr ',' '\n' | grep -nx duration | cut -d: -f1) && [ \"\$(awk -F, -v c=\"\$col\" 'NR==2{print \$c}' '$csv')\" = 258 ]" \
@@ -593,7 +635,7 @@ scenario_family_bracketed_unit() {
     cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir2/one.txt"; cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir2/two.txt"
     ( cd "$dir2" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -o -du us -V notices one.txt two.txt > out 2> out.stderr ) || true
     notice_lines "$dir2/out" > "$dir2/out.notices"
-    check_capture_warnings "$dir2/out"
+    check_run "$dir2/out"
     local csv2; csv2=$(ls "$dir2"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)
     assert_command \
         command "[ -n '$csv2' ] && col=\$(head -1 '$csv2' | tr ',' '\n' | grep -nx duration | cut -d: -f1) && [ \"\$(awk -F, -v c=\"\$col\" 'NR==2{print \$c}' '$csv2')\" = 516 ]" \
@@ -618,8 +660,9 @@ scenario_family_ambiguity_note_once() {
     local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
     a="$dir/one.txt"; b="$dir/two.txt"
     sed 's/^2026-05-30/2026-05-03/' "$FIXTURE_DIR/connection-server.txt" > "$a"; cp "$a" "$b"
-    out=$(run_format_detection "$a" "$b"); check_capture_warnings "$out"
+    out=$(run_format_detection "$a" "$b"); check_run "$out"
     assert_command \
+        reads "$out" \
         command "[ \"\$(grep -c '^format-producer-undecided | connection_server_standard | ' '$out.notices')\" = 1 ] && grep -qE '^format-producer-undecided \\| [^|]+ \\| [^|]+ \\| ([^|]*one\\.txt; [^|]*two\\.txt|[^|]*two\\.txt; [^|]*one\\.txt) \\| ' '$out.notices' && grep -q -- '-lf integration_runtime_standard' '$out.notices'" \
         label 'the ambiguity note prints once per run, naming every file that fell to a default and the alternative' \
         asserts 'a two-file run where both files fall to the group default prints the note once, naming both files and every other member' \
@@ -633,7 +676,7 @@ scenario_codebeamer() {
     local log="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  format: access_common_duration_bracketed$' \
@@ -661,7 +704,7 @@ scenario_thingworx_standard() {
     local log; log=$(head_slice "$LOGS_DIR/ThingworxLogs/ApplicationLog.2025-05-05.0.log" ApplicationLog.2025-05-05.0.log)
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  format: thingworx_standard$' \
@@ -689,7 +732,7 @@ scenario_thingworx_with_metrics() {
     local log; log=$(head_slice "$LOGS_DIR/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log" ScriptLog-DPMExtended-clean.log)
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  format: thingworx_standard$' \
@@ -711,7 +754,7 @@ scenario_tw_edge_c_sdk() {
     local log; log=$(head_slice "$LOGS_DIR/UDM/rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log" tw-edge-c-sdk-trace.log)
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  format: tw_edge_c_sdk$' \
@@ -735,7 +778,7 @@ scenario_csv_with_udm() {
     # CSV detection requires at least one -udm flag for the CSV path to
     # be reached; otherwise ltl treats every CSV line as unmatched log content.
     out=$(run_format_detection "$log" -udm latency_ms)
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  format: csv$' \
@@ -768,7 +811,7 @@ assert_registry_sample_scenario() {
     local fixture="$1" slug="$2" mt="$3" nlines="$4" event_ledger="${5:-}"
     local out
     out=$(run_format_detection "$fixture")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     "^  format: $slug\$" \
@@ -961,7 +1004,7 @@ scenario_gc_tagless_start_lines() {
         echo "  FAIL  $current_scenario :: fixture carries no pause records or no start lines ($counts)"
         fail=$((fail + 1)); failures+=("$current_scenario :: fixture counts"); return
     fi
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  format: java_gc_g1_time$' \
         asserts 'A G1 log decorated with the time alone binds the time-only entry by content' \
         produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
@@ -1026,8 +1069,8 @@ assert_gc_parity() {
     if ! a=$(run_gc_csv "$fixture" "$label") || ! b=$(run_gc_csv "$twin" "${twin%.txt}-twin-of-$label"); then
         fail=$((fail + 1)); failures+=("$current_scenario :: ltl -o run failed for $fixture or $twin"); return
     fi
-    check_capture_warnings "$a/run.out"
-    check_capture_warnings "$b/run.out"
+    check_run "$a/run.out"
+    check_run "$b/run.out"
     assert_line "$a/run.out" pattern "^  format: $entry\$" \
         asserts "The tag-less fixture $fixture binds $entry" \
         produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
@@ -1080,7 +1123,8 @@ scenario_gc_tagless_crlf() {
         command "perl -ne '\$lf++ unless /\\r\\n\\z/; END { exit((\$. && !\$lf) ? 0 : 1) }' '$FIXTURE_DIR/gc-time-crlf-jdk21.txt'" \
         asserts 'Every line of the CRLF fixture ends in CR LF, so the scenario exercises the carriage-return path' \
         produced_by 'tests/fixtures/format-detection/gc-time-crlf-jdk21.txt (committed fixture)' \
-        contract "$GC_TAGLESS_CONTRACT C6"
+        contract "$GC_TAGLESS_CONTRACT C6" \
+        run_free 'tests/fixtures/format-detection/gc-time-crlf-jdk21.txt'
     assert_gc_parity gc-time-crlf-jdk21.txt java_gc_g1_time gc-tagged-jdk21.txt
 }
 
@@ -1108,8 +1152,9 @@ scenario_gc_tagless_level_padded() {
         command "grep -q '^\\[[^]]*\\]\\[info \\] GC([0-9]*) Pause ' '$log'" \
         asserts 'The fixture carries pause lines whose level bracket the JVM padded to [info ]' \
         produced_by 'tests/fixtures/format-detection/gc-time-level-padded-jdk17.txt (committed fixture)' \
-        contract "$GC_TAGLESS_CONTRACT C5, F11"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+        contract "$GC_TAGLESS_CONTRACT C5, F11" \
+        run_free 'tests/fixtures/format-detection/gc-time-level-padded-jdk17.txt'
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern "^  matched_lines: $((records + markers))\$" \
         asserts "Every pause record ($records) and marker ($markers) is read although the level bracket is padded" \
         produced_by 'the java_gc_g1_time_level pattern in format_registry_specs() in ltl' \
@@ -1134,8 +1179,9 @@ scenario_gc_tagged_padded_level() {
         command "grep -q '^\\[[^]]*\\]\\[info \\]\\[gc  *\\] GC([0-9]*) Pause ' '$log'" \
         asserts 'The fixture carries tagged pause lines whose level bracket the JVM padded to [info ]' \
         produced_by 'tests/fixtures/format-detection/gc-tagged-padded-jdk17.txt (committed fixture)' \
-        contract "$GC_TAGLESS_CONTRACT C4, F12"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+        contract "$GC_TAGLESS_CONTRACT C4, F12" \
+        run_free 'tests/fixtures/format-detection/gc-tagged-padded-jdk17.txt'
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  format: java_gc_g1$' \
         asserts 'A tagged G1 log whose level bracket is padded binds the tagged entry' \
         produced_by 'the java_gc_g1 pattern in format_registry_specs() in ltl' \
@@ -1155,7 +1201,7 @@ scenario_gc_tagless_legend() {
     local timeonly; stage_fixture gc-time-jdk17.txt gc.log || return 0; timeonly="$staged_path"
     # run_format_detection places extra arguments before its log argument,
     # so the tagged file is read first.
-    local out; out=$(run_format_detection "$timeonly" "$tagged"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$timeonly" "$tagged"); check_run "$out"
     assert_line "$out" pattern '^legend: 1=java_gc_g1,2=java_gc_g1_time$' \
         asserts 'A tagged G1 file and a time-only G1 file are two formats, each under its own name, numbered in first-detection order' \
         produced_by 'emit_format_detection_verbose() in ltl (legend)' \
@@ -1218,7 +1264,7 @@ scenario_scan_telemetry() {
     local log="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^=== format-detection / scan ===$' \
@@ -1378,7 +1424,7 @@ scenario_scan_telemetry_nomatch() {
 
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  scan_failed_attempts: 300$' \
@@ -1409,7 +1455,7 @@ scenario_scan_telemetry_nomatch() {
     # double-count on held-line replay) and the resolved N is reported.
     local wout
     wout=$(run_format_detection "$log" --detection-window=8)
-    check_capture_warnings "$wout"
+    check_run "$wout"
 
     assert_line "$wout" \
         pattern     '^window_size: 8$' \
@@ -1456,7 +1502,7 @@ classification_value() {
         exit 1
     fi
     value=$(sed -n '/^=== format-detection \/ classification ===$/,/^=== END format-detection \/ classification ===$/p' "$capture" \
-            | grep -E "^$key: " | awk '{print $2}')
+            | grep -E "^$key: " | awk '{print $2}') || value=""
     if [[ -z "$value" ]]; then
         echo "FAIL: key '$key' not found in the classification sub-section of $capture" >&2
         exit 1
@@ -1496,7 +1542,8 @@ PY
 # directory of its own; $TMP_DIR is cleaned by the EXIT trap, keeping transient
 # artifacts out of any deliverables area (HARNESS-DESIGN.md Traps 9 and 10).
 # No `-n` limit: the assertion sums every message row, so no row may be
-# withheld from the CSV. Echoes the capture path; its stderr is beside it.
+# withheld from the CSV. Echoes the capture path; its stderr is beside it and
+# its outcome in <capture>.rc (record_run).
 run_classification_csv() {
     local tag="$1" log="$2"
     shift 2
@@ -1508,14 +1555,9 @@ run_classification_csv() {
         > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
-    if [[ "$ec" -ne 0 ]]; then
-        echo "FAIL: ltl exited $ec for $log (classification CSV run '$tag'); stderr:" >&2
-        sed 's/^/    /' "$outfile.stderr" >&2
-        exit 1
-    fi
-    if ! grep -qE '^=== format-detection ===$' "$outfile"; then
-        echo "FAIL: format-detection section header not found in capture $outfile" >&2
-        exit 1
+    record_run "$outfile" "$ec"
+    if [[ "$(cat "$outfile.rc")" == 0 ]] && ! grep -qE '^=== format-detection ===$' "$outfile"; then
+        echo no-section > "$outfile.rc"
     fi
     echo "$outfile"
 }
@@ -1529,7 +1571,7 @@ scenario_classification_access() {
     local log="$REPO_DIR/tests/fixtures/http-status-families.txt"
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^=== format-detection / classification ===$' \
@@ -1626,7 +1668,7 @@ scenario_classification_declining() {
     local log="$REPO_DIR/tests/fixtures/gc-g1-categories.txt"
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^lines_included: 7$' \
@@ -1681,7 +1723,7 @@ scenario_classification_default() {
     local log="$REPO_DIR/tests/fixtures/log-level-vocabulary.txt"
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^lines_included: 6$' \
@@ -1739,9 +1781,13 @@ scenario_classification_consolidation_reconciles() {
 
     local plain_out cons_out
     plain_out=$(run_classification_csv plain "$log")
-    check_capture_warnings "$plain_out"
+    check_run "$plain_out"
     cons_out=$(run_classification_csv consolidated "$log" -g 60)
-    check_capture_warnings "$cons_out"
+    check_run "$cons_out"
+    if failed_run "$plain_out" || failed_run "$cons_out"; then
+        echo "  SKIP  $current_scenario :: the reconciliation checks (a run they compare failed)"
+        return
+    fi
 
     local plain_dir cons_dir
     plain_dir=$(dirname "$plain_out")
@@ -1813,7 +1859,7 @@ scenario_variant_ambiguity_note() {
     # default — nothing in the file name or content decided between the
     # producers — emits one stderr note naming the consequence and the
     # overrides. The note is an intentional diagnostic — it never carries an
-    # ` at ... line` suffix, so check_capture_warnings stays clean. The
+    # ` at ... line` suffix, so check_run stays clean. The
     # connection-server fixture rewritten to a day-3 date leaves both
     # members of its group alive (no impossible month under either layout)
     # and carries no name evidence, so the group default holds by its
@@ -1823,7 +1869,7 @@ scenario_variant_ambiguity_note() {
     sed 's/^2026-05-30/2026-05-03/' "$FIXTURE_DIR/connection-server.txt" > "$undecided"
     local out
     out=$(run_format_detection "$undecided")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out.notices" \
         pattern     '^format-producer-undecided \| connection_server_standard \| the detected log format is written by more than one producer and the date layout differs between them; nothing in the file name or content decided which \| [^|]*renamed-cxserver\.txt \| use -lf integration_runtime_standard if the file comes from the other producer$' \
@@ -1839,7 +1885,7 @@ scenario_variant_ambiguity_note() {
     # Contracted absence 1: a pin names the format, so no assumption is in effect.
     local out_pin
     out_pin=$(run_format_detection "$undecided" -lf connection_server_standard)
-    check_capture_warnings "$out_pin"
+    check_run "$out_pin"
     assert_absent "$out_pin.notices" \
         pattern     '^format-producer-undecided ' \
         asserts     'With -lf given, the note is contracted ABSENT: the user named the format' \
@@ -1850,7 +1896,7 @@ scenario_variant_ambiguity_note() {
     # never triggers the note.
     local out_cb
     out_cb=$(run_format_detection "$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt")
-    check_capture_warnings "$out_cb"
+    check_run "$out_cb"
     assert_absent "$out_cb.notices" \
         pattern     '^format-producer-undecided ' \
         asserts     'A format that is not a member of a variant group is contracted to never emit the note — the gate is group membership plus a default-basis selection' \
@@ -1862,7 +1908,7 @@ scenario_variant_ambiguity_note() {
     local staged; stage_fixture connection-server.txt cxserver.1.log || return 0; staged="$staged_path"
     local out_named
     out_named=$(run_format_detection "$staged")
-    check_capture_warnings "$out_named"
+    check_run "$out_named"
     assert_absent "$out_named.notices" \
         pattern     '^format-producer-undecided ' \
         asserts     'Filename stem evidence decides the variant (basis evidence), so the default-selection note is contracted ABSENT' \
@@ -1894,7 +1940,7 @@ scenario_classification_format_switch() {
     local log="$REPO_DIR/tests/fixtures/classification-format-switch.txt"
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^rule_changes: 1$' \
@@ -1943,7 +1989,7 @@ scenario_classification_format_interleaved() {
     local log="$REPO_DIR/tests/fixtures/classification-format-interleaved.txt"
     local out
     out=$(run_format_detection "$log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^rule_changes: 23$' \
@@ -1954,6 +2000,7 @@ scenario_classification_format_interleaved() {
     local listed
     listed=$(grep -c '^rule_change: ' "$out" || true)
     assert_command \
+        reads       "$out" \
         command     "[[ '$listed' == '10' ]]" \
         label       "exactly 10 rule_change: lines listed for 23 changes (observed: $listed)" \
         asserts     'The listing is capped at the first ten changes per file so an interleaved file does not emit one line per alternation' \
@@ -1969,6 +2016,7 @@ scenario_classification_format_interleaved() {
     local notes
     notes=$(grep -c '^classification-rules-changed ' "$out.notices" || true)
     assert_command \
+        reads       "$out" \
         command     "[[ '$notes' == '1' ]]" \
         label       "exactly one rule-change notice for 23 changes (observed: $notes)" \
         asserts     'The user is told once per file, at the first change, however many times the rules change afterwards' \
@@ -1990,12 +2038,13 @@ scenario_classification_summary_rows() {
     local diag="$REPO_DIR/tests/fixtures/log-level-vocabulary.txt"
     local gc="$REPO_DIR/tests/fixtures/gc-g1-categories.txt"
     local r_access="$dir/access.txt" r_diag="$dir/diag.txt" r_gc="$dir/gc.txt"
-    "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$access" 2> "$r_access.stderr" > "$r_access"
-    assert_no_runtime_warnings "$r_access.stderr" "$current_scenario access"
-    "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$diag" 2> "$r_diag.stderr" > "$r_diag"
-    assert_no_runtime_warnings "$r_diag.stderr" "$current_scenario diagnostics"
-    "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$gc" 2> "$r_gc.stderr" > "$r_gc"
-    assert_no_runtime_warnings "$r_gc.stderr" "$current_scenario gc"
+    local rc
+    rc=0; "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$access" 2> "$r_access.stderr" > "$r_access" || rc=$?
+    record_run "$r_access" "$rc"; check_run "$r_access"
+    rc=0; "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$diag" 2> "$r_diag.stderr" > "$r_diag" || rc=$?
+    record_run "$r_diag" "$rc"; check_run "$r_diag"
+    rc=0; "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$gc" 2> "$r_gc.stderr" > "$r_gc" || rc=$?
+    record_run "$r_gc" "$rc"; check_run "$r_gc"
 
     # The classified rows carry their outcome's colour. This scenario asserts
     # the rows' text and shape — the count, the share, the funnel order — so
@@ -2017,6 +2066,7 @@ scenario_classification_summary_rows() {
         contract    "$CLASSIFICATION_CONTRACT - summary rows: both rows shown when both outcomes are declared"
 
     assert_command \
+        reads       "$r_access" \
         command     "grep -oE 'LINES INCLUDED|SUCCESS CLASSIFIED|FAILURE CLASSIFIED|LINES READ' '$r_access' | tr '\n' ' ' | grep -q '^LINES READ LINES INCLUDED SUCCESS CLASSIFIED FAILURE CLASSIFIED '" \
         label       'tallies read as a funnel: LINES READ, LINES INCLUDED, then the classified rows' \
         asserts     'The two rows partition LINES INCLUDED and appear directly beneath it; LINES READ leads the tallies (#452, architect 2026-08-31)' \
@@ -2046,7 +2096,7 @@ scenario_variant_connection_server() {
     current_scenario="variant-connection-server"
     echo "[$current_scenario]"
     local log; stage_fixture connection-server.txt cxserver.1.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_variant_selection "$out" connection_server_standard mt10 evidence '0\.93'
     assert_line "$out" pattern '^  filename_evidence: stem=mt10 ext=match date=- index=present$' \
         asserts 'cxserver.1.log decomposes to the Connection Server stem, the declared extension and a rotation index (D45/I4)' \
@@ -2070,7 +2120,7 @@ scenario_milliseconds_not_read() {
             slug=connection_server_standard; fixture=milliseconds-connection-server.txt; staged=milliseconds-cs.txt; confidence='0\.75'
         fi
         stage_fixture "$fixture" "$staged" || return 0; log="$staged_path"
-        out=$(run_format_detection "$log"); check_capture_warnings "$out"
+        out=$(run_format_detection "$log"); check_run "$out"
         assert_variant_selection "$out" "$slug" "$member" evidence "$confidence"
         assert_line "$out" pattern '^  matched_lines: 8$' \
             asserts "Every line of the $slug fixture is recognised" \
@@ -2087,7 +2137,7 @@ scenario_variant_integration_runtime_named() {
     current_scenario="variant-integration-runtime-named"
     echo "[$current_scenario]"
     local log; stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '0\.82'
     assert_member_outscores "$out" mt10ir mt10
     assert_line "$out" pattern '^  filename_evidence: stem=mt10ir ext=match date=- index=-$' \
@@ -2108,7 +2158,7 @@ scenario_variant_integration_runtime_unnamed() {
     current_scenario="variant-integration-runtime-unnamed"
     echo "[$current_scenario]"
     local log; stage_fixture integration-runtime.txt app.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '0\.78'
     assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
         asserts 'app.log carries no name evidence for any entry' \
@@ -2143,7 +2193,7 @@ scenario_date_order_one_sampled_line() {
     current_scenario="date-order-one-sampled-line"
     echo "[$current_scenario]"
     local log; log=$(generate_connection_server_runs 2024-13-05@9x1 2024-04-05@10x300)
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_date_order "$out" 1 mt10 0 1 'One sampled line valid only day first, every other line valid either way'
     assert_line "$out.notices" pattern '^date-cannot-exist \| connection_server_standard \| 1 of 301 lines of this format were not matched because their date cannot exist under its date layout \| ' \
         asserts 'The left-out line is reported in the run'"'"'s impossible-date note, which names the other order'"'"'s -lf' \
@@ -2155,7 +2205,7 @@ scenario_date_order_one_read_line() {
     current_scenario="date-order-one-read-line"
     echo "[$current_scenario]"
     local log; log=$(generate_connection_server_runs 2024-04-05@9x220 2024-25-04@10x1 2024-04-05@11x620)
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_date_order "$out" 2 mt10 0 1 'One unsampled line valid only day first'
 }
 
@@ -2163,7 +2213,7 @@ scenario_date_order_enough_lines() {
     current_scenario="date-order-enough-lines"
     echo "[$current_scenario]"
     local log; log=$(generate_connection_server_runs 2024-04-05@9x200 2024-25-04@10x40 2024-04-05@11x600)
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_date_order "$out" 3 mt10ir 1 '([1-9]|[1-3][0-9])' '40 consecutive unsampled lines valid only day first'
 }
 
@@ -2171,7 +2221,7 @@ scenario_date_order_moves_back() {
     current_scenario="date-order-moves-back"
     echo "[$current_scenario]"
     local log; log=$(generate_connection_server_runs 2024-04-05@9x200 2024-25-04@10x40 2024-04-20@11x40 2024-04-05@12x600)
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_date_order "$out" 4 mt10 2 '([1-9]|[1-7][0-9])' '40 unsampled lines valid only day first, then 40 valid only month first'
 }
 
@@ -2179,7 +2229,7 @@ scenario_unit_tomcat_named() {
     current_scenario="unit-tomcat-named"
     echo "[$current_scenario]"
     local log; stage_fixture tomcat-access.txt localhost_access_log.2025-05-05.txt || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  format: access_common_duration$' \
         asserts 'The common-plus-duration shape is one format whatever unit the producer writes: a Tomcat-named file binds it (#444 D3 as revised)' \
         produced_by 'read_and_process_logs() in ltl (first-match block)' \
@@ -2198,7 +2248,7 @@ scenario_unit_httpd_named() {
     current_scenario="unit-httpd-named"
     echo "[$current_scenario]"
     local log; stage_fixture httpd-access.txt access.log-20260609 || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  format: access_common_duration$' \
         asserts 'An httpd-named file binds the same format: nothing on the line or in the registry distinguishes the microsecond producer' \
         produced_by 'read_and_process_logs() in ltl (first-match block)' \
@@ -2213,7 +2263,7 @@ scenario_unit_httpd_named() {
         contract 'features/log-format-registry.md section Drop 1.5 I6'
     # -du us is the way to read the microsecond producer: the resolved unit
     # follows the override, and the section reports it.
-    local out_du; out_du=$(run_format_detection "$log" -du us); check_capture_warnings "$out_du"
+    local out_du; out_du=$(run_format_detection "$log" -du us); check_run "$out_du"
     assert_line "$out_du" pattern '^duration_unit_override: us$' \
         asserts 'When -du us is given, the format-detection section reports the override' \
         produced_by 'emit_format_detection_verbose() in ltl (run-level duration_unit_override field)' \
@@ -2224,7 +2274,7 @@ scenario_variant_thingworx_rolled() {
     current_scenario="variant-thingworx-rolled"
     echo "[$current_scenario]"
     local log; stage_fixture thingworx-application-log.txt ApplicationLog.2025-05-06.0.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=mt1std ext=match date=match index=present$' \
         asserts 'A logback-rolled ThingWorx name decomposes to stem, date, index and extension, and the filename date agrees with the first content timestamp (D52 probe c)' \
         produced_by 'format_filename_evidence() / format_sample_probes() in ltl' \
@@ -2263,7 +2313,7 @@ scenario_windchill_method_server_named() {
     current_scenario="windchill-method-server-named"
     echo "[$current_scenario]"
     local log; stage_fixture windchill-method-server.txt BackgroundMethodServerESI-2507180624-9559-log4j.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_windchill_fixture_detection "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=- index=-$' \
         asserts 'A producer-true method-server name (service stem, start-time and pid tokens, -log4j, .log) decomposes to the mt17 stem and a matching extension; an unrolled file carries no date or index' \
@@ -2279,7 +2329,7 @@ scenario_windchill_method_server_rolled() {
     current_scenario="windchill-method-server-rolled"
     echo "[$current_scenario]"
     local log; stage_fixture windchill-method-server.txt MethodServer-2507180627-9144-log4j.log.2025-07-18_3 || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_windchill_fixture_detection "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=match index=present$' \
         asserts 'A log4j daily-rolled name (.YYYY-MM-DD_N after the extension) decomposes through the date_n index form, and the roll date agrees with the first content timestamp (D52 probe c)' \
@@ -2291,7 +2341,7 @@ scenario_windchill_method_server_bare() {
     current_scenario="windchill-method-server-bare"
     echo "[$current_scenario]"
     local log; stage_fixture windchill-method-server.txt MethodServer.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_windchill_fixture_detection "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=- index=-$' \
         asserts 'A bare service name (no start-time/pid/-log4j tail) still earns mt16 stem evidence and a matching extension: the stem alone matches, the producer tail is optional' \
@@ -2303,7 +2353,7 @@ scenario_windchill_method_server_renamed() {
     current_scenario="windchill-method-server-renamed"
     echo "[$current_scenario]"
     local log; stage_fixture windchill-method-server.txt app.txt || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_windchill_fixture_detection "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
         asserts 'A renamed file yields no filename evidence; recognition is decided by content alone' \
@@ -2315,7 +2365,7 @@ scenario_variant_mixed_legend() {
     current_scenario="variant-mixed-legend"
     echo "[$current_scenario]"
     local log; stage_fixture mixed.txt mixed.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  formats: connection_server_standard,access_common_duration$' \
         asserts 'Every format found in the file is listed, first-bound first' \
         produced_by 'read_and_process_logs() in ltl (per-file formats, N7)' \
@@ -2325,19 +2375,23 @@ scenario_variant_mixed_legend() {
         produced_by 'emit_format_detection_verbose() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
     local render="$TMP_DIR/$current_scenario/render.out"
-    "$LTL" --disable-progress -ni --terminal-width 160 -bs 1440 -oe "$log" > "$render" 2> "$render.stderr"
-    assert_no_runtime_warnings "$render.stderr" "$current_scenario render"
+    local rc=0
+    "$LTL" --disable-progress -ni --terminal-width 160 -bs 1440 -oe "$log" > "$render" 2> "$render.stderr" || rc=$?
+    record_run "$render" "$rc"; check_run "$render"
     assert_command label "console bracket [1,2] after the file name" \
+        reads "$render" \
         command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q 'mixed.log  *\\[1,2\\]'" \
         asserts 'The summary file list carries the formats found as legend numbers in brackets (D50)' \
         produced_by 'print_summary_table() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D50'
     assert_command label "console legend title" \
+        reads "$render" \
         command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  Log Formats *\$'" \
         asserts 'The legend is introduced by a "Log Formats" title, rendered like the file-list heading (D50)' \
         produced_by 'print_summary_table() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D50'
     assert_command label "console legend line" \
+        reads "$render" \
         command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  1 connection_server_standard  2 access_common_duration *\$'" \
         asserts 'One legend line below the title names the numbered formats (D50)' \
         produced_by 'print_summary_table() in ltl' \
@@ -2354,7 +2408,7 @@ scenario_windchill_workgroup_manager() {
     current_scenario="wgm-client"
     echo "[$current_scenario]"
     local log; stage_fixture wgm-client.txt uwgm_client.log.1 || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log" -V benchmark-data); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log" -V benchmark-data); check_run "$out"
     assert_line "$out" pattern '^  format: windchill_workgroup_manager$' \
         asserts 'A WGM client log binds the windchill_workgroup_manager format' \
         produced_by 'read_and_process_logs() in ltl (first-match block); emitted by emit_format_detection_verbose()' \
@@ -2403,7 +2457,7 @@ scenario_wgm_client_localtime() {
     current_scenario="wgm-client-localtime"
     echo "[$current_scenario]"
     local log; stage_fixture wgm-client-localtime.txt uwgm.log.1 || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log" -V benchmark-data); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log" -V benchmark-data); check_run "$out"
     assert_line "$out" pattern '^  format: windchill_workgroup_manager$' \
         asserts 'A WGM client log whose timestamps carry a numeric zone offset binds windchill_workgroup_manager, not the bracketed-token format that would otherwise accept a minority of its lines' \
         produced_by 'read_and_process_logs() in ltl (first-match block); emitted by emit_format_detection_verbose()' \
@@ -2439,7 +2493,7 @@ scenario_wgm_filename_family() {
     local name log out
     for name in genlwsc.log.1 uwgm.log.1; do
         stage_fixture wgm-client.txt "$name" || return 0; log="$staged_path"
-        out=$(run_format_detection "$log"); check_capture_warnings "$out"
+        out=$(run_format_detection "$log"); check_run "$out"
         assert_line "$out" pattern '^  filename_evidence: stem=mt16 ext=match date=- index=present$' \
             asserts "$name decomposes to the windchill_workgroup_manager entry's stem, extension and rotation index" \
             produced_by 'format_filename_decompose() in ltl; emitted by emit_format_detection_evidence_verbose()' \
@@ -2450,7 +2504,7 @@ scenario_wgm_filename_family() {
             contract 'features/log-format-registry.md section -V format-detection section-contract'
     done
     stage_fixture wgm-client.txt renamed.txt || return 0; log="$staged_path"
-    out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
         asserts 'A renamed WGM file matches no declared stem: the name signal is withheld, never contradicting (D45)' \
         produced_by 'format_filename_decompose() in ltl; emitted by emit_format_detection_evidence_verbose()' \
@@ -2468,7 +2522,7 @@ scenario_impossible_date() {
     local f name expect out
     for f in application:2 access:1 connector:1; do
         name=${f%%:*}; expect=${f#*:}
-        out=$(run_format_detection "$fx/impossible-date-$name.txt"); check_capture_warnings "$out"
+        out=$(run_format_detection "$fx/impossible-date-$name.txt"); check_run "$out"
         assert_line "$out" pattern "^  impossible_date_lines: $expect\$" \
             asserts "The file counts its own lines not matched because their date cannot exist ($expect in impossible-date-$name.txt)" \
             produced_by 'the impossible-date branch format_timestamp_src() emits; emit_format_detection_verbose() in ltl' \
@@ -2480,7 +2534,7 @@ scenario_format_pin() {
     current_scenario="format-pin"
     echo "[$current_scenario]"
     local log; stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log" -lf connection_server_standard); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log" -lf connection_server_standard); check_run "$out"
     assert_line "$out" pattern '^format_pin: connection_server_standard$' \
         asserts 'The run-level pin is reported' \
         produced_by 'emit_format_detection_verbose() in ltl' \
@@ -2509,7 +2563,7 @@ scenario_format_pin() {
         asserts 'The run is told once, with the count and the other member of the date-layout group to pin, never per file or per line' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract 'features/611-timestamp-acceptance.md C5, AC3'
-    local out2; out2=$(run_format_detection "$log" -lf thingworx_standard); check_capture_warnings "$out2"
+    local out2; out2=$(run_format_detection "$log" -lf thingworx_standard); check_run "$out2"
     assert_line "$out2" pattern '^entries: 2$' \
         asserts 'A name carried by two registry entries pins both (N9)' \
         produced_by 'apply_format_pin() in ltl' \
@@ -2534,7 +2588,7 @@ scenario_format_pin() {
 
     # A connector shape is pinned by its name like any scanned entry.
     local jk; stage_fixture apache-mod-jk.txt mod_jk.log || return 0; jk="$staged_path"
-    local out3; out3=$(run_format_detection "$jk" -lf apache_mod_jk); check_capture_warnings "$out3"
+    local out3; out3=$(run_format_detection "$jk" -lf apache_mod_jk); check_run "$out3"
     assert_line "$out3" pattern '^format_pin: apache_mod_jk$' \
         asserts 'The run-level pin names the connector entry' \
         produced_by 'emit_format_detection_verbose() in ltl' \
@@ -2555,7 +2609,7 @@ scenario_format_pin() {
     # The tag-less G1 entries are pinnable by their own names, and the tagged
     # name does not read a time-only file.
     local gc; stage_fixture gc-time-jdk17.txt gc.log || return 0; gc="$staged_path"
-    local out4; out4=$(run_format_detection "$gc" -lf java_gc_g1_time); check_capture_warnings "$out4"
+    local out4; out4=$(run_format_detection "$gc" -lf java_gc_g1_time); check_run "$out4"
     assert_line "$out4" pattern '^  format: java_gc_g1_time$' \
         asserts 'Pinning the time-only G1 entry by its own name reads the file as that format' \
         produced_by 'apply_format_pin() in ltl' \
@@ -2564,7 +2618,7 @@ scenario_format_pin() {
         asserts 'Selection basis is pin under -lf java_gc_g1_time' \
         produced_by 'emit_format_detection_evidence_verbose() in ltl' \
         contract "features/656-gc-log-tagless-decorations.md D4"
-    local out5; out5=$(run_format_detection "$gc" -lf java_gc_g1); check_capture_warnings "$out5"
+    local out5; out5=$(run_format_detection "$gc" -lf java_gc_g1); check_run "$out5"
     assert_line "$out5" pattern '^  matched_lines: 0$' \
         asserts 'The tagged G1 name, pinned on a time-only file, matches nothing: the decorations are distinct formats' \
         produced_by 'apply_format_pin() in ltl; the java_gc_g1 pattern in format_registry_specs()' \
@@ -2610,7 +2664,7 @@ scenario_unregistered_levels_per_file() {
         sed 's/^/    /' "$outfile.stderr" >&2
         fail=$((fail + 1)); failures+=("$current_scenario :: ltl non-zero exit"); return
     fi
-    check_capture_warnings "$outfile"
+    check_run "$outfile"
 
     assert_line "$outfile" \
         pattern     '^  unregistered_levels: NOTAREALLEVEL=1$' \
@@ -2642,7 +2696,7 @@ CONNECTOR_CONTRACT='features/655-apache-mod-jk-connector-format.md'
 assert_connector_shape() {
     local fixture="$1" format="$2" entry="$3" lines="$4"
     local log; stage_fixture "$fixture" mod_jk.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern "^  format: $format\$" \
         asserts "A connector log written in the $format shape binds the entry of that name by its content" \
         produced_by 'read_and_process_logs() in ltl (first-match bind through the generated scan sub)' \
@@ -2709,7 +2763,7 @@ scenario_apache_mod_jk_unnamed() {
     current_scenario="apache-mod-jk-unnamed"
     echo "[$current_scenario]"
     local log; stage_fixture apache-mod-jk.txt app.txt || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  format: apache_mod_jk$' \
         asserts 'A connector log binds its entry from any file name: the shape on the line is the whole evidence' \
         produced_by 'read_and_process_logs() in ltl (first-match bind); the entry declares no filename evidence' \
@@ -2733,7 +2787,7 @@ scenario_apache_mod_jk_stamp() {
     current_scenario="apache-mod-jk-stamp"
     echo "[$current_scenario]"
     local log; stage_fixture apache-mod-jk.txt mod_jk.log || return 0; log="$staged_path"
-    local out; out=$(run_format_detection "$log" -V filter-summary -st '2026-08-30 01:18:10.579'); check_capture_warnings "$out"
+    local out; out=$(run_format_detection "$log" -V filter-summary -st '2026-08-30 01:18:10.579'); check_run "$out"
     assert_line "$out" pattern '^excluded_time_window: 27$' \
         asserts 'A start one millisecond after the 27th line stamp (01:18:10.578) excludes exactly the 27 lines at or before it' \
         produced_by 'the asctime layout parse and generic fraction strip in format_entry_block_src(); the time-window filter in read_and_process_logs(); emitted by the filter-summary section' \
@@ -2761,7 +2815,7 @@ scenario_apache_mod_jk_beside_access() {
         IFS='|' read -r start end status <<< "$window"
         # run_format_detection puts its first argument last on the command
         # line, so the access log is passed among the options to come first.
-        out=$(run_format_detection "$jk" -du us -V filter-summary -st "$start" -et "$end" "$access"); check_capture_warnings "$out"
+        out=$(run_format_detection "$jk" -du us -V filter-summary -st "$start" -et "$end" "$access"); check_run "$out"
         assert_line "$out" pattern '^legend: 1=access_common_duration,2=apache_mod_jk$' \
             asserts 'Both formats are numbered in the run legend, the access log first' \
             produced_by 'the format legend in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
@@ -2793,7 +2847,7 @@ echo ""
 BYTE_NOTATION_CONTRACT='features/608-byte-unit-ladder.md D7, D12, D13, D17, D20 and section 5.5 (-V surface); features/log-format-registry.md -V format-detection section contract - additions are non-breaking'
 
 # run_byte_notation TAG ARGS... — the section for a run over several files
-# (run_format_detection takes one); same invocation shape.
+# (run_format_detection takes one); same invocation shape and outcome record.
 run_byte_notation() {
     local tag="$1"; shift
     local outfile="$TMP_DIR/byte-notation-$tag.out"
@@ -2801,10 +2855,9 @@ run_byte_notation() {
     "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-detection "$@" > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
-    if [[ "$ec" -ne 0 ]] || ! grep -qE '^=== format-detection ===$' "$outfile"; then
-        echo "FAIL: ltl exited $ec or printed no format-detection section for byte-notation/$tag" >&2
-        sed 's/^/    /' "$outfile.stderr" >&2
-        exit 1
+    record_run "$outfile" "$ec"
+    if [[ "$(cat "$outfile.rc")" == 0 ]] && ! grep -qE '^=== format-detection ===$' "$outfile"; then
+        echo no-section > "$outfile.rc"
     fi
     echo "$outfile"
 }
@@ -2819,7 +2872,7 @@ scenario_byte_notation() {
     local out
 
     out=$(run_byte_notation default "$boundary")
-    check_capture_warnings "$out"
+    check_run "$out"
     assert_line "$out" \
         pattern     '^byte_notation: si \(default\)$' \
         asserts     'A run whose formats declare no notation, with no -bn, renders SI by default' \
@@ -2832,7 +2885,7 @@ scenario_byte_notation() {
         contract    "$BYTE_NOTATION_CONTRACT"
 
     out=$(run_byte_notation option -bn IEC "$boundary")
-    check_capture_warnings "$out"
+    check_run "$out"
     assert_line "$out" \
         pattern     '^byte_notation: iec \(-bn\)$' \
         asserts     '-bn in any case sets the notation and is named as its source' \
@@ -2840,7 +2893,7 @@ scenario_byte_notation() {
         contract    "$BYTE_NOTATION_CONTRACT"
 
     out=$(run_byte_notation declared "$gc")
-    check_capture_warnings "$out"
+    check_run "$out"
     assert_line "$out" \
         pattern     '^byte_notation: iec \(format java_gc_g1\)$' \
         asserts     'A run of GC logs alone takes the notation the GC format declares, and names the format' \
@@ -2853,7 +2906,7 @@ scenario_byte_notation() {
         contract    "$BYTE_NOTATION_CONTRACT"
 
     out=$(run_byte_notation declared-overridden -bn si "$gc")
-    check_capture_warnings "$out"
+    check_run "$out"
     assert_line "$out" \
         pattern     '^byte_notation: si \(-bn\)$' \
         asserts     '-bn overrides the format declaration' \
@@ -2866,13 +2919,14 @@ scenario_byte_notation() {
         contract    "$BYTE_NOTATION_CONTRACT"
 
     out=$(run_byte_notation mixed "$gc" "$boundary")
-    check_capture_warnings "$out"
+    check_run "$out"
     assert_line "$out" \
         pattern     '^byte_notation: si \(mixed\)$' \
         asserts     'Files whose formats declare different notations render SI, and the source says the declarations were mixed' \
         produced_by 'resolve_byte_notation() in ltl' \
         contract    "$BYTE_NOTATION_CONTRACT"
     assert_command \
+        reads       "$out" \
         command     "[ \"\$(grep -E '^  byte_notation: ' '$out' | tr -d ' ' | tr '\n' ,)\" = 'byte_notation:iec,byte_notation:-,' ]" \
         label       'the mixed run reports iec for the GC file and - for the access log, in input order' \
         asserts     'Each file reports its own format declaration' \
@@ -2880,7 +2934,7 @@ scenario_byte_notation() {
         contract    "$BYTE_NOTATION_CONTRACT"
 
     out=$(run_byte_notation mixed-option -bn iec "$gc" "$boundary")
-    check_capture_warnings "$out"
+    check_run "$out"
     assert_line "$out" \
         pattern     '^byte_notation: iec \(-bn\)$' \
         asserts     'With -bn given, the option decides a mixed run' \
@@ -2888,7 +2942,7 @@ scenario_byte_notation() {
         contract    "$BYTE_NOTATION_CONTRACT"
 
     out=$(run_byte_notation unrecognised "$gc" "$plain")
-    check_capture_warnings "$out"
+    check_run "$out"
     assert_line "$out" \
         pattern     '^byte_notation: si \(mixed\)$' \
         asserts     'A file no format recognised declares nothing, so a GC log beside it does not decide the run' \

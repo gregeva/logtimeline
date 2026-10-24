@@ -107,8 +107,9 @@ current_scenario=""
 # Generate one anchor log, run ltl -o on it in its own dir (the CSV filename
 # carries a wall-clock timestamp to the second, so anchors run in the same
 # second would otherwise collide), and echo the path to the MESSAGES CSV.
-# Hard-fails (exit 1) on any breakdown in the chain so a broken setup can
-# never present as a passing assertion (HARNESS-DESIGN.md traps 1, 3, 7).
+# Returns 1 on any breakdown in the chain, with the reason on stderr; it runs
+# inside $( ), so it counts nothing itself and the caller counts the failure
+# (anchor_failed) in the main shell (HARNESS-DESIGN.md traps 1, 3, 7, 12).
 generate_and_run() {
     local anchor="$1"
     local logfile="$TMP_ROOT/$anchor.log"
@@ -118,27 +119,38 @@ generate_and_run() {
     if ! python3 "$GENERATOR" "$anchor" "$logfile" 2>"$TMP_ROOT/$anchor.gen.err"; then
         echo "ERROR: anchor generation failed for '$anchor':" >&2
         sed 's/^/    /' "$TMP_ROOT/$anchor.gen.err" >&2
-        exit 1
+        return 1
     fi
     if [[ ! -s "$logfile" ]]; then
         echo "ERROR: generated log is empty: $logfile" >&2
-        exit 1
+        return 1
     fi
 
     if ! ( cd "$rundir" && "$LTL" --disable-progress -ni -o "$logfile" \
            >/dev/null 2>"$TMP_ROOT/$anchor.ltl.err" ); then
         echo "ERROR: ltl failed for anchor '$anchor':" >&2
         sed 's/^/    /' "$TMP_ROOT/$anchor.ltl.err" >&2
-        exit 1
+        return 1
     fi
 
     local csv
     csv=$(find "$rundir" -name '*MESSAGES*.csv' -type f | head -1)
     if [[ -z "$csv" || ! -s "$csv" ]]; then
         echo "ERROR: no MESSAGES CSV produced for anchor '$anchor' in $rundir" >&2
-        exit 1
+        return 1
     fi
     echo "$csv"
+}
+
+# anchor_failed <anchor>: counts the failure generate_and_run returned for an
+# anchor, in the main shell; the anchor's checks are then skipped.
+anchor_failed() {
+    echo "  FAIL  $current_scenario :: the $1 anchor produced no MESSAGES CSV (reason above)"
+    echo "        asserts:     the anchor log is generated and ltl -o writes its MESSAGES CSV"
+    echo "        produced_by: generate_and_run() in this harness; ltl -o"
+    echo "        contract:    tests/HARNESS-DESIGN.md Trap 12 and Trap 13"
+    fail=$((fail + 1))
+    failures+=("$current_scenario :: $1 anchor run")
 }
 
 # Runtime-warning cleanliness for the ltl run inside generate_and_run (its
@@ -251,7 +263,12 @@ CONTRACT='Issue #254 anchor table + features/222-* (shape moments). Bands fixed 
 scenario_normal() {
     current_scenario="normal"
     echo "[$current_scenario]"
-    local csv; csv=$(generate_and_run normal)
+    local csv
+    if ! csv=$(generate_and_run normal); then
+        check_capture_warnings normal
+        anchor_failed normal
+        return
+    fi
     check_capture_warnings normal
 
     assert_in_band csv "$csv" column duration_skewness lo -0.1 hi 0.1 \
@@ -275,7 +292,12 @@ scenario_normal() {
 scenario_exponential() {
     current_scenario="exponential"
     echo "[$current_scenario]"
-    local csv; csv=$(generate_and_run exponential)
+    local csv
+    if ! csv=$(generate_and_run exponential); then
+        check_capture_warnings exponential
+        anchor_failed exponential
+        return
+    fi
     check_capture_warnings exponential
 
     assert_in_band csv "$csv" column duration_skewness lo 1.8 hi 2.2 \
@@ -295,7 +317,12 @@ scenario_exponential() {
 scenario_bimodal() {
     current_scenario="bimodal"
     echo "[$current_scenario]"
-    local csv; csv=$(generate_and_run bimodal)
+    local csv
+    if ! csv=$(generate_and_run bimodal); then
+        check_capture_warnings bimodal
+        anchor_failed bimodal
+        return
+    fi
     check_capture_warnings bimodal
 
     assert_in_band csv "$csv" column duration_bimodality_coef lo 0.5550001 hi 1.0 \

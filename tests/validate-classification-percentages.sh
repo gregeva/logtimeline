@@ -81,8 +81,11 @@ TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
 
 pass=0; fail=0; failures=(); current_scenario=""
 
+# assert_command ... [reads "CAPTURE ..."]: a check that reads captures is
+# skipped, and counts nothing, when one of them failed; capture_run() counted
+# that failure once (tests/HARNESS-DESIGN.md Trap 13).
 assert_command() {
-    local command label asserts produced_by contract
+    local command label asserts produced_by contract reads=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -90,6 +93,7 @@ assert_command() {
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            reads)       reads="$2";       shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -98,6 +102,13 @@ assert_command() {
     : "${asserts:?assert_command requires asserts}"
     : "${produced_by:?assert_command requires produced_by}"
     : "${contract:?assert_command requires contract}"
+    local cap
+    for cap in $reads; do
+        if ! captured "$cap"; then
+            echo "  SKIP  $current_scenario :: $label (its run failed: $(basename "$cap"))"
+            return 0
+        fi
+    done
     local cmd_out cmd_rc
     set +e
     cmd_out=$(eval "$command" 2>&1); cmd_rc=$?
@@ -119,7 +130,9 @@ assert_command() {
 
 # capture_run OUTFILE WIDTH EXTRA_ARGS... — one ltl render with ANSI intact,
 # --debug-layout so the column selector has its offsets, stderr to
-# OUTFILE.stderr. Non-zero exit or empty capture is a hard failure.
+# OUTFILE.stderr. A non-zero exit, an empty capture or a missing layout table
+# is one failure, counted here; OUTFILE.rc records the outcome, and the checks
+# that read the capture are skipped (captured()).
 capture_run() {
     local outfile="$1"; shift
     local width="$1"; shift
@@ -129,17 +142,30 @@ capture_run() {
         -ni -bs 60 -n 1 --debug-layout -V notices "$@" > "$outfile" 2> "$outfile.stderr"
     rc=$?
     set -e
+    echo "$rc" > "$outfile.rc"
     if [[ $rc -ne 0 || ! -s "$outfile" ]]; then
-        echo "ERROR: capture failed (rc=$rc) for: $*" >&2
-        cat "$outfile.stderr" >&2
-        exit 1
+        capture_failed "$outfile" "exit $rc, $(wc -c < "$outfile" | tr -d ' ') bytes: $*"
+        return 0
     fi
     # The debug-layout table prints on stderr; the column selector reads it
     # from the capture, so append the delimited block (and only it) here.
     sed -n '/^--- Layout Engine Debug/,/^---$/p' "$outfile.stderr" >> "$outfile"
-    grep -q '^--- Layout Engine Debug' "$outfile" || {
-        echo "ERROR: no debug-layout table on stderr for: $*" >&2; exit 1; }
+    if ! grep -q '^--- Layout Engine Debug' "$outfile"; then
+        echo "no-layout-table" > "$outfile.rc"
+        capture_failed "$outfile" "no debug-layout table on stderr: $*"
+    fi
 }
+capture_failed() {
+    echo "  FAIL  capture $(basename "$1") ($2)"
+    echo "        asserts:     every capture run exits 0 and writes its render and its debug-layout table"
+    echo "        produced_by: ltl"
+    echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+    sed 's/^/        | /' "$1.stderr" | head -5
+    fail=$((fail + 1)); failures+=("capture $(basename "$1")")
+}
+
+# captured CAPTURE: the run exited 0 and wrote its output.
+captured() { [[ "$(cat "$1.rc" 2>/dev/null)" == 0 && -s "$1" ]]; }
 
 # cell REPORT_CAPTURE ROW COL -> the timeline_cell_report line (fails hard on
 # missing row/column per the selector's own contract).
@@ -157,6 +183,24 @@ layout_field() {
         print $v[$idx{"'"$field"'"}], "\n"; exit 0;
     ' "$capture" | { read -r v && echo "$v" || { echo "COLUMN-NOT-IN-TABLE" ; return 1; }; }
 }
+
+# ---------------------------------------------------------------------------
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register column-placement \
+                  bucket-values \
+                  value-only-rendering \
+                  following-columns-unchanged \
+                  auto-hide-ordering \
+                  options \
+                  overview-parity \
+                  non-qualifying-run \
+                  mixed-run \
+                  summary-row-colour \
+                  share-omission-notice \
+                  clean-run-hygiene \
+                  leakage-warning-numbers \
+                  soft-wrap
+scenario_parse_args "$@"
 
 # ---------------------------------------------------------------------------
 # Capture A: qualifying access run, width 160.
@@ -195,29 +239,12 @@ capture_run "$M2" 170 --show-classification "$ACCESS_FIXTURE" "$DIAG_FIXTURE"
 SM="$TMP_DIR/diag-mono.out"
 capture_run "$SM" 160 -sm "$DIAG_FIXTURE"
 
-# ---------------------------------------------------------------------------
-# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
-scenario_register column-placement \
-                  bucket-values \
-                  value-only-rendering \
-                  following-columns-unchanged \
-                  auto-hide-ordering \
-                  options \
-                  overview-parity \
-                  non-qualifying-run \
-                  mixed-run \
-                  summary-row-colour \
-                  share-omission-notice \
-                  clean-run-hygiene \
-                  leakage-warning-numbers \
-                  soft-wrap
-scenario_parse_args "$@"
-
 if scenario_wanted column-placement; then
 current_scenario="column-placement"
 
 assert_command \
     label "success_pct and failure_pct sit right of the legend, before the legend|graph separator (AC4, R1, R7; placement corrected by the architect 2026-08-31)" \
+    reads "$A" \
     command "$PERL -ne 'push @o, \$1 if /^\\s*(\\S+)\\s+\\S+\\s+\\S+\\s+\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s*\$/; END { my \$ids = join(q{,}, @o); exit(\$ids =~ /legend,success_pct,failure_pct,sep_legend_graph,occurrences/ ? 0 : 1) }' '$A'" \
     asserts "the two new layout entries are declared in array order after the legend and before the legend|graph separator, and both render by default on an all-ledger both-criteria run" \
     produced_by "build_column_layout() in ltl" \
@@ -233,6 +260,7 @@ bucket_expect() {  # ROW SUCCESS_TEXT FAILURE_TEXT LABEL
     local row="$1" s_want="$2" f_want="$3" label="$4"
     assert_command \
         label "$label" \
+        reads "$A" \
         command "s=\$(cell '$A' '^ $row' success_pct) && f=\$(cell '$A' '^ $row' failure_pct) && [[ \$s == *\"text='\"*\"$s_want\"* ]] && [[ \$f == *\"text='\"*\"$f_want\"* ]] || { echo \"success: \$s\"; echo \"failure: \$f\"; false; }" \
         asserts "the rendered cell values are the classified-denominator percentages: successes/(successes+failures) per bucket, formatted by format_percentage() significant mode — the same rule the category and classified summary shares use (architect correction 2026-08-31)" \
         produced_by "normalize_data_for_output() derives the per-bucket ratio from %bucket_outcomes; the render step prints it via format_percentage()" \
@@ -246,6 +274,7 @@ bucket_expect '2025-05-07 04:00' '33.3%' '66.7%'  "1 of 3 renders under the sign
 
 assert_command \
     label "an empty bucket renders both cells blank — a measured 0% and an absent measurement never look the same (AC14, D11)" \
+    reads "$A" \
     command "s=\$(cell '$A' '^ 2025-05-07 01:00' success_pct) && f=\$(cell '$A' '^ 2025-05-07 01:00' failure_pct) && [[ \$s == *'centred=empty'* && \$f == *'centred=empty'* ]] || { echo \"success: \$s\"; echo \"failure: \$f\"; false; }" \
     asserts "a bucket with no classified line (no %bucket_outcomes entry) renders blank cells, not 0%" \
     produced_by "normalize_data_for_output() leaves the derived value unset for a bucket without outcomes; the render step prints nothing" \
@@ -259,6 +288,7 @@ current_scenario="value-only-rendering"
 
 assert_command \
     label "no bar: fill extent 0 in both cells; value text carries each column's own colour, green vs red distinct (AC3, D1, D14)" \
+    reads "$A" \
     command "s=\$(cell '$A' '^ 2025-05-07 00:00' success_pct) && f=\$(cell '$A' '^ 2025-05-07 00:00' failure_pct) && [[ \$s == *'extent=0'* && \$f == *'extent=0'* ]] && sfg=\$(sed -E 's/.* fg=([^ ]+).*/\\1/' <<<\"\$s\") && ffg=\$(sed -E 's/.* fg=([^ ]+).*/\\1/' <<<\"\$f\") && [[ \$sfg =~ ^(ansi:32|256:(2|22|28|34|64|70))\$ ]] && [[ \$ffg =~ ^(ansi:31|256:(1|52|88|124|160))\$ ]] && [[ \$sfg != \"\$ffg\" ]] || { echo \"success: \$s\"; echo \"failure: \$f\"; false; }" \
     asserts "the columns are value-only (no background fill anywhere in the cell) and the values print in a kelly-green / rosso-corsa named colour definition, not via any @column_colors index" \
     produced_by "the value-only flag on the layout entry read by the render step; named colour definitions per D14" \
@@ -266,6 +296,7 @@ assert_command \
 
 assert_command \
     label "values are centred in the cell, extra space on the left on an odd remainder (AC5, R4)" \
+    reads "$A" \
     command "for row in '00:00' '02:00' '03:00' '04:00'; do s=\$(cell '$A' \"^ 2025-05-07 \$row\" success_pct); [[ \$s == *'centred=centred'* ]] || { echo \"\$row success: \$s\"; exit 1; }; f=\$(cell '$A' \"^ 2025-05-07 \$row\" failure_pct); [[ \$f == *'centred=centred'* ]] || { echo \"\$row failure: \$f\"; exit 1; }; done" \
     asserts "every non-blank value is centred within the column's characters, the header-rule geometry (odd remainder leaves the extra space left)" \
     produced_by "the centred value print in the render step" \
@@ -279,6 +310,7 @@ current_scenario="following-columns-unchanged"
 
 assert_command \
     label "duration and bytes render their own colour tables after the insertion (AC6, R6, D14)" \
+    reads "$A" \
     command "d=\$('$PERL' -e 'require \$ARGV[0]; my \$l = parse_debug_layout(\$ARGV[1]); open my \$fh, \"<:encoding(UTF-8)\", \$ARGV[1] or die; while (<\$fh>) { (my \$p = \$_) =~ s/\\e\\[[0-9;]*m//g; next unless \$p =~ /^ 2025-05-07 03:00/; my \$c = decode_line(\$_); for my \$id (qw(duration bytes)) { my \$s = column_slice(\$c, \$l, \$id); print \$id, \"=\", fill_colour(\$s), \"\\n\"; } exit 0 } die \"row not found\\n\"' '$SCRIPT_DIR/lib/rendered-output.pl' '$A') && grep -q 'duration=256:184\\|duration=256:226\\|duration=MIXED:256:184,256:226' <<<\"\$d\" && grep -q 'bytes=256:34\\|bytes=256:46\\|bytes=MIXED:256:34,256:46' <<<\"\$d\" || { echo \"\$d\"; false; }" \
     asserts "the columns after the insertion point keep their own fill tables: duration yellow (226/184), bytes green (46/34) — the new columns consume no palette index, so the dynamic-column colour walk is unchanged" \
     produced_by "print_bar_graph() colour resolution by column id; the new columns use named colour definitions (D14)" \
@@ -292,6 +324,7 @@ current_scenario="auto-hide-ordering"
 
 assert_command \
     label "hide priorities: latency first, failure_pct immediately after; success_pct outlives duration, bytes and count (AC7, R5)" \
+    reads "$A" \
     command "lat=\$(layout_field '$A' latency hideo) && fp=\$(layout_field '$A' failure_pct hideo) && sp=\$(layout_field '$A' success_pct hideo) && dur=\$(layout_field '$A' duration hideo) && byt=\$(layout_field '$A' bytes hideo) && occ=\$(layout_field '$A' occurrences hideo) && (( lat > fp )) && (( fp > byt )) && (( fp > dur )) && (( sp < dur )) && (( sp < byt )) && (( sp > occ )) || { echo \"lat=\$lat fp=\$fp sp=\$sp dur=\$dur byt=\$byt occ=\$occ\"; false; }" \
     asserts "auto-hide order (higher hides first): latency > failure_pct > duration/bytes/count, and occurrences < success_pct < duration — the inequalities are the contract, exact values are the R5 tuning item" \
     produced_by "the hide-order values declared in build_column_layout()" \
@@ -299,6 +332,7 @@ assert_command \
 
 assert_command \
     label "under width pressure the failure column hides first and success survives (AC7; -hm 120, where the ladder binds)" \
+    reads "$A3" \
     command "fpv=\$(layout_field '$A3' failure_pct vis) && spv=\$(layout_field '$A3' success_pct vis) && [[ \$fpv == 0 && \$spv == 1 ]] || { echo \"failure vis=\$fpv success vis=\$spv\"; false; }" \
     asserts "as width shrinks the failure column is among the first hidden while the success column persists — on the default view every supported width fits both once the latency panel goes, so the binding point is the heatmap view" \
     produced_by "the width-allocation auto-hide pass in build_column_layout()" \
@@ -312,6 +346,7 @@ current_scenario="options"
 
 assert_command \
     label "--hide-classification removes exactly the two columns (AC9, D8)" \
+    reads "$H" \
     command "[[ \$(layout_field '$H' success_pct vis) == 0 && \$(layout_field '$H' failure_pct vis) == 0 && \$(layout_field '$H' duration vis) == 1 ]]" \
     asserts "the hide option turns the pair off where it is on by default, leaving every other column's visibility untouched" \
     produced_by "the single-sited visibility gate (D15) reading the hide option" \
@@ -325,6 +360,7 @@ current_scenario="overview-parity"
 
 assert_command \
     label "overview keys equal the shipped counters: success_pct 60, failure_pct 40 over classified 15 (AC10, D5, D13)" \
+    reads "$A" \
     command "sed -n '/=== format-detection \\/ classification ===/,/=== END format-detection \\/ classification ===/p' '$A' > '$TMP_DIR/cls.block' && [[ -s '$TMP_DIR/cls.block' ]] && awk -F': ' '\$1==\"successes\"{s=\$2} \$1==\"failures\"{f=\$2} \$1==\"classified\"{c=\$2} \$1==\"success_pct\"{sp=\$2} \$1==\"failure_pct\"{fp=\$2} END { if (c != s+f) { print \"classified \" c \" != \" s+f; exit 1 }; if (sp==\"\" || fp==\"\") { print \"pct keys missing\"; exit 1 }; ds = sp - (s/c*100); df = fp - (f/c*100); if (ds<0) ds=-ds; if (df<0) df=-df; if (ds>0.05 || df>0.05) { print \"pct drift: \" sp \" vs \" s/c*100 \", \" fp \" vs \" f/c*100; exit 1 } }' '$TMP_DIR/cls.block'" \
     asserts "the overall percentages are computed from the totalised counts over the classified denominator — one reconciliation sub, no second accumulator — and land as additive keys on the existing classification block" \
     produced_by "the shared reconciliation sub (D13) feeding emit_format_detection_verbose()" \
@@ -332,6 +368,7 @@ assert_command \
 
 assert_command \
     label "the run-level eligibility state is observable: pct_eligible 1 on the qualifying run (D5)" \
+    reads "$A" \
     command "grep -q '^pct_eligible: 1' '$TMP_DIR/cls.block'" \
     asserts "the printed-or-blank decision is observable on the -V surface" \
     produced_by "emit_format_detection_verbose() emitting the D2/D4 run-level resolution" \
@@ -345,6 +382,7 @@ current_scenario="non-qualifying-run"
 
 assert_command \
     label "columns absent by default on a classifying non-ledger run (AC8, D4)" \
+    reads "$D0" \
     command "[[ \$(layout_field '$D0' success_pct vis) == 0 && \$(layout_field '$D0' failure_pct vis) == 0 ]]" \
     asserts "default-off when the matched formats are not qualifying event ledgers" \
     produced_by "the single-sited visibility gate (D15) evaluating the D2/D4 ladder" \
@@ -352,6 +390,7 @@ assert_command \
 
 assert_command \
     label "no UNCLASSIFIED row on a fully-classified run — the row prints only when non-zero (R13; architect 2026-08-31)" \
+    reads "$A" \
     command "! grep -q 'UNCLASSIFIED' '$A'" \
     asserts "a permanent zero row is noise; leakage is surfaced only when it exists" \
     produced_by "print_summary_table() gating the row on a non-zero unclassified count" \
@@ -359,6 +398,7 @@ assert_command \
 
 assert_command \
     label "LINES READ precedes LINES INCLUDED in the summary tallies (architect 2026-08-31)" \
+    reads "$A" \
     command "r=\$(grep -n 'LINES READ' '$A' | head -1 | cut -d: -f1) && i=\$(grep -n 'LINES INCLUDED' '$A' | head -1 | cut -d: -f1) && (( r < i ))" \
     asserts "the tally block reads as a funnel: lines read, then lines included, then the classified breakdown" \
     produced_by "print_summary_table() row order" \
@@ -366,6 +406,7 @@ assert_command \
 
 assert_command \
     label "the UNCLASSIFIED summary row carries count and share of included lines: 2 (50%) (R13, R14)" \
+    reads "$D0" \
     command "grep -E 'UNCLASSIFIED' '$D0' | grep -qE '2 \\(50(\\.0*)?%\\)'" \
     asserts "matched lines that matched neither classification are surfaced as their own run-summary row over the included-lines denominator — leakage is called out, never absorbed" \
     produced_by "print_summary_table() rendering the unclassified count via share_row_text()" \
@@ -373,6 +414,7 @@ assert_command \
 
 assert_command \
     label "explicit request against a format without both criteria: no columns, notice 3 explains why (AC8, AC11, D4)" \
+    reads "$D1" \
     command "[[ \$(layout_field '$D1' success_pct vis) == 0 && \$(layout_field '$D1' failure_pct vis) == 0 ]] && [[ \$(notice_kind_count '$D1' classification-columns-not-shown) == 1 ]]" \
     asserts "an explicit --show-classification against formats that do not declare both success and failure criteria shows no columns and says why, rather than leaving them silently absent" \
     produced_by "the post-read notice emission (D12) evaluating the D4 floor" \
@@ -380,6 +422,7 @@ assert_command \
 
 assert_command \
     label "declining ledger (java_gc_g1) explicitly requested: no columns, notice 3 (AC8, F8)" \
+    reads "$G1" \
     command "[[ \$(layout_field '$G1' success_pct vis) == 0 && \$(layout_field '$G1' failure_pct vis) == 0 ]] && [[ \$(notice_kind_count '$G1' classification-columns-not-shown) == 1 ]]" \
     asserts "a format that declares classification 'none' is treated as declaring no criteria: notice 3, never the leakage warning (F8's misfire is prevented by the D2 predicate)" \
     produced_by "the post-read notice emission (D12)" \
@@ -393,6 +436,7 @@ current_scenario="mixed-run"
 
 assert_command \
     label "mixed run: run-level percentages suppressed everywhere — pct_eligible 0, no pct keys, classified-row shares suppressed (AC15, D2, D10)" \
+    reads "$M" \
     command "sed -n '/=== format-detection \\/ classification ===/,/=== END format-detection \\/ classification ===/p' '$M' > '$TMP_DIR/mixed.block' && [[ -s '$TMP_DIR/mixed.block' ]] && grep -q '^pct_eligible: 0' '$TMP_DIR/mixed.block' && ! grep -qE '^(success_pct|failure_pct):' '$TMP_DIR/mixed.block' && grep -E 'SUCCESS CLASSIFIED' '$M' | grep -vq '(' " \
     asserts "a run with any non-qualifying contribution prints no run-level percentages on any surface: the -V keys are absent, the eligibility state says why, and the summary rows keep counts but drop their shares" \
     produced_by "the shared reconciliation sub (D13) gated by the D2 run-level predicate; print_summary_table() share suppression" \
@@ -400,6 +444,7 @@ assert_command \
 
 assert_command \
     label "mixed run default: columns not rendered — visibility is the format test, not data eligibility (AC15, D4)" \
+    reads "$M" \
     command "[[ \$(layout_field '$M' success_pct vis) == 0 && \$(layout_field '$M' failure_pct vis) == 0 ]]" \
     asserts "default-on requires every bound file's format to be an event ledger declaring both criteria; a mixed run fails that test" \
     produced_by "classification_columns_visible() reading per-file event_ledger/cls_both" \
@@ -407,6 +452,7 @@ assert_command \
 
 assert_command \
     label "mixed run + --show-classification: columns render; ineligible buckets print counts, qualifying buckets print shares; notice 1 fires (AC15, AC18, R12, D2)" \
+    reads "$M2" \
     command "[[ \$(layout_field '$M2' success_pct vis) == 1 ]] && s0=\$(cell '$M2' '^ 2025-05-07 00:00' success_pct) && f0=\$(cell '$M2' '^ 2025-05-07 00:00' failure_pct) && s3=\$(cell '$M2' '^ 2025-05-07 03:00' success_pct) && s4=\$(cell '$M2' '^ 2025-05-07 04:00' failure_pct) && [[ \$s0 == *\"text='\"*'3'* && \$s0 != *'%'* ]] && [[ \$f0 == *\"text='\"*'2'* && \$f0 != *'%'* ]] && [[ \$s3 == *\"text='\"*'100%'* ]] && [[ \$s4 == *'66.7%'* ]] && [[ \$(notice_kind_count '$M2' classification-not-event-ledger) == 1 ]] || { echo \"s0=\$s0\"; echo \"f0=\$f0\"; echo \"s3=\$s3\"; echo \"s4=\$s4\"; false; }" \
     asserts "per-bucket eligibility is a data question independent of visibility: a bucket touched by a source that cannot report a success shows the counts the share would have been built from — never a share, and never blank, which would read as a window with no successes and no failures — while an untouched bucket keeps its stable figure and the partial-coverage caution names the blind spots" \
     produced_by "normalize_data_for_output() per-bucket derivation gated on %bucket_outcomes slot 3; emit_classification_percentage_notices()" \
@@ -414,6 +460,7 @@ assert_command \
 
 assert_command \
     label "an ineligible window with no successes shows the count 0, not a blank cell (AC18, D2 as amended)" \
+    reads "$M2" \
     command "s=\$(cell '$M2' '^ 2025-05-07 02:00' success_pct) && f=\$(cell '$M2' '^ 2025-05-07 02:00' failure_pct) && [[ \$s == *\"text='\"*'0'* && \$s != *'%'* ]] && [[ \$f == *\"text='\"*'4'* ]] || { echo \"success: \$s\"; echo \"failure: \$f\"; false; }" \
     asserts "a measured zero in an ineligible window is reported as a zero count: the D11 blank is reserved for a window with no classified line at all, so the two remain distinguishable after the count fallback was added" \
     produced_by "normalize_data_for_output() setting the *_count keys on a slot-3 bucket with classified lines; the value-only render branch choosing format_number over format_percentage" \
@@ -427,6 +474,7 @@ current_scenario="summary-row-colour"
 
 assert_command \
     label "the classified summary rows carry the classification shades: success kelly-green, failure rosso-corsa (D14)" \
+    reads "$A" \
     command "grep -aE $'\\033\\[38;5;34m *SUCCESS CLASSIFIED' '$A' >/dev/null && grep -aE $'\\033\\[38;5;160m *FAILURE CLASSIFIED' '$A' >/dev/null" \
     asserts "an outcome reads in one colour wherever the run reports it: the summary rows take the same named definitions as the timeline's percentage columns, not a colour of their own" \
     produced_by "the classified-row emitter in print_summary_table() resolving through summary_colour()" \
@@ -434,6 +482,7 @@ assert_command \
 
 assert_command \
     label "the UNCLASSIFIED summary row carries the gold shade, distinct from both outcome colours (D14)" \
+    reads "$D0" \
     command "grep -aE $'\\033\\[38;5;178m *UNCLASSIFIED' '$D0' >/dev/null" \
     asserts "the row for lines that are neither a success nor a failure is told apart from both at a glance, in a third named definition" \
     produced_by "the classified-row emitter in print_summary_table() resolving through summary_colour()" \
@@ -441,6 +490,7 @@ assert_command \
 
 assert_command \
     label "-sm renders the same rows with no colour at all (D14, -sm contract)" \
+    reads "$SM" \
     command "! grep -aE 'CLASSIFIED|CONFLICT|MIXED' '$SM' | grep -aE $'\\033\\[38;5;(34|160|178|173|135)m' >/dev/null && grep -aq 'UNCLASSIFIED' '$SM'" \
     asserts "monochrome is a property of the whole summary table: the classified rows inherit the switch through summary_colour() rather than reading %colors directly, so none of the classification shades survives -sm on a summary row (the message blocks' classification indicator is outside -sm, which renders the run summary table alone)" \
     produced_by "summary_colour() returning empty under \$summary_mono" \
@@ -454,6 +504,7 @@ current_scenario="share-omission-notice"
 
 assert_command \
     label "a run whose shares are withheld says why, naming the formats that define no success rule (R9)" \
+    reads "$M" \
     command "[[ \$(notice_kind_count '$M' classified-shares-omitted) == 1 && \$(notice_field '$M' classified-shares-omitted evidence) == windchill_method_server ]]" \
     asserts "when the classified rows drop their shares because a contributing format can report failures but never successes, the run says so and names that format — the reader is not left to infer why two percentages vanished" \
     produced_by "emit_classification_percentage_notices(), outside the columns-visible gate: the summary rows print whether or not the timeline columns do" \
@@ -467,6 +518,7 @@ current_scenario="clean-run-hygiene"
 
 assert_command \
     label "no qualifying notice fires on a clean, fully-classified ledger run (AC11)" \
+    reads "$A" \
     command "[[ \$(for k in classification-columns-not-shown classification-not-matched classification-not-event-ledger classified-shares-omitted; do notice_kind_count '$A' \$k; done | paste -sd, -) == 0,0,0,0 ]]" \
     asserts "the qualifying notices are mutually exclusive by condition and silent when no condition holds — including the share-omission notice, which has nothing to say on a run whose shares print" \
     produced_by "the post-read notice emission (D12)" \
@@ -476,6 +528,7 @@ for cap in "$A" "$A2" "$H" "$D0" "$D1" "$G1" "$M" "$M2" "$SM"; do
     label_name=$(basename "$cap")
     assert_command \
         label "no runtime warnings on stderr ($label_name)" \
+        reads "$cap" \
         command "assert_no_runtime_warnings '$cap.stderr' '$label_name'" \
         asserts "no ' at ltl line N' unguarded data path fires on any scenario run" \
         produced_by "any sub touched by this feature" \
@@ -496,15 +549,22 @@ LEAK_FIXTURE="$TMP_DIR/leakage-1200.txt"
 LK="$TMP_DIR/leakage.out"
 set +e
 "$LTL" --disable-progress -ni -lf classification_verification -bs 1440 -n 1 --terminal-width 160 -V notices "$LEAK_FIXTURE" > "$LK" 2> "$LK.stderr"
+lk_rc=$?
 set -e
+echo "$lk_rc" > "$LK.rc"
+if [[ $lk_rc -ne 0 || ! -s "$LK" ]]; then
+    capture_failed "$LK" "exit $lk_rc, $(wc -c < "$LK" | tr -d ' ') bytes"
+fi
 assert_command \
     label "the leakage warning reads 1200 included line(s) (100%) for 1,200 unclassified lines" \
+    reads "$LK" \
     command "[[ \$(notice_field '$LK' classification-not-matched statement) == '1200 included line(s) (100%) matched neither the success nor the failure classification; the percentages exclude them' ]]" \
     asserts "a notice's measured count renders through the one dispatch at its row (prose: 1,200 reads 1200 unclimbed, exact and narrower than any scaled spelling) and its share through the percentage formatter (100%, never 100.0%)" \
     produced_by "emit_classification_percentage_notices() in ltl, through value_text() and the notice and notice share rows" \
     contract "features/617-width-to-format-rule.md D6, D14, D23, D25"
 assert_command \
     label "no runtime warnings on stderr (leakage)" \
+    reads "$LK" \
     command "assert_no_runtime_warnings '$LK.stderr' 'leakage'" \
     asserts "no ' at ltl line N' unguarded data path fires on the leakage run" \
     produced_by "any sub touched by this feature" \
@@ -516,19 +576,22 @@ current_scenario="soft-wrap"
 for spec in "$A:160" "$A2:120" "$M:160"; do
     cap="${spec%%:*}"; w="${spec##*:}"
     wrap_scenario="classification-percentages-w$w-$(basename "$cap" .out)"
+    if ! captured "$cap"; then
+        echo "  SKIP  soft-wrap :: output fits $w columns ($(basename "$cap")) (its run failed)"
+        continue
+    fi
     wrap_issue=$(soft_wrap_known_failure "$wrap_scenario")
     if assert_no_soft_wrap "$cap" "$w" "$wrap_scenario" 2>/dev/null; then
         if [[ -n "$wrap_issue" ]]; then
             echo "  XPASS $wrap_scenario :: no longer exceeds its terminal width — remove its entry from tests/rendered-output/soft-wrap-known-failures.tsv (#$wrap_issue)"
-        else
-            echo "  PASS  soft-wrap :: output fits $w columns ($(basename "$cap"))"
         fi
+        echo "  PASS  soft-wrap :: output fits $w columns ($(basename "$cap"))"
         pass=$((pass + 1))
     elif [[ -n "$wrap_issue" ]]; then
+        # A known failure is reported and counts nothing, neither way.
         wrap_detail=$(assert_no_soft_wrap "$cap" "$w" "$wrap_scenario" 2>&1 >/dev/null || true)
         printf '%s\n' "${wrap_detail//  FAIL /  XFAIL}" >&2
         echo "  XFAIL soft-wrap :: $wrap_scenario exceeds its terminal width — known, #$wrap_issue"
-        pass=$((pass + 1))
     else
         echo "  FAIL  soft-wrap :: output does not fit $w columns ($(basename "$cap"))"
         assert_no_soft_wrap "$cap" "$w" "$wrap_scenario" || true

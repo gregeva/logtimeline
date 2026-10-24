@@ -24,7 +24,8 @@
 # Public functions:
 #   assert_no_soft_wrap CAPTURE WIDTH CONTEXT_LABEL
 #       Every line in CAPTURE fits WIDTH columns. Prints the self-documenting
-#       failure block and returns 1 otherwise.
+#       failure block and returns 1 otherwise, and when CAPTURE is missing or
+#       empty.
 #   soft_wrap_known_failure SCENARIO
 #       Echoes the issue number for a registered known failure, else nothing.
 #   render_row_report CAPTURE LABEL ROW_WIDTH
@@ -57,6 +58,12 @@ assert_no_soft_wrap() {
 
     if [[ ! -f "$capture" ]]; then
         echo "  FAIL  $context :: soft-wrap check found no capture at $capture" >&2
+        return 1
+    fi
+    # An empty capture has no line to exceed the width, so a pass on it would
+    # say nothing about a run that printed nothing (HARNESS-DESIGN.md Trap 13).
+    if [[ ! -s "$capture" ]]; then
+        echo "  FAIL  $context :: soft-wrap check found an empty capture at $capture" >&2
         return 1
     fi
 

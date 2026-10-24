@@ -130,7 +130,7 @@ assert_checker() {
     fi
 }
 yget() { perl "$CHECKER" get --yaml "$YAML_FILE" --path "$1" 2>/dev/null || true; }
-section_value() { grep -E "^$2: " "$1" | head -1 | sed -E 's/^[^:]+: //'; }
+section_value() { { grep -E "^$2: " "$1" || true; } | head -1 | sed -E 's/^[^:]+: //'; }
 strip_colour() { sed 's/\x1b\[[0-9;]*m//g'; }
 
 # A working directory a -o run is about to write into carries no product this
@@ -154,22 +154,30 @@ assert_directory_owned() {
 # Run ltl with -o in a scratch directory of its own; the file paths and the
 # stdout capture are exported. Extra args precede the log operands.
 YAML_FILE=""; STATS_CSV=""; MSG_CSV=""; OUT=""
+# A run that fails is one counted failure and the caller's checks, all gated
+# on YAML_FILE, are skipped; the paths are cleared first so a check never reads
+# an earlier scenario's export (tests/HARNESS-DESIGN.md Trap 13).
 run_export() {
     local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
-    assert_directory_owned "$dir" || return 1
+    YAML_FILE=""; STATS_CSV=""; MSG_CSV=""; OUT=""
+    assert_directory_owned "$dir" || { no_export; return 1; }
     OUT="$dir/stdout"
     set +e
     ( cd "$dir" && "$LTL" --disable-progress -ni -o -V aggregate-export,filter-summary,format-detection,benchmark-data,histogram-percentile-ticks,profile "$@" > "$OUT" 2> "$OUT.stderr" )
     local ec=$?
     set -e
-    if [[ $ec -ne 0 ]]; then echo "FAIL: ltl exited $ec for $current_scenario; stderr:" >&2; sed 's/^/    /' "$OUT.stderr" >&2; exit 1; fi
     if ! assert_no_runtime_warnings "$OUT.stderr" "$current_scenario"; then fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); fi
+    if [[ $ec -ne 0 ]]; then
+        fail_with "the -o run" 'The run exits 0 and writes its export' "$PRODUCER" "$CONTRACT" "ltl exited $ec: $(head -3 "$OUT.stderr" | tr '\n' ' ')"
+        no_export; return 1
+    fi
     YAML_FILE="$(ls "$dir"/*.yaml 2>/dev/null | head -1 || true)"
     STATS_CSV="$(ls "$dir"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)"
     MSG_CSV="$(ls "$dir"/*-LTL-MESSAGES-*.csv 2>/dev/null | head -1 || true)"
-    if [[ -z "$YAML_FILE" ]]; then fail_with "file written" 'A -o run writes exactly one YAML file beside the STATS CSV' "$PRODUCER" "$CONTRACT" "no .yaml in $dir"; return 1; fi
+    if [[ -z "$YAML_FILE" ]]; then fail_with "file written" 'A -o run writes exactly one YAML file beside the STATS CSV' "$PRODUCER" "$CONTRACT" "no .yaml in $dir"; no_export; return 1; fi
     return 0
 }
+no_export() { echo "  SKIP  $current_scenario :: its checks (no export to read)"; }
 
 echo "Validating the YAML aggregate export (Issue #503)"
 echo ""
@@ -179,7 +187,7 @@ current_scenario="histogram-n0"
 if want "$current_scenario"; then
     run_export -bs 1440 -oe -n 0 -cp full -hg duration -h orders "$FIXTURES/http-status-families.txt" "$FIXTURES/tomcat-access-duration-spread.txt" || true
     if [[ -n "$YAML_FILE" ]]; then
-        local_count=$(ls "$TMP_DIR/$current_scenario"/*.yaml | wc -l | tr -d ' ')
+        local_count=$(ls "$TMP_DIR/$current_scenario"/*.yaml | wc -l | tr -d ' ') || local_count=""
         assert_equal "exactly one YAML file" "$local_count" 1 asserts 'One file per run' produced_by "$PRODUCER" contract "$CONTRACT"
         name="$(basename "$YAML_FILE")"
         if [[ "$name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}-LTL-AGGREGATE\.yaml$ ]]; then pass_with "file name carries no argument text ($name)"; else fail_with "file name" 'The name is <stamp>-LTL-AGGREGATE.yaml with no argument suffix (D18)' "run_file_stamp() and $PRODUCER" "$CONTRACT" "$name"; fi
@@ -212,7 +220,7 @@ if want "$current_scenario"; then
         legend="$(section_value "$OUT" legend | tr ',' '\n' | sed 's/^[^=]*=//' | tr '\n' ',' | sed 's/,$//')"
         formats=""; i=0; while v="$(yget population.formats.$i.name)" && [[ -n "$v" ]]; do formats="${formats:+$formats,}$v"; i=$((i+1)); done
         assert_equal "formats = legend slugs" "$formats" "$legend" asserts 'population.formats lists the distinct slugs the legend names, in its order (both fixtures bind the one slug)' produced_by "$PRODUCER" contract "$CONTRACT (D10)"
-        bd_read="$(grep -E '^lines_read	' "$OUT" | cut -f2)"; bd_incl="$(grep -E '^lines_included	' "$OUT" | cut -f2)"; bd_excl="$(grep -E '^lines_excluded	' "$OUT" | cut -f2)"
+        bd_read="$(grep -E '^lines_read	' "$OUT" | cut -f2 || true)"; bd_incl="$(grep -E '^lines_included	' "$OUT" | cut -f2 || true)"; bd_excl="$(grep -E '^lines_excluded	' "$OUT" | cut -f2 || true)"
         assert_equal "lines.read = benchmark-data lines_read" "$(yget population.lines.read)" "$bd_read" asserts 'benchmark-data reads the same counter' produced_by "$PRODUCER; print_verbose_output() in ltl" contract 'tests/HARNESS-DESIGN.md section one source, two surfaces'
         assert_equal "lines.included = benchmark-data lines_included" "$(yget population.lines.included)" "$bd_incl" asserts 'benchmark-data reads the same counter' produced_by "$PRODUCER; print_verbose_output() in ltl" contract 'tests/HARNESS-DESIGN.md section one source, two surfaces'
         assert_equal "bucket_count = COUNTS log_occurrences_entries" "$(yget series.bucket_count)" "$(grep -E '^COUNTS	log_occurrences_entries	' "$OUT" | cut -f3)" asserts 'The series row count is the one benchmark-data counts' produced_by "$PRODUCER; print_verbose_output() in ltl" contract "$CONTRACT (F6)"
@@ -220,7 +228,7 @@ if want "$current_scenario"; then
         # histogram: the chart's selected percentiles at full precision
         ticks="$TMP_DIR/$current_scenario.ticks"; sed -n '/=== histogram-percentile-ticks ===/,/=== END histogram-percentile-ticks ===/p' "$OUT" > "$ticks"
         for p in P50:p50 P75:p75 P90:p90 P95:p95; do
-            tv="$(grep -E "^\s+percentile: ${p%%:*} value=" "$ticks" | head -1 | sed 's/.*=//')"; fv="$(yget measurements.histogram.duration.${p##*:})"
+            tv="$(grep -E "^\s+percentile: ${p%%:*} value=" "$ticks" | head -1 | sed 's/.*=//' || true)"; fv="$(yget measurements.histogram.duration.${p##*:})"
             assert_near "histogram ${p##*:} = ticks ${p%%:*}" "$fv" "$tv" asserts 'The population-wide percentile is the value the histogram computed, as -V histogram-percentile-ticks prints it' produced_by "$PRODUCER; finalize_histogram_unified() in ltl" contract "$CONTRACT (D3)"
         done
         assert_equal "histogram occurrences excludes non-positive values" "$(yget measurements.histogram.duration.occurrences)" "$(section_value "$OUT" 'lines_included' | awk -v z=0 '{print $1}' | xargs -I{} sh -c 'echo $(( {} - 85 ))')" asserts 'Of the 444 included lines, 85 carry a zero duration the histogram capture gate excludes (10 in the status fixture, 75 in the spread fixture)' produced_by "$PRODUCER; read_and_process_logs() in ltl (histogram capture gate)" contract "$CONTRACT (D3, F1)"
@@ -238,7 +246,7 @@ if want "$current_scenario"; then
         stamps=""; i=0; while v="$(yget series.buckets.$i.timestamp)" && [[ -n "$v" ]]; do stamps="${stamps:+$stamps|}$v"; i=$((i+1)); done
         assert_equal "bucket timestamps = CSV timestamps" "$stamps" "$(awk -F, 'NR>1{gsub(/"/,"",$1); print $1}' "$STATS_CSV" | paste -sd'|' -)" asserts 'Every bucket timestamp is the STATS CSV timestamp of the same row' produced_by "$PRODUCER; format_timestamp() in ltl" contract "$CONTRACT (D7/D14)"
         # options string
-        opt_line="$(strip_colour < "$OUT" | grep -E '^command-line options: ' | head -1 | sed 's/^command-line options: //')"
+        opt_line="$(strip_colour < "$OUT" | grep -E '^command-line options: ' | head -1 | sed 's/^command-line options: //' || true)"
         assert_equal "options.command-line = echoed line" "$(yget provenance.determining.options.command-line)" "$opt_line" asserts 'The option string is byte-identical to the terminal echo, colour stripped' produced_by "$PRODUCER; build_run_options_string() in ltl" contract "$CONTRACT (D5)"
         # data model and unit
         assert_equal "data_model.histogram" "$(yget provenance.determining.data_model.histogram)" bin asserts 'The histogram default model is bin' produced_by "$PRODUCER" contract "$CONTRACT (R4)"
@@ -315,9 +323,11 @@ current_scenario="precision-not-csv"
 if want "$current_scenario"; then
     run_export -bs 1440 -oe -n 0 "$FIXTURES/tomcat-access-duration-spread.txt" || true
     if [[ -n "$YAML_FILE" ]]; then
-        col=$(head -1 "$STATS_CSV" | tr ',' '\n' | grep -n '^duration_mean$' | cut -d: -f1)
-        csv_mean="$(awk -F, -v c="$col" 'NR==2{print $c}' "$STATS_CSV")"; file_mean="$(yget series.buckets.0.duration.mean)"
-        if [[ "$file_mean" != "$csv_mean" && "$file_mean" == *.* ]]; then pass_with "duration.mean is the in-memory value ($file_mean), not the default -cp rendering ($csv_mean)"; else fail_with "precision" 'No value passes through format_csv_value(): the file differs from the default -cp CSV on a fractional mean' "$PRODUCER" "$CONTRACT (R12)" "file $file_mean csv $csv_mean"; fi
+        col=$(head -1 "$STATS_CSV" | tr ',' '\n' | grep -n '^duration_mean$' | cut -d: -f1) || col=""
+        csv_mean=""; [[ -n "$col" ]] && csv_mean="$(awk -F, -v c="$col" 'NR==2{print $c}' "$STATS_CSV")"
+        file_mean="$(yget series.buckets.0.duration.mean)"
+        # Unequal holds when either side is missing; both are read first.
+        if [[ -n "$csv_mean" && "$file_mean" != "$csv_mean" && "$file_mean" == *.* ]]; then pass_with "duration.mean is the in-memory value ($file_mean), not the default -cp rendering ($csv_mean)"; else fail_with "precision" 'No value passes through format_csv_value(): the file differs from the default -cp CSV on a fractional mean' "$PRODUCER" "$CONTRACT (R12)" "file $file_mean csv $csv_mean"; fi
     fi
 fi
 
@@ -360,10 +370,12 @@ if want "$current_scenario"; then
         set +e
         ( cd "$dir" && "$LTL" --disable-progress -ni -o -bs 1440 -oe -n 0 -osum tests/fixtures/http-status-families.txt tests/fixtures/category-contribution-skew.txt > "$OUT" 2> "$OUT.stderr" )
         ec=$?; set -e
-        [[ $ec -eq 0 ]] || { echo "FAIL: ltl exited $ec for $current_scenario" >&2; sed 's/^/    /' "$OUT.stderr" >&2; exit 1; }
         assert_no_runtime_warnings "$OUT.stderr" "$current_scenario" || { fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); }
         YAML_FILE="$(ls "$dir"/*-LTL-AGGREGATE.yaml 2>/dev/null | head -1 || true)"
-        if [[ -z "$YAML_FILE" ]]; then
+        if [[ $ec -ne 0 ]]; then
+            fail_with "the -o run" 'The run exits 0 and writes its export' "$PRODUCER" "$CONTRACT" "ltl exited $ec: $(head -3 "$OUT.stderr" | tr '\n' ' ')"
+            no_export
+        elif [[ -z "$YAML_FILE" ]]; then
             fail_with "file written" 'A -o run writes exactly one YAML file beside the STATS CSV' "$PRODUCER" "$CONTRACT" "no export in $dir"
         else
             assert_equal "directory_list" "$(yget population.sources.directory_list.0)|$(yget population.sources.directories)" "tests/fixtures|1" asserts 'Relative paths as given, file part removed, de-duplicated; the count counts the list' produced_by "$PRODUCER" contract "$CONTRACT (D9)"
@@ -390,13 +402,15 @@ if want "$current_scenario"; then
         set +e
         ( cd "$dir" && LTL_CONFIG="-oe" "$LTL" --disable-progress -ni -o -bs 1440 -n 0 "$FIXTURES/http-status-families.txt" > "$OUT" 2> "$OUT.stderr" )
         ec=$?; set -e
-        [[ $ec -eq 0 ]] || { echo "FAIL: ltl exited $ec for $current_scenario" >&2; exit 1; }
         assert_no_runtime_warnings "$OUT.stderr" "$current_scenario" || { fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); }
         YAML_FILE="$(ls "$dir"/*-LTL-AGGREGATE.yaml 2>/dev/null | head -1 || true)"
-        if [[ -z "$YAML_FILE" ]]; then
+        if [[ $ec -ne 0 ]]; then
+            fail_with "the -o run" 'The run exits 0 and writes its export' "$PRODUCER" "$CONTRACT" "ltl exited $ec: $(head -3 "$OUT.stderr" | tr '\n' ' ')"
+            no_export
+        elif [[ -z "$YAML_FILE" ]]; then
             fail_with "file written" 'A -o run writes exactly one YAML file beside the STATS CSV' "$PRODUCER" "$CONTRACT" "no export in $dir"
         else
-            env_line="$(strip_colour < "$OUT" | grep -E '^environment options: ' | head -1 | sed 's/^environment options: //')"
+            env_line="$(strip_colour < "$OUT" | grep -E '^environment options: ' | head -1 | sed 's/^environment options: //' || true)"
             assert_equal "options.environment = echoed line" "$(yget provenance.determining.options.environment)" "$env_line" asserts 'The environment option string is the text after environment options:' produced_by "$PRODUCER" contract "$CONTRACT (D5)"
             assert_equal "omit_empty from the environment" "$(yget series.omit_empty)" true asserts 'The option took effect and the series records it' produced_by "$PRODUCER" contract "$CONTRACT (R2)"
         fi

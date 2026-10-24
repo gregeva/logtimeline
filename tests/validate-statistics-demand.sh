@@ -179,8 +179,11 @@ assert_line() {
 
 # Self-documenting assertion for anything beyond a single-line grep.
 # `command` is eval'd (PASS if exit 0); `label` names it on the PASS line.
+# A check whose input does not depend on $LTL names it in `run_free`, and its
+# PASS line ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 assert_command() {
-    local command label asserts produced_by contract
+    local command label asserts produced_by contract run_free=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -188,6 +191,7 @@ assert_command() {
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            run_free)    run_free="$2";    shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -197,8 +201,10 @@ assert_command() {
     : "${produced_by:?assert_command requires produced_by}"
     : "${contract:?assert_command requires contract}"
 
-    if eval "$command" >/dev/null 2>&1; then
-        echo "  PASS  $current_scenario :: $label"
+    # In a subshell: an unbound name or an exit in the command ends that, not
+    # the harness (HARNESS-DESIGN.md shape 15).
+    if ( eval "$command" ) >/dev/null 2>&1; then
+        echo "  PASS  $current_scenario :: $label${run_free:+ [run-free: $run_free]}"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario"
@@ -762,8 +768,8 @@ assert_line "$out" \
     produced_by 'emit_benchmark_data_verbose() in ltl (re-emitted $stats_population_messages)' \
     contract    'tests/HARNESS-DESIGN.md section Counters serving benchmark attribution — one source, two surfaces'
 assert_command \
-    command     "! grep -qE 'TOP (OVERALL|HIGHLIGHTED) MESSAGES' '$out.plain'" \
-    label       'neither messages-table header is rendered' \
+    command     "grep -qE '^[[:space:]]+timestamp[[:space:]]+legend[[:space:]]' '$out.plain' && ! grep -qE 'TOP (OVERALL|HIGHLIGHTED) MESSAGES' '$out.plain'" \
+    label       'neither messages-table header is rendered (the timeline is)' \
     asserts     'The message summary table is skipped entirely - not printed empty, and not printed with a header only' \
     produced_by 'pipeline_render() in ltl (print_message_summary is not called when no message is retained)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
@@ -836,8 +842,8 @@ assert_command \
     produced_by 'pipeline_render() in ltl (STATS CSV open, gated only on the CSV request)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
 assert_command \
-    command     "! ls '$CSV_ONLY_DIR'/*-LTL-MESSAGES-*.csv" \
-    label       'no MESSAGES CSV file is created' \
+    command     "ls '$CSV_ONLY_DIR'/*-LTL-STATS-*.csv && ! ls '$CSV_ONLY_DIR'/*-LTL-MESSAGES-*.csv" \
+    label       'no MESSAGES CSV file is created (the STATS CSV is)' \
     asserts     'The MESSAGES CSV is the per-message store written out: with nothing retained no file is created, not even a header-only one' \
     produced_by 'pipeline_render() in ltl (MESSAGES CSV open gated on message retention)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
@@ -908,7 +914,8 @@ assert_command \
     label       "the fixture still carries $DURATION_SPREAD_LINES lines, the population the ceiling was derived from" \
     asserts     "The retained-duration ceiling is derived from this fixture's $DURATION_SPREAD_LINES durations; a regenerated fixture with a different line count changes the retained population and the threshold must be re-derived rather than silently absorb the change" \
     produced_by 'tests/duration-display/generate-fixture.py (fixture generator); the population is retained by the per-bucket durations push in read_and_process_logs()' \
-    contract    "$REPRESENTATION_CONTRACT"
+    contract    "$REPRESENTATION_CONTRACT" \
+    run_free    'tests/fixtures/tomcat-access-duration-spread.txt'
 
 # A missing row is a hard failure: the assertion below compares a number, and an
 # absent row must never read as a value under the ceiling.

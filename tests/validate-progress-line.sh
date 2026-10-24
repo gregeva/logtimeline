@@ -162,8 +162,11 @@ fail=0
 failures=()
 current_scenario=""
 
+# assert_command ... [reads "FRAMES ..."]: a check that reads captures is
+# skipped, and counts nothing, when one of them failed; capture_frames()
+# counted that failure once (tests/HARNESS-DESIGN.md Trap 13).
 assert_command() {
-    local command label asserts produced_by contract
+    local command label asserts produced_by contract reads=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -171,6 +174,7 @@ assert_command() {
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            reads)       reads="$2";       shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -179,6 +183,13 @@ assert_command() {
     : "${asserts:?assert_command requires asserts}"
     : "${produced_by:?assert_command requires produced_by}"
     : "${contract:?assert_command requires contract}"
+    local cap
+    for cap in $reads; do
+        if ! captured "$cap"; then
+            echo "  SKIP  $current_scenario :: $label (its run failed: $(basename "$cap"))"
+            return 0
+        fi
+    done
 
     local cmd_out cmd_rc
     set +e
@@ -209,8 +220,10 @@ assert_command() {
 # is coloured and the frames are not, and neither fact is what this harness is
 # about.
 #
-# Writes the frames to $1 and the run's stderr to $1.stderr. Fails hard on a
-# non-zero exit or an empty capture (HARNESS-DESIGN.md Trap 1).
+# Writes the frames to $1 and the run's stderr to $1.stderr. A non-zero exit
+# or an empty capture is one failure, counted here; $1.rc records the outcome,
+# and the checks that read the frames are skipped (captured(); HARNESS-DESIGN.md
+# Trap 1 and Trap 13).
 capture_frames() {
     local outfile="$1"; shift
     local rawfile="$outfile.raw"
@@ -219,24 +232,42 @@ capture_frames() {
     ( cd "$TMP_DIR" && with_ascii_colour "$LTL" "$@" ) >"$rawfile" 2>"$stderrfile"
     local status=$?
     set -e
+    : > "$outfile"
     if [[ "$status" -ne 0 ]]; then
-        echo "  FAIL  $current_scenario :: ltl exited $status" >&2
-        sed 's/^/        /' "$stderrfile" >&2
-        exit 1
+        echo "$status" > "$outfile.rc"
+        run_failed "ltl exited $status" "$stderrfile"
+        return 0
     fi
     if [[ ! -s "$rawfile" ]]; then
-        echo "  FAIL  $current_scenario :: ltl produced no output" >&2
-        exit 1
+        echo empty > "$outfile.rc"
+        run_failed "ltl produced no output" "$stderrfile"
+        return 0
     fi
+    echo 0 > "$outfile.rc"
     tr '\r' '\n' < "$rawfile" \
         | sed -E 's/\x1b\[[0-9;]*m//g' \
         | sed -E 's/[[:space:]]+$//' \
-        | grep -v '^$' \
+        | { grep -v '^$' || true; } \
         > "$outfile"
     if ! assert_no_runtime_warnings "$stderrfile" "$current_scenario"; then
         fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
     fi
 }
+
+# run_failed REASON STDERR: one failure for a run that gave nothing to read.
+run_failed() {
+    {
+        echo "  FAIL  $current_scenario :: $1"
+        echo "        asserts:     the run exits 0 and writes the output its checks read"
+        echo "        produced_by: ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+        sed 's/^/        | /' "$2" | head -5
+    } >&2
+    fail=$((fail + 1)); failures+=("$current_scenario :: $1")
+}
+
+# captured FRAMES: the run exited 0 and wrote its output.
+captured() { [[ "$(cat "$1.rc" 2>/dev/null)" == 0 ]]; }
 
 # ---------------------------------------------------------------------------
 # Scenario: multi-file — the full line, and the overall percentage's arithmetic
@@ -267,6 +298,7 @@ capture_frames "$MULTI" \
 # anchors).
 assert_command \
     command     "grep -q '^Processing ' '$MULTI'" \
+    reads       "$MULTI" \
     label       'the read pass paints at least one progress frame' \
     asserts     'A run without --disable-progress reports its progress on stdout while reading; a run that painted nothing would report nothing about a long read' \
     produced_by 'read_and_process_logs() in ltl (the opening frame per file and the throttled repaint)' \
@@ -274,6 +306,7 @@ assert_command \
 
 assert_command \
     command     "grep -qE '^Processing +[0-9]+%/[0-9]+% \\(file [0-9]+/3\\) line [0-9.]+[kMB]?[a-z]*, [0-9.]+[kMB]?[a-z]* total(, [0-9.]+[kMB]?[a-z]* lines/sec)?: [^ ]*part-[0-9]+\\.txt\$' '$MULTI'" \
+    reads       "$MULTI" \
     label       'the multi-file line carries file%, overall%, the counter, line, total and the filename, in that order' \
     asserts     'With two or more files the line reads: the file percentage over the overall percentage, the file counter, the current line, the run total, optionally the rate, and the filename LAST — the filename is the only variable-length element, so it sits where it cannot shift the numerics as the run moves between files' \
     produced_by 'progress_line_text() in ltl' \
@@ -285,6 +318,7 @@ assert_command \
 # different numbers.
 assert_command \
     command     "grep -qE '^Processing +0%/0% \\(file 1/3\\) .*: [^ ]*part-1\\.txt\$' '$MULTI'" \
+    reads       "$MULTI" \
     label       'file 1 of 3 opens at 0% overall' \
     asserts     'The overall percentage is bytes of closed files plus the live handle position over the sum of the selected sets sizes; before any file has closed that is 0 of 3160 bytes' \
     produced_by 'progress_line_text() in ltl, from the sweep in size_selected_files_for_progress()' \
@@ -292,6 +326,7 @@ assert_command \
 
 assert_command \
     command     "grep -qE '^Processing +0%/25% \\(file 2/3\\) .*: [^ ]*part-2\\.txt\$' '$MULTI'" \
+    reads       "$MULTI" \
     label       'file 2 of 3 opens at 25% overall (790 of 3160 bytes closed)' \
     asserts     'A file credits its whole size to the overall numerator when it closes, so the next file opens at exactly the closed bytes over the total: 790/3160 = 25%' \
     produced_by 'read_and_process_logs() in ltl (the roll from the live position to the full size at close) and progress_line_text()' \
@@ -299,6 +334,7 @@ assert_command \
 
 assert_command \
     command     "grep -qE '^Processing +0%/50% \\(file 3/3\\) .*: [^ ]*part-3\\.txt\$' '$MULTI'" \
+    reads       "$MULTI" \
     label       'file 3 of 3 opens at 50% overall (1580 of 3160 bytes closed)' \
     asserts     'The overall figure accumulates across files: two closed files of 790 bytes each is 1580 of 3160, which is 50% — bytes, not the file count, which would read 66% here' \
     produced_by 'progress_line_text() in ltl' \
@@ -310,6 +346,7 @@ assert_command \
 # flight rather than being emitted once.
 assert_command \
     command     "test \"\$(grep -cE '^Processing .*\\(file [0-9]+/3\\)' '$MULTI')\" -ge 3" \
+    reads       "$MULTI" \
     label       'every file of the set gets a frame naming its position' \
     asserts     'Each file paints an opening frame, so a run over many files shows the reader which file it has reached even when each one is read inside a single repaint interval' \
     produced_by 'read_and_process_logs() in ltl (the opening frame, painted outside the throttle)' \
@@ -317,6 +354,7 @@ assert_command \
 
 assert_command \
     command     "grep -q '^Processing completed\\.\$' '$MULTI'" \
+    reads       "$MULTI" \
     label       'the run closes on the completion line' \
     asserts     'The read pass ends with Processing completed., so the last thing the reader sees is never a frame parked below 100% — the completion line stands in for a final 100% frame' \
     produced_by 'read_and_process_logs() in ltl (end-of-run block)' \
@@ -328,6 +366,7 @@ assert_command \
 # column engine and are not this surface.
 assert_command \
     command     "! grep '^Processing ' '$MULTI' | awk -v w=$WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
+    reads       "$MULTI" \
     label       "no frame exceeds the width the line-clear covers ($((WIDTH - 1)) characters)" \
     asserts     'Every frame fits within terminal_width - 1 characters, which is exactly what the line-clear writes: a longer frame would leave its tail on screen when a shorter one replaced it, and would wrap on a real terminal' \
     produced_by 'progress_line_text() in ltl (the filename absorbs the fit; the rate is dropped before the name)' \
@@ -340,6 +379,7 @@ assert_command \
 # the tail of its predecessor standing beside it.
 assert_command \
     command     "python3 '$ROW_CHECK' width '$MULTI.raw' $WIDTH" \
+    reads       "$MULTI" \
     label       "every painted frame occupies exactly $((WIDTH - 1)) columns" \
     asserts     'Each frame is padded out to the width of the row it owns, so painting it covers whatever the previous frame left behind — the row never has to be blanked first, and no frame can be partly a fragment of an older one' \
     produced_by 'paint_progress_line() in ltl' \
@@ -347,6 +387,7 @@ assert_command \
 
 assert_command \
     command     "python3 '$ROW_CHECK' residue '$MULTI.raw'" \
+    reads       "$MULTI" \
     label       'no frame leaves characters of itself visible after the next one is painted' \
     asserts     'Replaying the run through a terminal — carriage returns moving the cursor, writes overwriting — leaves nothing of any frame standing past the end of the frame that replaced it: what the reader sees is always one frame, never two spliced together' \
     produced_by 'paint_progress_line() in ltl' \
@@ -367,6 +408,7 @@ capture_frames "$SINGLE" \
 
 assert_command \
     command     "grep -qE '^Processing +[0-9]+% line [0-9.]+[kMB]?[a-z]*(, [0-9.]+[kMB]?[a-z]* lines/sec)?: [^ ]*part-3\\.txt\$' '$SINGLE'" \
+    reads       "$SINGLE" \
     label       'the single-file line carries one percentage and the filename' \
     asserts     'With one file the line shows the file percentage, the current line, optionally the rate, and the filename — the same shape as the multi-file line with the overall figure and counter removed' \
     produced_by 'progress_line_text() in ltl' \
@@ -374,6 +416,7 @@ assert_command \
 
 assert_command \
     command     "! grep -qE '^Processing .*\\(file ' '$SINGLE'" \
+    reads       "$SINGLE" \
     label       'no file counter on a single-file run' \
     asserts     'A one-file run shows no file counter: (file 1/1) reports nothing the reader does not already know' \
     produced_by 'progress_line_text() in ltl (the counter is gated on the sweep having run)' \
@@ -381,6 +424,7 @@ assert_command \
 
 assert_command \
     command     "! grep -qE '^Processing +[0-9]+%/[0-9]+%' '$SINGLE'" \
+    reads       "$SINGLE" \
     label       'no overall percentage on a single-file run' \
     asserts     'A one-file run shows no overall percentage: it would equal the file percentage, and two identical figures side by side say nothing' \
     produced_by 'size_selected_files_for_progress() in ltl (the sweep does not run below two files) read by progress_line_text()' \
@@ -410,6 +454,7 @@ capture_frames "$PAINTING" \
 
 assert_command \
     command     "! grep -q '^Processing' '$QUIET'" \
+    reads       "$QUIET" \
     label       'no progress frame and no completion line under --disable-progress' \
     asserts     'The progress line is an indicator, so --disable-progress suppresses it entirely — including the completion line. This is the only suppression: the indicator gets no option of its own' \
     produced_by 'read_and_process_logs() in ltl (every progress print is gated on $disable_progress)' \
@@ -421,6 +466,7 @@ assert_command \
 # suppressed run must reach the same number as the painting one.
 assert_command \
     command     "test \"\$(grep -E '^ +LINES INCLUDED ' '$PAINTING' | tr -s ' ')\" = \"\$(grep -E '^ +LINES INCLUDED ' '$QUIET' | tr -s ' ')\" && grep -qE '^ +LINES INCLUDED ' '$PAINTING'" \
+    reads       "$QUIET $PAINTING" \
     label       'both modes analyse the same lines' \
     asserts     'Whether the progress line is painted or suppressed, the run reads and includes the same lines: the indicator observes the read pass without participating in it' \
     produced_by 'read_and_process_logs() in ltl — the progress block reads $total_lines_read and the handle position, and writes neither' \
@@ -441,6 +487,7 @@ capture_frames "$NARROW" \
 
 assert_command \
     command     "! grep '^Processing ' '$NARROW' | awk -v w=$NARROW_WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
+    reads       "$NARROW" \
     label       "no frame exceeds $((NARROW_WIDTH - 1)) characters at a 60-column width" \
     asserts     'The line is fitted to the terminal it is painted on: at a narrow width the filename is shortened, and the rate is dropped before the name, so the numerics stay readable and the line never wraps' \
     produced_by 'progress_line_text() in ltl (the room calculation and shorten_filename())' \
@@ -448,6 +495,7 @@ assert_command \
 
 assert_command \
     command     "grep -qE '^Processing +[0-9]+%/[0-9]+% \\(file [0-9]+/3\\) ' '$NARROW'" \
+    reads       "$NARROW" \
     label       'the percentages and counter survive the narrowing' \
     asserts     'The numerics are what the narrowing protects: the file and overall percentages and the counter are still present at 60 columns, because the filename gives up its characters first' \
     produced_by 'progress_line_text() in ltl' \
@@ -455,6 +503,7 @@ assert_command \
 
 assert_command \
     command     "python3 '$ROW_CHECK' width '$NARROW.raw' $NARROW_WIDTH" \
+    reads       "$NARROW" \
     label       "every painted frame occupies exactly $((NARROW_WIDTH - 1)) columns at a 60-column width" \
     asserts     'The row the frame fills is the terminal it is painted on: at 60 columns the padding runs to 59, so the same self-covering property holds on a narrow terminal, where the filename shortening makes the line length vary most' \
     produced_by 'paint_progress_line() in ltl (the pad is measured from $terminal_width)' \
@@ -489,6 +538,7 @@ capture_frames "$PATHED" \
 
 assert_command \
     command     "grep -qE '^Processing .*\\(file 1/2\\) .*: $SHORT_DIR/part-1\\.txt\$' '$PATHED'" \
+    reads       "$PATHED" \
     label       'a path that fits is shown whole, directory included' \
     asserts     'The frame ends with the path exactly as it was given, so the reader sees which folder the run is in and not just the file name' \
     produced_by 'progress_line_text() in ltl (shorten_filename() on the path as given)' \
@@ -501,6 +551,7 @@ capture_frames "$LONG_PATHED" \
 
 assert_command \
     command     "grep -qE '^Processing .*\\(file 1/2\\) .*: a-d[^ ]*\\.\\.\\.[^ ]*1\\.txt\$' '$LONG_PATHED'" \
+    reads       "$LONG_PATHED" \
     label       'a path that does not fit keeps its start and the end of the file name around an ellipsis' \
     asserts     'Shortening removes the middle of the path: the frame ends with the first characters of the directory, an ellipsis, and the tail of the file name, so both the folder and the file remain identifiable' \
     produced_by 'progress_line_text() in ltl (shorten_filename() keeps the start and the end)' \
@@ -508,6 +559,7 @@ assert_command \
 
 assert_command \
     command     "! grep '^Processing ' '$LONG_PATHED' | awk -v w=$NARROW_WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
+    reads       "$LONG_PATHED" \
     label       "no frame with a shortened path exceeds $((NARROW_WIDTH - 1)) characters" \
     asserts     'Keeping the directory does not change what absorbs the fit: the name is still shortened to the room the numerics leave, and the line never wraps' \
     produced_by 'progress_line_text() in ltl (the room calculation)' \
@@ -538,6 +590,7 @@ capture_frames "$EMPTY_RUN" \
 
 assert_command \
     command     "! grep -qE '^Processing +[0-9]+% \\(file ' '$EMPTY_RUN'" \
+    reads       "$EMPTY_RUN" \
     label       'no multi-file frame carries a single percentage' \
     asserts     'Every frame of a multi-file run shows the file percentage over the overall one. A frame carrying just one figure beside the file counter is the empty-file path having dropped the file percentage, which leaves the overall figure standing in the file figure position with nothing to say which it is' \
     produced_by 'progress_line_text() in ltl' \
@@ -545,6 +598,7 @@ assert_command \
 
 assert_command \
     command     "grep -qE '^Processing +0%/[0-9]+% \\(file 2/3\\)' '$EMPTY_RUN'" \
+    reads       "$EMPTY_RUN" \
     label       'the empty file reports 0% of itself, and the run continues' \
     asserts     'A zero-byte file has been read in full the moment it is opened, so its own figure is 0 rather than absent; the overall figure beside it keeps climbing, and the counter still names the file in flight' \
     produced_by 'progress_line_text() in ltl' \
@@ -579,15 +633,17 @@ sed 's/^2026-05-30/2026-05-03/' "$REPO_DIR/tests/fixtures/format-detection/conne
     "$PART1" "$PART2" "$PART3" "$TMP_DIR/renamed-cxserver.txt" ) >"$COLLIDE_RAW" 2>&1
 collide_status=$?
 set -e
+echo "$collide_status" > "$COLLIDE.rc"
 if [[ "$collide_status" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited $collide_status" >&2
-    sed 's/^/        /' "$COLLIDE_RAW" >&2
-    exit 1
+    run_failed "ltl exited $collide_status" "$COLLIDE_RAW"
+elif [[ ! -s "$COLLIDE_RAW" ]]; then
+    echo empty > "$COLLIDE.rc"
+    run_failed "ltl produced no output" "$COLLIDE_RAW"
 fi
 tr '\r' '\n' < "$COLLIDE_RAW" \
     | sed -E 's/\x1b\[[0-9;]*m//g' \
     | sed -E 's/[[:space:]]+$//' \
-    | grep -v '^$' \
+    | { grep -v '^$' || true; } \
     > "$COLLIDE"
 
 # The anchor: without -lf this fixture must actually produce the note. If a
@@ -595,6 +651,7 @@ tr '\r' '\n' < "$COLLIDE_RAW" \
 # testing anything and must fail rather than pass silently.
 assert_command \
     command     "grep -qF '— connection_server_standard the detected log format is written by more than one producer' '$COLLIDE'" \
+    reads       "$COLLIDE" \
     label       'the unpinned run raises the format-ambiguity notice' \
     asserts     'This fixture matches more than one producer of the same line shape, so an unpinned run raises the unit-ambiguity notice — the mid-read notice this scenario exists to place' \
     produced_by 'format_variant_ambiguity_note() in ltl' \
@@ -602,6 +659,7 @@ assert_command \
 
 assert_command \
     command     "! grep -E '^Processing .*(Note:|the detected log format)' '$COLLIDE'" \
+    reads       "$COLLIDE" \
     label       'no progress frame carries a notice in its row' \
     asserts     'A notice discovered while reading is held until the read ends, so it never lands in the row the progress line is holding open; a notice printed where it is discovered would appear appended to a Processing frame' \
     produced_by 'notice() and draw_deferred_notices() in ltl' \
@@ -609,6 +667,7 @@ assert_command \
 
 assert_command \
     command     "test \"\$(grep -n '^Processing completed\\.' '$COLLIDE' | head -1 | cut -d: -f1)\" -lt \"\$(grep -nF '— connection_server_standard the detected log format is written by more than one producer' '$COLLIDE' | head -1 | cut -d: -f1)\"" \
+    reads       "$COLLIDE" \
     label       'the notice is emitted after the read completes' \
     asserts     'The notice is drawn in the panel once the read is over, below the completion line rather than between frames — the reader sees an uninterrupted progress line, then the notices' \
     produced_by 'draw_deferred_notices() in ltl, called from pipeline_render()' \

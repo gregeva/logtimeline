@@ -212,7 +212,7 @@ scenario_zero_duration() {
     local unit
     ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -V csv-output -o "$ZERO_DURATION" ) > "$TMP_DIR/zd-unit.v" 2> "$TMP_DIR/zd-unit.stderr" || true
     assert_no_runtime_warnings "$TMP_DIR/zd-unit.stderr" "$current_scenario (resolved-unit probe)" || { fail=$((fail + 1)); failures+=("$current_scenario :: runtime warnings (probe)"); }
-    unit=$(grep -aE '^duration_unit_resolved:' "$TMP_DIR/zd-unit.v" | awk '{print $2}')
+    unit=$(grep -aE '^duration_unit_resolved:' "$TMP_DIR/zd-unit.v" | awk '{print $2}') || unit=""
     if [[ -z "$unit" ]]; then
         echo "  FAIL  $current_scenario :: missing duration_unit_resolved in -V csv-output"
         fail=$((fail + 1)); failures+=("$current_scenario :: missing duration_unit_resolved"); return 0
@@ -292,7 +292,7 @@ scenario_cv_agreement() {
     rm -f "$TMP_DIR"/*-LTL-MESSAGES-*.csv
     render cv "$CV_HALF" -bs 1 -n 1 -o --terminal-width 200 || return 0
     local csv
-    csv=$(ls "$TMP_DIR"/*-LTL-MESSAGES-*.csv 2>/dev/null | head -1)
+    csv=$(ls "$TMP_DIR"/*-LTL-MESSAGES-*.csv 2>/dev/null | head -1) || csv=""
     assert_command \
         command     "grep -qE 'CV:0\\.50( |\$)' '$TMP_DIR/cv.txt'" \
         label       'the timeline CV cell reads CV:0.50' \

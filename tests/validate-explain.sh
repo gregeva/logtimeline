@@ -122,16 +122,21 @@ check_capture_rendered() {
 }
 
 # Self-documenting assertion: a line matching `pattern` must be present.
+# A check whose input does not depend on $LTL names it in `run_free`, and its
+# PASS line ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
+# assert_no_line takes the same field.
 assert_line() {
     local outfile="$1"
     shift
-    local pattern asserts produced_by contract
+    local pattern asserts produced_by contract run_free=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             pattern)     pattern="$2";     shift 2 ;;
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            run_free)    run_free="$2";    shift 2 ;;
             *) echo "assert_line: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -141,7 +146,7 @@ assert_line() {
     : "${contract:?assert_line requires contract}"
 
     if grep -qE "$pattern" "$outfile"; then
-        echo "  PASS  $current_scenario :: $pattern"
+        echo "  PASS  $current_scenario :: $pattern${run_free:+ [run-free: $run_free]}"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario"
@@ -160,13 +165,14 @@ assert_line() {
 assert_no_line() {
     local outfile="$1"
     shift
-    local pattern asserts produced_by contract
+    local pattern asserts produced_by contract run_free=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             pattern)     pattern="$2";     shift 2 ;;
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            run_free)    run_free="$2";    shift 2 ;;
             *) echo "assert_no_line: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -193,36 +199,43 @@ assert_no_line() {
         fail=$((fail + 1))
         failures+=("$current_scenario :: !$pattern (unexpectedly present)")
     else
-        echo "  PASS  $current_scenario :: !$pattern"
+        echo "  PASS  $current_scenario :: !$pattern${run_free:+ [run-free: $run_free]}"
         pass=$((pass + 1))
     fi
 }
 
-# Assert the captured ltl exit code matches an expected value.
+# Assert the captured ltl exit code matches an expected value, and that the
+# run wrote the line it always writes on that outcome (`evidence`, a pattern,
+# `in` its capture): a run that printed nothing exits 0 too, and any failure
+# exits non-zero (HARNESS-DESIGN.md Trap 13).
 assert_exit() {
     local actual="$1"
     local expected="$2"
     shift 2
-    local asserts produced_by contract
+    local evidence in asserts produced_by contract
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            evidence)    evidence="$2";    shift 2 ;;
+            in)          in="$2";          shift 2 ;;
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
             *) echo "assert_exit: unknown field '$1'"; exit 2 ;;
         esac
     done
+    : "${evidence:?assert_exit requires evidence}"
+    : "${in:?assert_exit requires in}"
     : "${asserts:?assert_exit requires asserts}"
     : "${produced_by:?assert_exit requires produced_by}"
     : "${contract:?assert_exit requires contract}"
 
-    if [[ "$actual" -eq "$expected" ]]; then
+    if [[ "$actual" -eq "$expected" ]] && grep -qE -- "$evidence" "$in"; then
         echo "  PASS  $current_scenario :: exit=$expected"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario"
-        echo "        expected exit: $expected"
-        echo "        actual exit:   $actual"
+        echo "        expected exit: $expected, and a line matching $evidence in $in"
+        echo "        actual exit:   $actual$(grep -qE -- "$evidence" "$in" || echo ", no such line")"
         echo "        asserts:       $asserts"
         echo "        produced_by:   $produced_by"
         echo "        contract:      $contract"
@@ -422,6 +435,7 @@ scenario_all_topics_render() {
         check_capture_warnings "$out"
 
         assert_exit "$ec" 0 \
+            evidence    'See also' in "$out" \
             asserts     "ltl --explain <known-topic> exits 0 after emitting the topic" \
             produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch block)' \
             contract    'Issue #261: every known topic in %explain_topics is renderable'
@@ -533,11 +547,12 @@ scenario_so_names_explain() {
     for so_name in bytes_sum bytes_occurrences; do
         result=$(run_ltl "so-name-$so_name" --explain "$so_name")
         check_capture_warnings "${result#*:}"
+        local refused="${result#*:}"
         assert_exit "${result%%:*}" 1 \
+            evidence    "unknown --explain topic '$so_name'" in "${refused%.txt}.stderr" \
             asserts     "ltl --explain $so_name stays an unknown topic: neither a sum nor a metric's occurrences has a topic" \
             produced_by 'resolve_explain_topic() in ltl' \
             contract    "$contract"
-        local refused="${result#*:}"
         assert_line "${refused%.txt}.stderr" \
             pattern     "unknown --explain topic '$so_name'" \
             asserts     "The refusal is the unknown-topic error naming $so_name, not some other failure" \
@@ -557,6 +572,7 @@ scenario_registry() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 0 \
+        evidence    '^STATISTICS$' in "$out" \
         asserts     "ltl --explain (no argument) exits 0 after printing the topic registry" \
         produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch block, empty-string branch)' \
         contract    'Issue #261: bare --explain prints the grouped registry'
@@ -617,6 +633,7 @@ scenario_unknown_topic() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 1 \
+        evidence    "unknown --explain topic 'nope'" in "${out%.txt}.stderr" \
         asserts     "ltl --explain <unknown-topic> exits 1 with an error" \
         produced_by 'adapt_to_command_line_options() in ltl (die print_usage on unknown topic)' \
         contract    'Issue #261: unknown topics are a hard error, not silent fall-through'
@@ -641,6 +658,7 @@ scenario_help_statistics() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 0 \
+        evidence    '^STATISTICS$' in "$out" \
         asserts     "ltl --help statistics exits 0 after printing the index" \
         produced_by 'adapt_to_command_line_options() in ltl (--help dispatch, statistics branch)' \
         contract    'Issue #261: --help statistics is a recognized topic'
@@ -709,6 +727,7 @@ scenario_help_unknown() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 1 \
+        evidence    "unknown --help topic 'bogus'" in "${out%.txt}.stderr" \
         asserts     "ltl --help <unknown-topic> exits 1 with an error" \
         produced_by 'adapt_to_command_line_options() in ltl (die print_usage on unknown --help topic)' \
         contract    'Issue #261: unknown --help topics are a hard error'
@@ -733,6 +752,7 @@ scenario_help_bare() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 0 \
+        evidence    '^USAGE$' in "$out" \
         asserts     "Bare ltl --help still exits 0 and prints full help (backward-compatibility)" \
         produced_by 'adapt_to_command_line_options() in ltl (--help dispatch, empty-string branch)' \
         contract    'Issue #261: extending --help to accept an optional argument must not regress bare --help'
@@ -762,6 +782,7 @@ scenario_reflow() {
         check_capture_warnings "$out"
 
         assert_exit "$ec" 0 \
+            evidence    '^KURTOSIS$' in "$out" \
             asserts     "ltl --tw $w --explain kurtosis exits 0" \
             produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch)' \
             contract    'Issue #261: --terminal-width override controls reflow without affecting exit code'
@@ -1143,7 +1164,7 @@ scenario_pager_ansi() {
     ' "$LTL/../ltl" 2>/dev/null)
     # Fallback: scan the whole file for the less invocation.
     if [[ -z "$pager_default" ]]; then
-        pager_default=$(grep -oE "'less[^']*'" "$REPO_DIR/ltl" | head -1 | tr -d "'")
+        pager_default=$(grep -oE "'less[^']*'" "$REPO_DIR/ltl" | head -1 | tr -d "'") || pager_default=""
     fi
     local probe="$TMP_DIR/pager-probe.txt"
     echo "$pager_default" > "$probe"
@@ -1151,7 +1172,8 @@ scenario_pager_ansi() {
         pattern     'less -R' \
         asserts     "Unix-default pager is 'less -R'; the -R flag tells less to interpret ANSI color escapes from the title banner rather than render them as literal ^[[Nm text. Plain 'less' would show the codes verbatim and confuse users." \
         produced_by 'pipe_to_pager() in ltl (Unix branch when $PAGER is unset)' \
-        contract    'Issue #261: pager configuration is part of the user-visible help/explain contract; regression here would re-introduce the ANSI-leak bug the user originally reported'
+        contract    'Issue #261: pager configuration is part of the user-visible help/explain contract; regression here would re-introduce the ANSI-leak bug the user originally reported' \
+        run_free    "the checkout's ltl source"
 
     current_scenario="pager-ansi:strip_ansi-exists"
     echo "[$current_scenario]"
@@ -1163,7 +1185,8 @@ scenario_pager_ansi() {
         pattern     '^[0-9]+:sub strip_ansi' \
         asserts     "strip_ansi() helper exists in ltl. It is the fallback for environments where the pager cannot interpret ANSI (notably legacy Windows \`more\`) and for the pager-failure path." \
         produced_by 'strip_ansi() in ltl' \
-        contract    'Issue #261: ANSI-stripping must be available as a fallback so the title banner cannot leak as literal text in any supported configuration'
+        contract    'Issue #261: ANSI-stripping must be available as a fallback so the title banner cannot leak as literal text in any supported configuration' \
+        run_free    "the checkout's ltl source"
 
     current_scenario="pager-ansi:strip_ansi-removes-CSI"
     echo "[$current_scenario]"
@@ -1178,12 +1201,14 @@ scenario_pager_ansi() {
         pattern     '^hello world$' \
         asserts     "ANSI-strip regex removes \\033[Nm CSI sequences and leaves regular text intact" \
         produced_by 'strip_ansi() in ltl (regex /\\x1b\\[[0-9;]*[A-Za-z]//g)' \
-        contract    'Issue #261: ANSI-strip implementation must match the canonical CSI regex; regression here would let codes leak through'
+        contract    'Issue #261: ANSI-strip implementation must match the canonical CSI regex; regression here would let codes leak through' \
+        run_free    'a probe the harness writes'
     assert_line "$probe_out" \
         pattern     'U\x08U' \
         asserts     "ANSI-strip does NOT touch backspace-overstrike pairs (X\\bX for bold, _\\bX for underline). less/more interpret those natively for bold and underline." \
         produced_by 'strip_ansi() in ltl (regex targets only \\x1b CSI, not \\b)' \
-        contract    'Issue #261: overstrike formatting must survive ANSI strip; otherwise topic headings would lose their bold/underline rendering'
+        contract    'Issue #261: overstrike formatting must survive ANSI strip; otherwise topic headings would lose their bold/underline rendering' \
+        run_free    'a probe the harness writes'
 }
 
 # ---------------------------------------------------------------------------
@@ -1307,6 +1332,7 @@ scenario_technique_topics_render() {
         check_capture_warnings "$out"
 
         assert_exit "$ec" 0 \
+            evidence    '^  See also$' in "$out" \
             asserts     "ltl --explain $topic exits 0 after emitting the technique-family page" \
             produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch block)' \
             contract    'Issue #504 AC2: every technique-family topic is reachable by the distinctive words of its name in kebab case'
@@ -1647,6 +1673,7 @@ scenario_load_over_time_reading() {
     local out="${result#*:}"
     check_capture_warnings "$out"
     assert_exit "$ec" 0 \
+        evidence    '^  See also$' in "$out" \
         asserts     "ltl --explain load-over-time exits 0" \
         produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch)' \
         contract    'features/652-load-over-time-reading.md AC1-AC6: the page under assertion must render'
@@ -1687,10 +1714,12 @@ scenario_load_over_time_reading() {
     perl -0pe 's/\s+/ /g' "$out" > "$page_joined"
     perl -0pe 's/\s+/ /g' "$mirror_section" > "$mirror_joined"
 
-    local target label file
+    local target label file run_free
     for target in "page:$page_joined" "mirror:$mirror_joined"; do
         label="${target%%:*}"
         file="${target#*:}"
+        run_free=""
+        [[ "$label" == mirror ]] && run_free='docs/explain/techniques.md'
 
         # AC1: the saturation reading is gone.
         local phrase
@@ -1699,7 +1728,8 @@ scenario_load_over_time_reading() {
                 pattern     "$phrase" \
                 asserts     "The load-over-time $label no longer reads a pool at its size as saturation ('$phrase')" \
                 produced_by '%explain_topics in ltl (the load-over-time reading) and docs/explain/techniques.md' \
-                contract    'features/652-load-over-time-reading.md AC1, D1: at wide buckets a count at the pool size is the pool size, busy or quiet'
+                contract    'features/652-load-over-time-reading.md AC1, D1: at wide buckets a count at the pool size is the pool size, busy or quiet' \
+                run_free    "$run_free"
         done
 
         # AC2: the three readings, each on its fixed phrase.
@@ -1707,38 +1737,46 @@ scenario_load_over_time_reading() {
             pattern     "the column reads the pool's size whether the hour was busy or quiet" \
             asserts     "The load-over-time $label states that at wide buckets the pool column reads the pool's size" \
             produced_by '%explain_topics in ltl (the load-over-time reading) and docs/explain/techniques.md' \
-            contract    'features/652-load-over-time-reading.md AC2, C1'
+            contract    'features/652-load-over-time-reading.md AC2, C1' \
+            run_free    "$run_free"
         assert_line "$file" \
             pattern     "summed duration divided by the bucket's length is the average number of requests in flight" \
             asserts     "The load-over-time $label states that concurrency is summed duration over bucket length" \
             produced_by '%explain_topics in ltl (the load-over-time reading) and docs/explain/techniques.md' \
-            contract    'features/652-load-over-time-reading.md AC2, C2'
+            contract    'features/652-load-over-time-reading.md AC2, C2' \
+            run_free    "$run_free"
         assert_line "$file" \
             pattern     "a count below what the same request rate produced in the minutes before" \
             asserts     "The load-over-time $label states that saturation is a count below what the same request rate produced before" \
             produced_by '%explain_topics in ltl (the load-over-time reading) and docs/explain/techniques.md' \
-            contract    'features/652-load-over-time-reading.md AC2, C3, D4: the comparison is stated in plain words, with no expected-count formula'
+            contract    'features/652-load-over-time-reading.md AC2, C3, D4: the comparison is stated in plain words, with no expected-count formula' \
+            run_free    "$run_free"
     done
 
     # AC5: the command block, matched on the unjoined lines as drawn.
     for target in "page:$out" "mirror:$mirror_section"; do
         label="${target%%:*}"
         file="${target#*:}"
+        run_free=""
+        [[ "$label" == mirror ]] && run_free='docs/explain/techniques.md'
         assert_line "$file" \
             pattern     'ltl -tpas -bs 1h ' \
             asserts     "The load-over-time $label carries an hour-wide command, which reads the pool's size and the duration" \
             produced_by '%explain_topics in ltl (the load-over-time command block) and docs/explain/techniques.md' \
-            contract    'features/652-load-over-time-reading.md AC5, C6'
+            contract    'features/652-load-over-time-reading.md AC5, C6' \
+            run_free    "$run_free"
         assert_line "$file" \
             pattern     'ltl -tpas -bs 1 -st [^ ]+ -et [^ ]+ ' \
             asserts     "The load-over-time $label carries a one-minute command narrowed to a window, to see a shortfall" \
             produced_by '%explain_topics in ltl (the load-over-time command block) and docs/explain/techniques.md' \
-            contract    'features/652-load-over-time-reading.md AC5, C6'
+            contract    'features/652-load-over-time-reading.md AC5, C6' \
+            run_free    "$run_free"
         assert_no_line "$file" \
             pattern     'ceiling being reached|-bs 10 .*ceiling' \
             asserts     "No load-over-time $label command claims a ceiling is seen at ten-minute buckets" \
             produced_by '%explain_topics in ltl (the load-over-time command block) and docs/explain/techniques.md' \
-            contract    'features/652-load-over-time-reading.md AC5, C6: at ten minutes most buckets of a busy server already read the pool size'
+            contract    'features/652-load-over-time-reading.md AC5, C6: at ten minutes most buckets of a busy server already read the pool size' \
+            run_free    "$run_free"
     done
 
     # AC6: the user guide no longer claims the column reveals saturation.
@@ -1746,7 +1784,8 @@ scenario_load_over_time_reading() {
         pattern     'thread exhaustion, pool saturation' \
         asserts     "docs/usage.md Thread Pool Activity no longer says the column reveals thread exhaustion and pool saturation" \
         produced_by 'docs/usage.md (Thread Pool Activity)' \
-        contract    'features/652-load-over-time-reading.md AC6, D5: the user guide and the explanation agree'
+        contract    'features/652-load-over-time-reading.md AC6, D5: the user guide and the explanation agree' \
+        run_free    'docs/usage.md'
 }
 
 # --- Scenario: no internals leak into the technique pages (AC10). ---
@@ -1818,7 +1857,8 @@ scenario_technique_mirror() {
             pattern     "^#{2,3} .*[\`]${topic}[\`]" \
             asserts     "The mirror carries a section for technique-family topic '$topic' addressed by its topic name" \
             produced_by 'docs/explain/techniques.md (one section per topic, in roster order)' \
-            contract    'Issue #504 AC11, R9: the mirror holds a page per topic so a wiki reader reaches the same content as the terminal'
+            contract    'Issue #504 AC11, R9: the mirror holds a page per topic so a wiki reader reaches the same content as the terminal' \
+            run_free    'docs/explain/techniques.md'
     done
 
     # AC10 over the mirror: the same no-internals rule.
@@ -1826,13 +1866,15 @@ scenario_technique_mirror() {
         pattern     '(^|[^A-Za-z0-9_])(D|F|R|AC)[0-9]+([^A-Za-z0-9_]|$)' \
         asserts     "The mirror carries no decision, finding, requirement or acceptance-criterion label" \
         produced_by 'docs/explain/techniques.md' \
-        contract    'Issue #504 AC10, R10: the no-internals rule applies to the mirror as much as to the rendered page'
+        contract    'Issue #504 AC10, R10: the no-internals rule applies to the mirror as much as to the rendered page' \
+        run_free    'docs/explain/techniques.md'
 
     assert_no_line "$mirror" \
         pattern     '[%$@][a-z_]+_[a-z_]+' \
         asserts     "The mirror names no Perl variable" \
         produced_by 'docs/explain/techniques.md' \
-        contract    'Issue #504 AC10, R10: the mirror is user-facing prose'
+        contract    'Issue #504 AC10, R10: the mirror is user-facing prose' \
+        run_free    'docs/explain/techniques.md'
 }
 
 # --- Scenario: the wiki sync map covers every mirror source (R9). ---
@@ -1893,7 +1935,7 @@ scenario_wiki_sync_map() {
         failures+=("$current_scenario :: the sync map is empty")
         return
     fi
-    echo "  PASS  $current_scenario :: sync map carries $mapped page(s)"
+    echo "  PASS  $current_scenario :: sync map carries $mapped page(s) [run-free: process/sync-wiki.sh]"
     pass=$((pass + 1))
 
     # (2) every mapped source exists.
@@ -1901,7 +1943,7 @@ scenario_wiki_sync_map() {
     while read -r src page; do
         [[ -n "$src" ]] || continue
         if [[ -f "$REPO_DIR/$src" ]]; then
-            echo "  PASS  $current_scenario :: $src -> $page (source present)"
+            echo "  PASS  $current_scenario :: $src -> $page (source present) [run-free: process/sync-wiki.sh and the files it names]"
             pass=$((pass + 1))
         else
             echo "  FAIL  $current_scenario"
@@ -1921,7 +1963,7 @@ scenario_wiki_sync_map() {
     for f in "$REPO_DIR"/docs/explain/*.md; do
         base="docs/explain/$(basename "$f")"
         if grep -q "^$base " "$map_file"; then
-            echo "  PASS  $current_scenario :: $base is carried by the sync map"
+            echo "  PASS  $current_scenario :: $base is carried by the sync map [run-free: process/sync-wiki.sh and docs/explain]"
             pass=$((pass + 1))
         else
             echo "  FAIL  $current_scenario"
@@ -1940,7 +1982,7 @@ scenario_wiki_sync_map() {
     local invocation
     for invocation in "sync-wiki.sh publish" "sync-wiki.sh verify"; do
         if grep -q "$invocation" "$workflow"; then
-            echo "  PASS  $current_scenario :: the release procedure runs '$invocation'"
+            echo "  PASS  $current_scenario :: the release procedure runs '$invocation' [run-free: docs/process/workflow.md]"
             pass=$((pass + 1))
         else
             echo "  FAIL  $current_scenario"
@@ -1972,7 +2014,7 @@ scenario_wiki_link_form() {
         # Trap 1). The scenario still fails loudly when a link is found.
         offenders=$(grep -o "](\([A-Za-z0-9_-]*\.md\)[^)]*)" "$f" | sort -u | tr "\n" " ") || true
         if [[ -z "$offenders" ]]; then
-            echo "  PASS  $current_scenario :: $base links to siblings by wiki page name"
+            echo "  PASS  $current_scenario :: $base links to siblings by wiki page name [run-free: $base]"
             pass=$((pass + 1))
         else
             echo "  FAIL  $current_scenario"

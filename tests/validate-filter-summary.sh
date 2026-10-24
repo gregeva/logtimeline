@@ -189,15 +189,37 @@ benchmark_value() {
     printf -v "$var" '%s' "$v"
 }
 
+# A scenario's run failed: count it once, name the scenario in $runs_failed,
+# and leave the checks that read its capture to be skipped (HARNESS-DESIGN.md
+# Trap 13). Usage: run_failed <what> [stderr-file]
+runs_failed=" "
+run_failed() {
+    {
+        echo "  FAIL  $current_scenario :: $1"
+        echo "        asserts:     the scenario's ltl run exits 0 and writes the section or table its checks read"
+        echo "        produced_by: emit_filter_summary_verbose() and print_summary_table() in ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13 - a check made against a run that did not happen is skipped, its cause counted once"
+        if [[ -n "${2:-}" ]]; then sed 's/^/        | /' "$2"; fi
+    } >&2
+    fail=$((fail + 1)); failures+=("$current_scenario :: $1")
+    runs_failed+="$current_scenario "
+}
+skip_checks() {
+    echo "  SKIP  $current_scenario :: the checks reading that run's capture (the run gave nothing to read)"
+}
+run_ok() { [[ "$runs_failed" != *" $1 "* ]]; }
+
 # Run ltl with the four sections the scenarios read. Extra args precede the
 # log. Names the capture path in $sections_out; stderr sits beside it as
-# <capture>.stderr. Called directly, never inside $( ), so the runtime-warning
-# failure it counts is kept (HARNESS-DESIGN.md Trap 12).
+# <capture>.stderr. A run that exits non-zero or lacks the filter-summary
+# section is counted by run_failed and returns 1. Called directly, never inside
+# $( ), so the failures it counts are kept (HARNESS-DESIGN.md Trap 12).
 sections_out=""
 run_sections() {
     local log="$1"
     shift
     local outfile="$TMP_DIR/$current_scenario.out"
+    sections_out=""
     set +e
     "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum \
         -V filter-summary,format-detection,benchmark-data,profile,notices "$@" "$log" \
@@ -205,13 +227,12 @@ run_sections() {
     local ec=$?
     set -e
     if [[ "$ec" -ne 0 ]]; then
-        echo "FAIL: ltl exited $ec for $current_scenario; stderr:" >&2
-        sed 's/^/    /' "$outfile.stderr" >&2
-        exit 1
+        run_failed "ltl exited $ec" "$outfile.stderr"
+        return 1
     fi
     if ! grep -qE '^=== filter-summary ===$' "$outfile"; then
-        echo "FAIL: filter-summary section header not found in $outfile" >&2
-        exit 1
+        run_failed "filter-summary section header not found in $outfile"
+        return 1
     fi
     notice_lines "$outfile" > "$outfile.notices"
     if ! assert_no_runtime_warnings "$outfile.stderr" "$current_scenario"; then
@@ -277,7 +298,7 @@ cause_scenario() {
     scenario_wanted "$name" || return 0
     current_scenario="$name"
     local out
-    run_sections "$fixture" "$@"
+    run_sections "$fixture" "$@" || { skip_checks; return 0; }
     out="$sections_out"
     assert_line "$out" pattern "^${key}: ${expected}\$" \
         asserts "$asserts" \
@@ -310,7 +331,7 @@ echo ""
 cause_scenario unmatched "$FIXTURES/message-control-characters-unmatched.txt" \
     lines_unmatched 1 \
     'The space-led continuation line no format recognises is the one unmatched line; the two matched lines are included'
-if scenario_wanted unmatched; then
+if scenario_wanted unmatched && run_ok unmatched; then
     out="$TMP_DIR/unmatched.out"
     assert_line "$out" pattern '^lines_excluded: 0$' \
         asserts 'With no criterion in force nothing is excluded: unmatched is not excluded' \
@@ -337,7 +358,7 @@ cause_scenario profile-fold "$FIXTURES/profile-weekend-fold.txt" \
     excluded_profile 2 \
     'The two weekend lines fold to no day under -pr workday and are counted as profile drops' \
     -pr workday
-if scenario_wanted profile-fold; then
+if scenario_wanted profile-fold && run_ok profile-fold; then
     out="$TMP_DIR/profile-fold.out"
     assert_line "$out" pattern '^samples_dropped: 2$' \
         asserts 'excluded_profile reads the same counter -V profile prints as samples_dropped' \
@@ -362,7 +383,7 @@ cause_scenario numeric-threshold "$FIXTURES/numeric-highlight-boundary.txt" \
     excluded_numeric 15 \
     '-dmin 100 -dmax 200 keeps at-min, inside, at-max and cross-both; the other 15 lines, the one with no duration among them, are numeric drops' \
     -dmin 100 -dmax 200
-if scenario_wanted numeric-threshold; then
+if scenario_wanted numeric-threshold && run_ok numeric-threshold; then
     out="$TMP_DIR/numeric-threshold.out"
     assert_line "$out" pattern '^lines_included: 4$' \
         asserts 'Exactly the four in-range lines survive' \
@@ -378,20 +399,23 @@ cause_scenario vocabulary-rejection "$FIXTURES/log-level-outside-vocabulary.txt"
 if scenario_wanted csv-unparseable-row; then
     current_scenario="csv-unparseable-row"
     printf 'timestamp,latency\n2026-06-01 10:00:05,12\nnot-a-timestamp,34\n2026-06-01 10:02:05,56\n' > "$TMP_DIR/bad-row.csv"
-    run_sections "$TMP_DIR/bad-row.csv" -udm latency:ms:mean
-    out="$sections_out"
-    assert_line "$out" pattern '^excluded_other: 0$' \
-        asserts 'A CSV row whose timestamp is neither epoch nor ISO is never matched, so no exclusion cause counts it' \
-        produced_by 'the shape test of the CSV block csv_block_src() generates, before the csv row counts as a match in read_and_process_logs() in ltl' \
-        contract 'features/640-csv-unplaced-rows-silent.md D1 (a CSV row without a parsable timestamp is read and not matched)'
-    assert_line "$out" pattern '^lines_unmatched: 2$' \
-        asserts 'The CSV header line (metadata, D22) and the row whose timestamp cannot be placed (640 D1) both count as unmatched' \
-        produced_by 'note_unmatched_line() in ltl, called at the CSV header stash and for a csv row its block does not place' \
-        contract 'features/503-yaml-aggregate-export.md D22 (a CSV file first line is metadata and counts as unmatched); features/640-csv-unplaced-rows-silent.md D1'
-    assert_line "$out" pattern '^lines_included: 2$' \
-        asserts 'The two well-formed rows are included' \
-        produced_by "$PRODUCER" contract "$CONTRACT"
-    assert_funnel_identities "$out"
+    if run_sections "$TMP_DIR/bad-row.csv" -udm latency:ms:mean; then
+        out="$sections_out"
+        assert_line "$out" pattern '^excluded_other: 0$' \
+            asserts 'A CSV row whose timestamp is neither epoch nor ISO is never matched, so no exclusion cause counts it' \
+            produced_by 'the shape test of the CSV block csv_block_src() generates, before the csv row counts as a match in read_and_process_logs() in ltl' \
+            contract 'features/640-csv-unplaced-rows-silent.md D1 (a CSV row without a parsable timestamp is read and not matched)'
+        assert_line "$out" pattern '^lines_unmatched: 2$' \
+            asserts 'The CSV header line (metadata, D22) and the row whose timestamp cannot be placed (640 D1) both count as unmatched' \
+            produced_by 'note_unmatched_line() in ltl, called at the CSV header stash and for a csv row its block does not place' \
+            contract 'features/503-yaml-aggregate-export.md D22 (a CSV file first line is metadata and counts as unmatched); features/640-csv-unplaced-rows-silent.md D1'
+        assert_line "$out" pattern '^lines_included: 2$' \
+            asserts 'The two well-formed rows are included' \
+            produced_by "$PRODUCER" contract "$CONTRACT"
+        assert_funnel_identities "$out"
+    else
+        skip_checks
+    fi
 fi
 
 # --- highlight: never a drop; the sister row counts the highlighted subset ---
@@ -399,7 +423,7 @@ cause_scenario highlight "$FIXTURES/http-status-families.txt" \
     lines_highlighted 3 \
     'A highlight marks the three /store/orders lines without excluding anything' \
     -h orders
-if scenario_wanted highlight; then
+if scenario_wanted highlight && run_ok highlight; then
     out="$TMP_DIR/highlight.out"
     assert_line "$out" pattern '^lines_excluded: 0$' \
         asserts 'A highlight criterion drops no line' \
@@ -422,50 +446,56 @@ cause_scenario combined-causes "$FIXTURES/http-status-families.txt" \
 if scenario_wanted impossible-date; then
     current_scenario="impossible-date"
     IMPOSSIBLE_CONTRACT='features/611-timestamp-acceptance.md C3, C4, C5 (a line whose date cannot exist is not matched, counted, and noted once per run per format); AC1, AC2, AC4'
-    run_sections "$FIXTURES/impossible-date-application.txt" "$FIXTURES/impossible-date-access.txt" "$FIXTURES/impossible-date-connector.txt"
-    out="$sections_out"
-    assert_line "$out" pattern '^lines_unmatched_impossible_date: 4$' \
-        asserts 'Month 13 and 30 February on the scanned ISO arm, 31 June on the Apache date and 30 February on the asctime date: four lines not matched because their date cannot exist, and the run continues' \
-        produced_by 'the impossible-date branch format_timestamp_src() emits into each scan block; timestamp_impossible_total() in ltl' \
-        contract "$IMPOSSIBLE_CONTRACT"
-    assert_line "$out" pattern '^lines_unmatched: 4$' \
-        asserts 'The four lines are unmatched, nothing else is' \
-        produced_by 'note_unmatched_line() in ltl, for a line the scan sub returns no entry for' \
-        contract "$IMPOSSIBLE_CONTRACT"
-    assert_line "$out" pattern '^lines_included: 7$' \
-        asserts 'The seven valid lines are included and none is placed at another line time: an impossible line contributes nothing' \
-        produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
-    assert_funnel_identities "$out"
-    assert_line "$out.notices" pattern "^date-cannot-exist \\| thingworx_standard \\| 2 of 5 lines of this format were not matched because their date cannot exist under its date layout \\| " \
-        asserts 'One note per format after the read, with the count and no file name, line number or value' \
-        produced_by 'defer_timestamp_impossible_notes() in ltl' \
-        contract "$IMPOSSIBLE_CONTRACT"
-    assert_line "$out.notices" pattern "^date-cannot-exist \\| access_common_duration_thread_session \\| 1 of 3 lines of this format were not matched because their date cannot exist under its date layout \\| " \
-        asserts 'The Apache common log date has the same outcome and note as the ISO arm' \
-        produced_by 'defer_timestamp_impossible_notes() in ltl' \
-        contract "$IMPOSSIBLE_CONTRACT"
-    assert_line "$out.notices" pattern "^date-cannot-exist \\| apache_mod_jk \\| 1 of 3 lines of this format were not matched because their date cannot exist under its date layout \\| " \
-        asserts 'The asctime date has the same outcome and note as the ISO arm' \
-        produced_by 'defer_timestamp_impossible_notes() in ltl' \
-        contract "$IMPOSSIBLE_CONTRACT"
-    assert_absent "$out.notices" pattern 'line [0-9]+|previous line' \
-        asserts 'No note per line or per file, and no line is kept at the previous line time' \
-        produced_by 'format_probe_signal() in ltl' \
-        contract 'features/log-format-registry.md D52 as amended 2026-09-30; features/611-timestamp-acceptance.md C5'
-    current_scenario=impossible-date-csv run_sections "$FIXTURES/impossible-date-csv.txt" -udm value::max
-    csv_out="$sections_out"
-    assert_line "$csv_out" pattern '^lines_unmatched_impossible_date: 1$' \
-        asserts 'A CSV row dated 30 February under the order its file is read in is not matched, and the run continues' \
-        produced_by 'the impossible-date branch format_timestamp_src() emits into the CSV block csv_block_src() generates' \
-        contract "$IMPOSSIBLE_CONTRACT; supersedes features/615-csv-registry-entry.md D7"
-    assert_line "$csv_out" pattern '^lines_included: 2$' \
-        asserts 'The two valid rows are included' \
-        produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
-    assert_funnel_identities "$csv_out"
-    assert_line "$csv_out.notices" pattern "^date-cannot-exist \\| csv \\| 1 of 3 lines of this format were not matched because their date cannot exist under its date layout \\| " \
-        asserts 'A CSV row has the same outcome and note as a scanned line' \
-        produced_by 'defer_timestamp_impossible_notes() in ltl' \
-        contract "$IMPOSSIBLE_CONTRACT"
+    if run_sections "$FIXTURES/impossible-date-application.txt" "$FIXTURES/impossible-date-access.txt" "$FIXTURES/impossible-date-connector.txt"; then
+        out="$sections_out"
+        assert_line "$out" pattern '^lines_unmatched_impossible_date: 4$' \
+            asserts 'Month 13 and 30 February on the scanned ISO arm, 31 June on the Apache date and 30 February on the asctime date: four lines not matched because their date cannot exist, and the run continues' \
+            produced_by 'the impossible-date branch format_timestamp_src() emits into each scan block; timestamp_impossible_total() in ltl' \
+            contract "$IMPOSSIBLE_CONTRACT"
+        assert_line "$out" pattern '^lines_unmatched: 4$' \
+            asserts 'The four lines are unmatched, nothing else is' \
+            produced_by 'note_unmatched_line() in ltl, for a line the scan sub returns no entry for' \
+            contract "$IMPOSSIBLE_CONTRACT"
+        assert_line "$out" pattern '^lines_included: 7$' \
+            asserts 'The seven valid lines are included and none is placed at another line time: an impossible line contributes nothing' \
+            produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
+        assert_funnel_identities "$out"
+        assert_line "$out.notices" pattern "^date-cannot-exist \\| thingworx_standard \\| 2 of 5 lines of this format were not matched because their date cannot exist under its date layout \\| " \
+            asserts 'One note per format after the read, with the count and no file name, line number or value' \
+            produced_by 'defer_timestamp_impossible_notes() in ltl' \
+            contract "$IMPOSSIBLE_CONTRACT"
+        assert_line "$out.notices" pattern "^date-cannot-exist \\| access_common_duration_thread_session \\| 1 of 3 lines of this format were not matched because their date cannot exist under its date layout \\| " \
+            asserts 'The Apache common log date has the same outcome and note as the ISO arm' \
+            produced_by 'defer_timestamp_impossible_notes() in ltl' \
+            contract "$IMPOSSIBLE_CONTRACT"
+        assert_line "$out.notices" pattern "^date-cannot-exist \\| apache_mod_jk \\| 1 of 3 lines of this format were not matched because their date cannot exist under its date layout \\| " \
+            asserts 'The asctime date has the same outcome and note as the ISO arm' \
+            produced_by 'defer_timestamp_impossible_notes() in ltl' \
+            contract "$IMPOSSIBLE_CONTRACT"
+        assert_absent "$out.notices" pattern 'line [0-9]+|previous line' \
+            asserts 'No note per line or per file, and no line is kept at the previous line time' \
+            produced_by 'format_probe_signal() in ltl' \
+            contract 'features/log-format-registry.md D52 as amended 2026-09-30; features/611-timestamp-acceptance.md C5'
+    else
+        skip_checks
+    fi
+    if current_scenario=impossible-date-csv run_sections "$FIXTURES/impossible-date-csv.txt" -udm value::max; then
+        csv_out="$sections_out"
+        assert_line "$csv_out" pattern '^lines_unmatched_impossible_date: 1$' \
+            asserts 'A CSV row dated 30 February under the order its file is read in is not matched, and the run continues' \
+            produced_by 'the impossible-date branch format_timestamp_src() emits into the CSV block csv_block_src() generates' \
+            contract "$IMPOSSIBLE_CONTRACT; supersedes features/615-csv-registry-entry.md D7"
+        assert_line "$csv_out" pattern '^lines_included: 2$' \
+            asserts 'The two valid rows are included' \
+            produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
+        assert_funnel_identities "$csv_out"
+        assert_line "$csv_out.notices" pattern "^date-cannot-exist \\| csv \\| 1 of 3 lines of this format were not matched because their date cannot exist under its date layout \\| " \
+            asserts 'A CSV row has the same outcome and note as a scanned line' \
+            produced_by 'defer_timestamp_impossible_notes() in ltl' \
+            contract "$IMPOSSIBLE_CONTRACT"
+    else
+        current_scenario=impossible-date-csv skip_checks
+    fi
 fi
 
 # --- time window: the accepted forms of a bound, and a bound in none of them ---
@@ -476,13 +506,16 @@ if scenario_wanted time-window-forms; then
     current_scenario="time-window-forms"
     FORMS_CONTRACT='features/611-timestamp-acceptance.md C6, C7 (one parser for -st and -et, either separator, a usage error naming the forms); AC6, AC7'
     for bound in "2025-05-07T12:00:00" "2025-05-07T12:00" "2025-05-07T11:59:59.999"; do
-        current_scenario="time-window-forms-$bound" run_sections "$FIXTURES/tomcat-access-duration-spread.txt" -st "$bound"
-        out="$sections_out"
-        assert_line "$out" pattern '^excluded_time_window: 360$' \
-            asserts "-st $bound drops the same 360 lines as the space form: the T separator, a bound without seconds and a fraction are read whole" \
-            produced_by 'iso_timestamp_parts() through the -st/-et settlement in adapt_to_command_line_options() in ltl' \
-            contract "$FORMS_CONTRACT"
-        assert_funnel_identities "$out"
+        if current_scenario="time-window-forms-$bound" run_sections "$FIXTURES/tomcat-access-duration-spread.txt" -st "$bound"; then
+            out="$sections_out"
+            assert_line "$out" pattern '^excluded_time_window: 360$' \
+                asserts "-st $bound drops the same 360 lines as the space form: the T separator, a bound without seconds and a fraction are read whole" \
+                produced_by 'iso_timestamp_parts() through the -st/-et settlement in adapt_to_command_line_options() in ltl' \
+                contract "$FORMS_CONTRACT"
+            assert_funnel_identities "$out"
+        else
+            current_scenario="time-window-forms-$bound" skip_checks
+        fi
     done
     for bad in "-st:2025-13-01 00:00:00" "-et:2025-02-30" "-st:yesterday" "-et:25:00"; do
         flag=${bad%%:*}; value=${bad#*:}
@@ -491,12 +524,19 @@ if scenario_wanted time-window-forms; then
         "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 "$flag" "$value" "$FIXTURES/tomcat-access-duration-spread.txt" > "$TMP_DIR/time-window-forms-bad.out" 2> "$err"
         ec=$?
         set -e
-        assert_equal "$flag '$value' exits 1" "$ec" 1 \
-            asserts "A $flag value in no accepted form, or naming a date or time that cannot exist, is a usage error" \
+        refusal="^.*Error: Invalid $flag timestamp '$value'\\. Accepted forms: YYYY-MM-DD, optionally followed by a space or T and HH:MM\\[:SS\\[\\.fraction\\]\\] \\(an absolute bound\\), or HH:MM\\[:SS\\[\\.fraction\\]\\] alone"
+        assert_line "$err" pattern "$refusal" \
+            asserts 'The usage error names the value and the accepted forms' \
             produced_by 'adapt_to_command_line_options() in ltl (the -st/-et settlement)' \
             contract "$FORMS_CONTRACT"
-        assert_line "$err" pattern "^.*Error: Invalid $flag timestamp '$value'\\. Accepted forms: YYYY-MM-DD, optionally followed by a space or T and HH:MM\\[:SS\\[\\.fraction\\]\\] \\(an absolute bound\\), or HH:MM\\[:SS\\[\\.fraction\\]\\] alone" \
-            asserts 'The usage error names the value and the accepted forms' \
+        # The exit code and the absences read a refused run: any failure exits
+        # non-zero, and a run that printed nothing holds no forbidden text.
+        if ! grep -qE "$refusal" "$err"; then
+            echo "  SKIP  $current_scenario :: $flag '$value' exit code and absences (the run printed no refusal)"
+            continue
+        fi
+        assert_equal "$flag '$value' exits 1" "$ec" 1 \
+            asserts "A $flag value in no accepted form, or naming a date or time that cannot exist, is a usage error" \
             produced_by 'adapt_to_command_line_options() in ltl (the -st/-et settlement)' \
             contract "$FORMS_CONTRACT"
         assert_absent "$err" pattern 'Time/Piece|strptime| at .* line [0-9]+' \
@@ -517,22 +557,30 @@ if scenario_wanted summary-table-unchanged; then
     "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -e catalog "$FIXTURES/http-status-families.txt" > "$out" 2>"$out.stderr"
     ec=$?
     set -e
-    [[ "$ec" -eq 0 ]] || { echo "FAIL: ltl exited $ec for $current_scenario" >&2; exit 1; }
-    if ! assert_no_runtime_warnings "$out.stderr" "$current_scenario"; then
-        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    if [[ "$ec" -ne 0 ]]; then
+        run_failed "ltl exited $ec" "$out.stderr"
+    elif ! grep -qE 'LINES READ' "$out"; then
+        run_failed "the run summary table not found in $out"
     fi
-    assert_line "$out" pattern 'LINES READ +10' \
-        asserts 'The run summary keeps its LINES READ row' \
-        produced_by 'print_summary_table() in ltl' \
-        contract 'features/503-yaml-aggregate-export.md D12 - the run summary table does not change'
-    assert_line "$out" pattern 'LINES INCLUDED +5' \
-        asserts 'The run summary keeps its LINES INCLUDED row' \
-        produced_by 'print_summary_table() in ltl' \
-        contract 'features/503-yaml-aggregate-export.md D12 - the run summary table does not change'
-    assert_absent "$out" pattern 'LINES (EXCLUDED|UNMATCHED)' \
-        asserts 'No excluded or unmatched row joins the run summary; the accounting lives on -V filter-summary and in the aggregate export' \
-        produced_by 'print_summary_table() in ltl' \
-        contract 'features/503-yaml-aggregate-export.md D12 - the summary stays exactly as it is'
+    if run_ok "$current_scenario"; then
+        if ! assert_no_runtime_warnings "$out.stderr" "$current_scenario"; then
+            fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+        fi
+        assert_line "$out" pattern 'LINES READ +10' \
+            asserts 'The run summary keeps its LINES READ row' \
+            produced_by 'print_summary_table() in ltl' \
+            contract 'features/503-yaml-aggregate-export.md D12 - the run summary table does not change'
+        assert_line "$out" pattern 'LINES INCLUDED +5' \
+            asserts 'The run summary keeps its LINES INCLUDED row' \
+            produced_by 'print_summary_table() in ltl' \
+            contract 'features/503-yaml-aggregate-export.md D12 - the run summary table does not change'
+        assert_absent "$out" pattern 'LINES (EXCLUDED|UNMATCHED)' \
+            asserts 'No excluded or unmatched row joins the run summary; the accounting lives on -V filter-summary and in the aggregate export' \
+            produced_by 'print_summary_table() in ltl' \
+            contract 'features/503-yaml-aggregate-export.md D12 - the summary stays exactly as it is'
+    else
+        skip_checks
+    fi
 fi
 
 
