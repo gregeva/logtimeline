@@ -442,6 +442,7 @@ for level in FATAL ERROR WARN INFO DEBUG TRACE; do
         contract    'features/463-friendly-log-level-category-names.md § R2 — a category with no entry displays its own name unchanged'
 done
 fi
+fi
 
 echo
 echo "─────────────────────────────────────────"
@@ -454,5 +455,3 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
-fi
-

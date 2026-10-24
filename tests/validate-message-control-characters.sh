@@ -486,6 +486,7 @@ assert_command \
 else
     skip_checks
 fi
+fi
 
 echo
 echo "─────────────────────────────────────────"
@@ -498,5 +499,3 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
-fi
-

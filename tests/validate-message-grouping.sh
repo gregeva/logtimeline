@@ -377,17 +377,18 @@ if capture_section "$out" $SHAPE -g 95 --final-threshold 70 "$FIXTURE"; then
     check_scenario "$out" 95 70 2 'an explicit --final-threshold 70 overrides -g 95 for the final pass only'
 fi
 
+fi
+
 # Candidate search scenarios. -du us binds the fixture's microsecond durations
 # as the source log is read; -xqs keeps the query string, which carries the
 # per-request values the search must look past. Same SHAPE otherwise.
+# signed-downloads-75-repeat compares its run with signed-downloads-75's.
 DOWNLOAD_KEYS=$(wc -l < "$FIXTURE_DOWNLOADS" | tr -d ' ')
-
-fi
+out_downloads_75="$TMP_DIR/downloads-g75.out"
 
 if scenario_wanted signed-downloads-75; then
 current_scenario="signed-downloads-75"
 echo "[$current_scenario]"
-out_downloads_75="$TMP_DIR/downloads-g75.out"
 if capture_section "$out_downloads_75" $SHAPE -du us -xqs -g 75 "$FIXTURE_DOWNLOADS"; then
     assert_command \
         command     "check_rows_at_most '$out_downloads_75' 'plain|200' $DOWNLOAD_KEYS 10" \
@@ -454,7 +455,9 @@ if scenario_wanted signed-downloads-75-repeat; then
 current_scenario="signed-downloads-75-repeat"
 echo "[$current_scenario]"
 out="$TMP_DIR/downloads-g75-repeat.out"
-if [[ -s "$out_downloads_75" ]] && capture_section "$out" $SHAPE -du us -xqs -g 75 "$FIXTURE_DOWNLOADS"; then
+if [[ ! -s "$out_downloads_75" ]]; then
+    echo "  SKIP  $current_scenario :: cluster-membership byte-identical (no signed-downloads-75 capture to compare: name it with this scenario, or its run failed)"
+elif capture_section "$out" $SHAPE -du us -xqs -g 75 "$FIXTURE_DOWNLOADS"; then
     assert_command \
         command     "check_membership_identical '$out_downloads_75' '$out'" \
         label       'cluster-membership byte-identical across two runs' \

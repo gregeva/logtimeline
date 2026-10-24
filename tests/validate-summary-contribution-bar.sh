@@ -1000,6 +1000,7 @@ assert_command \
     asserts     'The plain row takes the subdued shade of the same hue, so the pair reads as one category split in two rather than as two unrelated ones. Rendering both in the vivid shade makes the highlight invisible — the two rows come out identical and nothing says which is which.' \
     produced_by "$BAR_PRODUCED" \
     contract    'features/448-category-summary-share-and-bar.md § D2 — the bar uses the same bar mechanism and colour table as the timeline columns'
+fi
 
 echo
 echo "─────────────────────────────────────────"
@@ -1012,5 +1013,3 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
-fi
-
