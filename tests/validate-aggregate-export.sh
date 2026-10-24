@@ -187,7 +187,7 @@ current_scenario="histogram-n0"
 if want "$current_scenario"; then
     run_export -bs 1440 -oe -n 0 -cp full -hg duration -h orders "$FIXTURES/http-status-families.txt" "$FIXTURES/tomcat-access-duration-spread.txt" || true
     if [[ -n "$YAML_FILE" ]]; then
-        local_count=$(ls "$TMP_DIR/$current_scenario"/*.yaml | wc -l | tr -d ' ')
+        local_count=$(ls "$TMP_DIR/$current_scenario"/*.yaml | wc -l | tr -d ' ') || local_count=""
         assert_equal "exactly one YAML file" "$local_count" 1 asserts 'One file per run' produced_by "$PRODUCER" contract "$CONTRACT"
         name="$(basename "$YAML_FILE")"
         if [[ "$name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}-LTL-AGGREGATE\.yaml$ ]]; then pass_with "file name carries no argument text ($name)"; else fail_with "file name" 'The name is <stamp>-LTL-AGGREGATE.yaml with no argument suffix (D18)' "run_file_stamp() and $PRODUCER" "$CONTRACT" "$name"; fi

@@ -169,7 +169,7 @@ if scenario_wanted producer/fixture-tracked; then
 current_scenario="producer/fixture-tracked"
 if ( cd "$REPO_DIR" && git ls-files --error-unmatch tests/fixtures/classification-states.txt > /dev/null 2>&1 ) \
    && grep -q 'classification-states.txt' "$REPO_DIR/docs/test-logs.md"; then
-    pass_with "fixture is tracked and recorded in docs/test-logs.md"
+    pass_with "fixture is tracked and recorded in docs/test-logs.md [run-free: the git index and docs/test-logs.md]"
 else
     fail_with "fixture tracked and recorded" 'the synthetic fixture is committed as .txt and described in docs/test-logs.md' 'repository' "$SPEC acceptance criterion 1"
 fi

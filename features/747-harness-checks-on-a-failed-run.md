@@ -10,8 +10,9 @@ Drop 3 done 2026-10-24 (848b26d8): ten of its eleven harnesses fixed, shape
 fixed (§ Drop 4). D4 done 2026-10-24 (51a95f55): the four selection defects
 fixed (§ D4: the selection defects). Drop 5 done 2026-10-24 (9ebc1bf1): five
 of its six harnesses fixed (§ Drop 5). Drop 6 done 2026-10-24 (ffd7a142):
-three of its four harnesses fixed (§ Drop 6). Drop 7 done 2026-10-24: five of
-its six harnesses fixed (§ Drop 7); drop 8 is next.
+three of its four harnesses fixed (§ Drop 6). Drop 7 done 2026-10-24
+(8d2db3cd): five of its six harnesses fixed (§ Drop 7). Drop 8 done
+2026-10-24: the failed-run checker (§ Drop 8); the completion gate is next.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -24,11 +25,10 @@ agreed by the architect on 2026-10-24, and work started that day on branch
 carried on the issue branch: each drop's commit updates § Per-harness record
 and the status line, and the document reaches the release branch with the PR,
 as the work merged by PR #754 did with its own. Drops 1 to 7 and D4 (the
-four selection defects) are done; the next step is drop 8 (D3: the official
-checker of the harnesses, every condition it checks written in
-`tests/HARNESS-DESIGN.md`, the rule that a harness change passes it before it
-is committed, every run-free PASS line marked), then the completion gate. The
-scratchpad worktree
+four selection defects) and drop 8 (D3: the failed-run checker,
+`tests/validate-harness-failed-run.sh`) are done; the next step is the
+completion gate, whose sweep of every harness against the stubs is the
+checker's whole run. The scratchpad worktree
 and stubs do not survive the session: a new session makes them again as
 § Drop 2 describes (stubs: `failing` prints nothing and exits 1, `silent`
 prints nothing and exits 0, each a two-line Perl script).
@@ -807,6 +807,91 @@ capture can skip that capture by the `.rc` its run recorded, so a harness of
 several hundred checks per run needs no per-check field; and the steps that
 edit what a run wrote besides its capture (index-read-back's index) are
 skipped with its checks. Both are in the fix forms of `tests/HARNESS-DESIGN.md`.
+
+### Drop 8
+
+D3, built to the shape recorded with it. Its conditions are written in
+`tests/HARNESS-DESIGN.md` § The failed-run checker as what is expected and
+what fails; the rule that a harness change passes the checker is a bullet of
+`.claude/rules/harnesses.md` and part of the CLAUDE.md checkpoint "Any harness
+change".
+
+- **`tests/validate-harness-failed-run.sh`**, one harness in the suite, with a
+  scenario per harness that runs `ltl` (52; scenario-selector names no `LTL`
+  and is not checked). Each scenario makes eleven checks: the three source
+  rules, then a run of every scenario the harness registers against each stub,
+  failing on a summary not reached, an exit of 0, PASS lines that differ from
+  the passed count, or a PASS line not marked run-free. Its whole run is the
+  sweep of every harness against the stubs the gate calls for (AC1 to AC3).
+- **`process/check-harness-source.pl`**, the source rules: a counting helper
+  run inside `$( )`, `<( )` or backticks (counted-in-subshell), a summary
+  inside any block but a top-level `if` that does not test the scenario
+  selection (summary-in-scenario), and a `grep` or `ls` lookup assigned with
+  no `||` (lookup-no-fallback). It reads the harness through bash's own parser
+  (the harness wrapped in a function and printed back by `declare -f`), so
+  nesting is bash's, and continued lines, comments and here-document bodies
+  do not mislead it.
+- **`process/check-harness-capture.pl`** counts the PASS lines not marked
+  run-free, a seventh column of `--brief`.
+- **The run-free mark**, `[run-free: <what it read>]` at the end of a PASS
+  line, given through the assertion helper (a `run_free` field, or a seventh
+  argument to `check`). It goes on a check whose input does not depend on
+  `$LTL`: docs, a fixture, what the harness writes, the checkout's source read
+  through `REPO_DIR`, or the screenshot tool's output, the tool running the
+  repository's `ltl` (D1). Source read through `$LTL` fails under a stub and
+  carries none. 136 PASS lines in ten harnesses carry it: explain 61,
+  help-content 32, screenshot-capture 29, index-read-back 6, format-detection
+  3, and one each in statistics-demand, classification-states, memory-usage,
+  notices and read-path, the run-free checks § Per-harness record names.
+- **Eleven lookups given a fallback.** Over the 52 harnesses the source rules
+  found no counting helper inside `$( )` and no summary inside a scenario's
+  block, the drops having fixed both, and eleven `grep` or `ls` lookups with
+  no `||`: aggregate-export, byte-units (two), duration-display, explain,
+  format-detection, format-registry (three), runtime-config and section-layout.
+  Each was read in its drop as unable to stop the harness where it stands (a
+  helper called where `set -e` does not apply, or a value that is always
+  there); each now carries `|| var=""`, and the value is asserted on as
+  before, so the rule holds without an exception.
+
+Proof (AC6): in the scratchpad worktree at drop 7, with the checker and its
+two tools copied in, the checker fails each condition on a harness that
+breaks it. The summary inside a scenario's block fails category-names as it
+was before D4 (a8b7dcfe). A counting helper inside `$( )` fails
+statistics-demand as it was at 422f2d4e, whose `extract_section` counted
+inside `body=$( )`. Lookups with no fallback fail explain and runtime-config
+at drop 7, and read-path at the base commit. A summary not reached fails
+filter-summary at drop 6. An exit of 0 fails read-path at the base commit,
+which ran its own `ltl` whatever `LTL` named. A PASS count off the passed
+count fails classification-states doctored to count two per pass. Unmarked
+passes fail explain and statistics-demand at drop 7, read-path at the base
+commit and the doctored classification-states.
+
+The checker's run over all 52 harnesses, from the scratchpad worktree at the
+drop's commit: 572 passed, 0 failed (eleven checks for each), in 461 s. The
+sixteen harnesses drop 8 changed keep their passed
+counts on the real `ltl` and exit 0 (aggregate-export 163, byte-units 48,
+duration-display 41, explain 728, format-detection 472, format-registry 59,
+runtime-config 119, section-layout 186, classification-states 56, memory-usage
+23, notices 188, read-path 28, help-content 114, statistics-demand 167,
+index-read-back 107, screenshot-capture 44), 136 of their PASS lines marked;
+run from the scratchpad worktree they report the same summary, exit, passed
+count and marked lines, 16 runs.
+A stub run of
+csv-output or statistics captures the shared CSV cache again, its signature
+being a digest of the file `LTL` names (§ What is in place), so the next real
+run of either captures again.
+
+The checker's first run over all 52 failed regression on both stubs, by its
+own reading of `--list`: regression prints a note under its scenario names
+("A positional argument names an alternative reference directory."), and the
+reading took its first word for a name, which regression refused. The names
+are now the one-word lines directly after `Scenarios:`; read that way, only
+regression's list changes, and its scenario passes all eleven checks.
+
+What drop 8 adds to the method: the review-gate greps stay the reader's
+candidate list, and the checker is the subset certain without reading, run
+on every change. "Confirming a fix" in the method now names the checker's
+scenario.
 
 ### Fix designs read ahead (drops 3 to 6)
 

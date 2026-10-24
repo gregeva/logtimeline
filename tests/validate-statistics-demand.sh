@@ -179,8 +179,11 @@ assert_line() {
 
 # Self-documenting assertion for anything beyond a single-line grep.
 # `command` is eval'd (PASS if exit 0); `label` names it on the PASS line.
+# A check whose input does not depend on $LTL names it in `run_free`, and its
+# PASS line ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 assert_command() {
-    local command label asserts produced_by contract
+    local command label asserts produced_by contract run_free=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -188,6 +191,7 @@ assert_command() {
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            run_free)    run_free="$2";    shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -200,7 +204,7 @@ assert_command() {
     # In a subshell: an unbound name or an exit in the command ends that, not
     # the harness (HARNESS-DESIGN.md shape 15).
     if ( eval "$command" ) >/dev/null 2>&1; then
-        echo "  PASS  $current_scenario :: $label"
+        echo "  PASS  $current_scenario :: $label${run_free:+ [run-free: $run_free]}"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario"
@@ -910,7 +914,8 @@ assert_command \
     label       "the fixture still carries $DURATION_SPREAD_LINES lines, the population the ceiling was derived from" \
     asserts     "The retained-duration ceiling is derived from this fixture's $DURATION_SPREAD_LINES durations; a regenerated fixture with a different line count changes the retained population and the threshold must be re-derived rather than silently absorb the change" \
     produced_by 'tests/duration-display/generate-fixture.py (fixture generator); the population is retained by the per-bucket durations push in read_and_process_logs()' \
-    contract    "$REPRESENTATION_CONTRACT"
+    contract    "$REPRESENTATION_CONTRACT" \
+    run_free    'tests/fixtures/tomcat-access-duration-spread.txt'
 
 # A missing row is a hard failure: the assertion below compares a number, and an
 # absent row must never read as a value under the ceiling.

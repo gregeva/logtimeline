@@ -137,7 +137,7 @@ assert_int_le() {
         return
     fi
     local value
-    value=$(grep -E "^${key}: [0-9]+\$" "$outfile" | sed -E "s/^${key}: //")
+    value=$(grep -E "^${key}: [0-9]+\$" "$outfile" | sed -E "s/^${key}: //") || value=""
     if [[ "$value" -le "$max" && "$value" -ge "$min" ]]; then
         echo "  PASS  $current_scenario :: $key=$value (in [$min,$max])"
         pass=$((pass + 1))
@@ -501,8 +501,8 @@ scenario_benchmark_data_reemission() {
     fi
 
     local section_value bench_value
-    section_value=$(grep -E '^scan_subs_compiled: [0-9]+$' "$outfile" | sed -E 's/^scan_subs_compiled: //')
-    bench_value=$(grep -E '^COUNTS\tformat_scan_subs_compiled\t[0-9]+$' "$outfile" | cut -f3)
+    section_value=$(grep -E '^scan_subs_compiled: [0-9]+$' "$outfile" | sed -E 's/^scan_subs_compiled: //') || section_value=""
+    bench_value=$(grep -E '^COUNTS\tformat_scan_subs_compiled\t[0-9]+$' "$outfile" | cut -f3) || bench_value=""
 
     if [[ -z "$section_value" || -z "$bench_value" ]]; then
         echo "  FAIL  $current_scenario"

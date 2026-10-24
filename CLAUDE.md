@@ -311,7 +311,9 @@ about anything else, these still hold.
       `--disable-progress` suppresses progress indicators only.
 - [ ] Any harness change: the file name tracks the `-V` section it validates;
       every assertion declares `asserts`, `produced_by` (function name, not line)
-      and `contract`; a lookup that matches nothing is a failure, never a pass.
+      and `contract`; a lookup that matches nothing is a failure, never a pass;
+      and its scenario of `tests/validate-harness-failed-run.sh` passes before
+      the change is committed.
 - [ ] Any `-V` section or key change: read `tests/HARNESS-DESIGN.md` first,
       update every consumer and the owning feature doc's section contract in the
       same commit, and run the scenarios that read the changed section or key,

@@ -517,7 +517,7 @@ TIME_NOTICE='^deprecated-spelling \| time \| is deprecated as a metric name \(gi
 run_section_only() {
     local label="$1" section="$2"; shift 2
     local hide
-    hide=$(printf '%s\n' title timeline histogram options messages summary | grep -vx "$section" | paste -sd, -)
+    hide=$(printf '%s\n' title timeline histogram options messages summary | grep -vx "$section" | paste -sd, -) || hide=""
     run_ltl "$label" -bs 1440 -oe --terminal-width 200 --hide "$hide" "$@"
 }
 

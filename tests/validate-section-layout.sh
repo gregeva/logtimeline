@@ -167,7 +167,7 @@ heading_absent() {
 # timeline is hidden where this is read). Usage: closing_rule <capture>
 closing_rule() {
     local rule
-    rule=$("$PERL" "$CHECKER" strip "$1" | sed 's/\x1b\[[0-9;]*m//g' | grep '^─' | tail -1)
+    rule=$("$PERL" "$CHECKER" strip "$1" | sed 's/\x1b\[[0-9;]*m//g' | grep '^─' | tail -1) || rule=""
     [[ -n "$rule" ]] || { echo "no rule row in $1"; return 1; }
     printf '%s\n' "$rule"
 }

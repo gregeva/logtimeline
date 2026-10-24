@@ -71,10 +71,13 @@ fail_with() {
     failures+=("$current_scenario :: $label")
 }
 
-# check <label> <actual> <expected> <asserts> <produced_by> <contract>
+# check <label> <actual> <expected> <asserts> <produced_by> <contract> [run_free]
+# run_free names the input of a check that does not depend on $LTL; the PASS
+# line then ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 check() {
     if [[ -n "$2" && "$2" == "$3" ]]; then
-        pass_with "$1 ($2)"
+        pass_with "$1 ($2)${7:+ [run-free: $7]}"
     else
         fail_with "$1" "$4" "$5" "$6" "expected: $3" "actual:   ${2:-MISSING-ANCHOR}"
     fi
@@ -150,7 +153,7 @@ scenario_registered() {
     check "alone under -V notices" "$(grep -c '^=== [a-z-]* ===$' "$TMP_DIR/alone.out" || true)" "1" \
         '-V notices emits the notices section and no other' 'section_requested() in ltl' "$C_SECTION"
     check "reserved in the harness design" "$(grep -c '^- `notices` — ' "$REPO_DIR/tests/HARNESS-DESIGN.md" || true)" "1" \
-        'The section is listed among the implemented reserved section names' 'tests/HARNESS-DESIGN.md § Reserved section names' "$C_SECTION"
+        'The section is listed among the implemented reserved section names' 'tests/HARNESS-DESIGN.md § Reserved section names' "$C_SECTION" 'tests/HARNESS-DESIGN.md'
 }
 
 # ---------------------------------------------------------------------------

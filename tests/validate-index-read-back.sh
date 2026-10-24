@@ -480,8 +480,11 @@ assert_no_line() {
 # captures, or the index they write) names those runs' captures in
 # `reads "CAPTURE ..."`, and is skipped when one of them failed.
 # Reads $current_scenario for the scenario label.
+# A check whose input does not depend on $LTL names it in `run_free`, and its
+# PASS line ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 assert_command() {
-    local command label asserts produced_by contract reads=""
+    local command label asserts produced_by contract reads="" run_free=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -490,6 +493,7 @@ assert_command() {
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
             reads)       reads="$2";       shift 2 ;;
+            run_free)    run_free="$2";    shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -509,7 +513,7 @@ assert_command() {
     # In a subshell: an unbound name or an exit in the command ends that, not
     # the harness (HARNESS-DESIGN.md shape 15).
     if ( eval "$command" ); then
-        echo "  PASS  $current_scenario :: $label"
+        echo "  PASS  $current_scenario :: $label${run_free:+ [run-free: $run_free]}"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario"
@@ -553,21 +557,24 @@ helper_self_test() {
         label       'seed_from_fixture produces ltl-index.csv' \
         asserts     'The seed_from_fixture helper drops the prebuilt fixture into the scenario cwd so subsequent assertions have a known starting state' \
         produced_by 'seed_from_fixture() in tests/validate-index-read-back.sh (copies $INDEX_FIXTURE to ./ltl-index.csv)' \
-        contract    'features/179-index-read-back.md section Validation - Index orchestration; tests/HARNESS-DESIGN.md section Orchestration helpers'
+        contract    'features/179-index-read-back.md section Validation - Index orchestration; tests/HARNESS-DESIGN.md section Orchestration helpers' \
+        run_free    'the committed index fixture, as the harness copies it'
 
     assert_command \
         command     '[[ "$(grep -c "^file," ltl-index.csv || true)" -ge 1 && "$(grep -c "^selection," ltl-index.csv || true)" -ge 1 ]]' \
         label       'fixture seeds at least one file row and one selection row' \
         asserts     'The prebuilt fixture must carry both row kinds (file rows and selection rows) so scenarios exercising either tier have something to match against' \
         produced_by 'tests/fixtures/regenerate-index-readback-fixtures.sh (produces tests/fixtures/ltl-index-readback.csv)' \
-        contract    'features/179-index-read-back.md section Validation - Test scenarios; fixture invariant'
+        contract    'features/179-index-read-back.md section Validation - Test scenarios; fixture invariant' \
+        run_free    'the committed index fixture'
 
     assert_command \
         command     '[[ -z "$(fixture_staleness_reason)" ]]' \
         label       'fixture describes the sample logs on disk (fresh size + mtime)' \
         asserts     'Every pre-seeded scenario depends on ltl accepting the fixture rows as fresh, which it does only when each recorded file_size and file_mtime still matches the live log; asserting freshness here names the fixture as the fault when the logs have moved under it, instead of letting it surface as a broad functional break across every pre-seeded scenario' \
         produced_by 'fixture_staleness_reason() in tests/validate-index-read-back.sh, compared against the freshness gate in read_index_file() in ltl' \
-        contract    'features/179-index-read-back.md section Validation - Test scenarios; fixture invariant'
+        contract    'features/179-index-read-back.md section Validation - Test scenarios; fixture invariant' \
+        run_free    'the committed index fixture and the sample logs on disk'
 
     # Test delete_index_rows: remove all selection rows.
     delete_index_rows "entry_type=selection"
@@ -576,7 +583,8 @@ helper_self_test() {
         label       'delete_index_rows removes matching rows' \
         asserts     'The delete_index_rows orchestration helper removes every row whose predicate columns match, so scenarios can force Tier 2 fallback by deleting the relevant selection rows' \
         produced_by 'delete_index_rows() in tests/validate-index-read-back.sh (Text::CSV-based row filter)' \
-        contract    'features/179-index-read-back.md section Validation - Index orchestration supported operations'
+        contract    'features/179-index-read-back.md section Validation - Index orchestration supported operations' \
+        run_free    'the committed index fixture, as the harness edits it'
 
     # Test edit_index_row: change duration_max in the file row.
     edit_index_row "entry_type=file" "duration_max=999999"
@@ -585,7 +593,8 @@ helper_self_test() {
         label       'edit_index_row applies new value' \
         asserts     'The edit_index_row orchestration helper writes the new column value to the first matching row, so scenarios can corrupt bounds (narrow duration_max, blank a column) without touching unrelated rows' \
         produced_by 'edit_index_row() in tests/validate-index-read-back.sh (Text::CSV-based first-match rewrite)' \
-        contract    'features/179-index-read-back.md section Validation - Index orchestration supported operations'
+        contract    'features/179-index-read-back.md section Validation - Index orchestration supported operations' \
+        run_free    'the committed index fixture, as the harness edits it'
 
     # Test corrupt_index_file: truncate to half-size.
     local size_before size_after
@@ -597,7 +606,8 @@ helper_self_test() {
         label       "corrupt_index_file truncate shrinks file ($size_before -> $size_after bytes)" \
         asserts     'The corrupt_index_file helper (mode=truncate) cuts the index file mid-row so scenarios can drive the malformed-index code path' \
         produced_by 'corrupt_index_file() in tests/validate-index-read-back.sh (head -c $((sz/2)))' \
-        contract    'features/179-index-read-back.md section Validation - Index orchestration supported operations'
+        contract    'features/179-index-read-back.md section Validation - Index orchestration supported operations' \
+        run_free    'the committed index fixture, as the harness edits it'
 }
 
 # ---------------------------------------------------------------------------

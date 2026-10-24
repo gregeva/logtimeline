@@ -65,10 +65,13 @@ fail_with() {
     failures+=("$current_scenario :: $label")
 }
 
-# check <label> <actual> <expected> <asserts> <produced_by> <contract>
+# check <label> <actual> <expected> <asserts> <produced_by> <contract> [run_free]
+# run_free names the input of a check that does not depend on $LTL; the PASS
+# line then ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 check() {
     if [[ -n "$2" && "$2" == "$3" ]]; then
-        pass_with "$1 ($2)"
+        pass_with "$1 ($2)${7:+ [run-free: $7]}"
     else
         fail_with "$1" "$4" "$5" "$6" "expected: $3" "actual:   ${2:-MISSING-ANCHOR}"
     fi
@@ -269,7 +272,7 @@ scenario_debug_samples() {
     echo "[$current_scenario]"
     perl -e 'local $/; my $lines = <STDIN>; print $lines x 12500' < "$ACCESS_FIXTURE" > "$TMP_DIR/repeated.txt"
     check "input lines" "$(wc -l < "$TMP_DIR/repeated.txt" | tr -d ' ')" "150000" \
-        'The input carries exactly two 75,000-line strides' 'the harness' "$C_DEBUG"
+        'The input carries exactly two 75,000-line strides' 'the harness' "$C_DEBUG" 'a file the harness writes'
     run_ltl samples -bs 1440 -oe -mem debug "$TMP_DIR/repeated.txt"
     check "read-loop samples" "$(debug_records samples | awk -F'\t' '$1 == "sample" && $3 == "read_lines"' | wc -l | tr -d ' ')" "2" \
         'One sample record every 75,000 lines read' 'memory_debug_sample() from read_and_process_logs() in ltl' "$C_DEBUG"

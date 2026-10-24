@@ -15,9 +15,11 @@
 #   it), the exit status, the passed and failed counts the summary gives, the
 #   number of PASS lines against the passed count (a mismatch is a counter
 #   advanced without a check, or a check that printed no PASS line: Trap 6),
-#   and every PASS line, to be compared with the harness's run-free checks.
-#   --brief prints one tab-separated line per capture instead:
-#   capture, summary (yes|no), exit, passed, failed, pass_lines.
+#   and every PASS line, with those not marked run-free (a PASS line ending in
+#   `[run-free: <what it read>]`, tests/HARNESS-DESIGN.md § The failed-run
+#   checker) listed apart. --brief prints one tab-separated line per capture
+#   instead: capture, summary (yes|no), exit, passed, failed, pass_lines,
+#   unmarked (the PASS lines not marked run-free).
 #
 # Exit status: 0 when every capture reached its summary, 1 otherwise, 2 on a
 # usage error.
@@ -59,6 +61,7 @@ for my $capture (@captures) {
         }
     }
     my @pass_lines = grep { /^\s*PASS\b/ && !/^\s*PASS: \d+\s+FAIL: \d+\s*$/ } @lines;
+    my @unmarked   = grep { !/\[run-free: [^]]+\]\s*$/ } @pass_lines;
 
     my $exit = 'unknown';
     if ( open my $rc, '<', "$capture.rc" ) {
@@ -69,7 +72,7 @@ for my $capture (@captures) {
     my $reached = defined $summary_at;
     $all_reached &&= $reached;
     if ($brief) {
-        print join( "\t", $capture, $reached ? 'yes' : 'no', $exit, $passed // '-', $failed // '-', scalar @pass_lines ), "\n";
+        print join( "\t", $capture, $reached ? 'yes' : 'no', $exit, $passed // '-', $failed // '-', scalar @pass_lines, scalar @unmarked ), "\n";
         next;
     }
     print "capture:     $capture\n";
@@ -86,6 +89,8 @@ for my $capture (@captures) {
     my $mismatch = defined $passed && $passed != @pass_lines ? "  MISMATCH: the summary counts $passed" : '';
     print 'pass_lines:  ', scalar @pass_lines, "$mismatch\n";
     print "  $_\n" for map { s/^\s+//r } @pass_lines;
+    print 'unmarked:    ', scalar @unmarked, " PASS line(s) not marked run-free\n";
+    print "  $_\n" for map { s/^\s+//r } @unmarked;
     print "\n";
 }
 exit( $all_reached ? 0 : 1 );

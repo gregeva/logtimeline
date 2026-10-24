@@ -752,15 +752,64 @@ summary's own; none is a case. The greps are run, not recalled: three lookups
 that stopped a harness on a failed run were passed over by reading and listed
 by grep 10.
 
-**Confirming a fix.** Once a harness is read and fixed, it is run against two
-stubs, each a two-line Perl script named by its absolute path: one that prints
-nothing and exits 1, one that prints nothing and exits 0
-(`LTL=<stub> ./tests/validate-<name>.sh`, output captured to a file).
-`process/check-harness-capture.pl` reads the capture: the summary is reached,
-the exit status is non-zero, and every PASS line is a run-free check, with as
-many PASS lines as the summary counts. A guard that a check's run wrote what
+**Confirming a fix.** Once a harness is read and fixed, its scenario of the
+failed-run checker confirms it (§ The failed-run checker): the source rules
+hold, and against both stubs the harness reaches its summary, exits non-zero,
+and passes only checks marked run-free. A guard that a check's run wrote what
 the check reads is shown failing on a stub that exits 0 having printed one
 unrelated line, or on a doctored capture without the line.
+
+## The failed-run checker
+
+`tests/validate-harness-failed-run.sh` holds every harness that runs `ltl` to
+Traps 12 and 13. It has one scenario per harness, named as the harness is
+without `validate-` and `.sh`, and finds a new harness by itself; a harness
+that never names `LTL` runs no `ltl` and is not checked. **A harness change
+passes its scenario before it is committed:**
+
+```bash
+./tests/validate-harness-failed-run.sh --scenario <name>
+```
+
+It runs whole in the full suite, where it is the sweep of every harness
+against the stubs. A failure names the rule and the line or the run behind it.
+
+**What it reads from the source.** `process/check-harness-source.pl` reads the
+harness through bash's own parser: the harness is wrapped in a function and
+printed back with `declare -f`, which joins continued lines and indents each
+level of nesting by four spaces. It never runs the harness. Three faults are
+certain there:
+
+| Rule | A failure | What is expected |
+|---|---|---|
+| counted-in-subshell | a function that changes a counter the summary reports, or `failures`, or calls one that does, runs inside `$( )`, `<( )` or backticks | the helper runs in the harness's own shell and hands back what it found through a variable or a file beside the capture (Trap 12) |
+| summary-in-scenario | the line printing the summary sits in a block other than a top-level `if` that does not test `scenario_wanted` or `scenario_selected`; or no line prints a summary in a form `process/check-harness-capture.pl` reads | the summary prints after the last scenario, at the top level, whatever the selection |
+| lookup-no-fallback | a variable is assigned from a command substitution that runs `grep` or `ls`, with no `\|\|` inside the substitution or after it | `\|\| var=""` on the assignment, or `\|\| true` inside it, and the empty value asserted on (shape 10) |
+
+**What it reads from a run.** The two stubs are two-line Perl scripts in a
+temporary directory, named by their absolute paths: one prints nothing and
+exits 1, the other prints nothing and exits 0. The harness runs every scenario
+its `--list` names against each, and `process/check-harness-capture.pl` reads
+the capture. A run is a failure when:
+
+- the summary is not reached: a step ended the harness (shape 13, or a lookup
+  under `set -e`, shape 10);
+- the harness exits 0: a run that did not happen was not counted as a failure;
+- the PASS lines do not number the passed count: a counter advanced without a
+  check (shape 12), or a check that printed no line;
+- a PASS line is not marked run-free: a check held on a run that did not
+  happen (Trap 13).
+
+**The run-free mark.** A check whose input does not depend on `$LTL` passes
+whatever `ltl` does: a file under `docs/` or `features/`, a fixture, an
+artifact the harness writes itself, the checkout's source read through
+`REPO_DIR`, or the output of a tool that runs the repository's `ltl` rather
+than `$LTL` (`process/capture-screenshots.pl`). Its PASS line ends with
+`[run-free: <what it read>]`, given through the assertion helper (a
+`run_free` field, or a last argument to a positional helper such as
+`check`), so the claim is read beside the check it is made for. Source read
+through `$LTL` is the stub's under a stub run, fails there, and carries no
+mark.
 
 ## Invocation coherence: every `ltl` run is shaped to the test that invokes it
 

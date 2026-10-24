@@ -236,8 +236,11 @@ run_format_detection() {
 # triple as assert_line (reference: tests/validate-csv-input.sh). A command
 # that reads run captures names them in `reads "CAPTURE ..."`, and is skipped
 # when one of those runs failed (failed_run).
+# A check whose input does not depend on $LTL names it in `run_free`, and its
+# PASS line ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 assert_command() {
-    local command="" label="" asserts="" produced_by="" contract="" reads=""
+    local command="" label="" asserts="" produced_by="" contract="" reads="" run_free=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2"; shift 2 ;;
@@ -246,6 +249,7 @@ assert_command() {
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2"; shift 2 ;;
             reads)       reads="$2"; shift 2 ;;
+            run_free)    run_free="$2";    shift 2 ;;
             *) echo "assert_command: unknown field '$1'" >&2; exit 2 ;;
         esac
     done
@@ -263,7 +267,7 @@ assert_command() {
     # In a subshell: an unbound name or an exit in the command ends that, not
     # the harness (HARNESS-DESIGN.md shape 15).
     if ( eval "$command" ) >/dev/null 2>&1; then
-        echo "  PASS  $current_scenario :: $label"
+        echo "  PASS  $current_scenario :: $label${run_free:+ [run-free: $run_free]}"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario :: $label"
@@ -1119,7 +1123,8 @@ scenario_gc_tagless_crlf() {
         command "perl -ne '\$lf++ unless /\\r\\n\\z/; END { exit((\$. && !\$lf) ? 0 : 1) }' '$FIXTURE_DIR/gc-time-crlf-jdk21.txt'" \
         asserts 'Every line of the CRLF fixture ends in CR LF, so the scenario exercises the carriage-return path' \
         produced_by 'tests/fixtures/format-detection/gc-time-crlf-jdk21.txt (committed fixture)' \
-        contract "$GC_TAGLESS_CONTRACT C6"
+        contract "$GC_TAGLESS_CONTRACT C6" \
+        run_free 'tests/fixtures/format-detection/gc-time-crlf-jdk21.txt'
     assert_gc_parity gc-time-crlf-jdk21.txt java_gc_g1_time gc-tagged-jdk21.txt
 }
 
@@ -1147,7 +1152,8 @@ scenario_gc_tagless_level_padded() {
         command "grep -q '^\\[[^]]*\\]\\[info \\] GC([0-9]*) Pause ' '$log'" \
         asserts 'The fixture carries pause lines whose level bracket the JVM padded to [info ]' \
         produced_by 'tests/fixtures/format-detection/gc-time-level-padded-jdk17.txt (committed fixture)' \
-        contract "$GC_TAGLESS_CONTRACT C5, F11"
+        contract "$GC_TAGLESS_CONTRACT C5, F11" \
+        run_free 'tests/fixtures/format-detection/gc-time-level-padded-jdk17.txt'
     local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern "^  matched_lines: $((records + markers))\$" \
         asserts "Every pause record ($records) and marker ($markers) is read although the level bracket is padded" \
@@ -1173,7 +1179,8 @@ scenario_gc_tagged_padded_level() {
         command "grep -q '^\\[[^]]*\\]\\[info \\]\\[gc  *\\] GC([0-9]*) Pause ' '$log'" \
         asserts 'The fixture carries tagged pause lines whose level bracket the JVM padded to [info ]' \
         produced_by 'tests/fixtures/format-detection/gc-tagged-padded-jdk17.txt (committed fixture)' \
-        contract "$GC_TAGLESS_CONTRACT C4, F12"
+        contract "$GC_TAGLESS_CONTRACT C4, F12" \
+        run_free 'tests/fixtures/format-detection/gc-tagged-padded-jdk17.txt'
     local out; out=$(run_format_detection "$log"); check_run "$out"
     assert_line "$out" pattern '^  format: java_gc_g1$' \
         asserts 'A tagged G1 log whose level bracket is padded binds the tagged entry' \
@@ -1495,7 +1502,7 @@ classification_value() {
         exit 1
     fi
     value=$(sed -n '/^=== format-detection \/ classification ===$/,/^=== END format-detection \/ classification ===$/p' "$capture" \
-            | grep -E "^$key: " | awk '{print $2}')
+            | grep -E "^$key: " | awk '{print $2}') || value=""
     if [[ -z "$value" ]]; then
         echo "FAIL: key '$key' not found in the classification sub-section of $capture" >&2
         exit 1

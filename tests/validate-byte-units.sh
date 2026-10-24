@@ -113,7 +113,7 @@ run_ltl_in() {
 # a missing file or column is reported as MISSING-ANCHOR (Trap 3/4).
 stats_cell() {
     local dir="$1" column="$2" file
-    file=$(ls "$dir"/*STATS*.csv 2>/dev/null | head -1)
+    file=$(ls "$dir"/*STATS*.csv 2>/dev/null | head -1) || file=""
     if [[ -z "$file" ]]; then
         echo "MISSING-ANCHOR:STATS-csv"
         return
@@ -132,7 +132,7 @@ PY
 # joined by '|'; a missing file or column is reported as MISSING-ANCHOR.
 stats_column() {
     local dir="$1" column="$2" file
-    file=$(ls "$dir"/*STATS*.csv 2>/dev/null | head -1)
+    file=$(ls "$dir"/*STATS*.csv 2>/dev/null | head -1) || file=""
     if [[ -z "$file" ]]; then
         echo "MISSING-ANCHOR:STATS-csv"
         return

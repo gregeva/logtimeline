@@ -136,7 +136,7 @@ read_resolved_unit() {
         fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr (resolved-unit probe)")
     fi
 
-    resolved_unit=$(grep -aE '^duration_unit_resolved:' "$vfile" | awk '{print $2}')
+    resolved_unit=$(grep -aE '^duration_unit_resolved:' "$vfile" | awk '{print $2}') || resolved_unit=""
     if [[ -z "$resolved_unit" ]]; then
         echo "  FAIL  $current_scenario :: missing 'duration_unit_resolved' anchor in -V csv-output" >&2
         fail=$((fail + 1)); failures+=("$current_scenario :: missing duration_unit_resolved"); return 1

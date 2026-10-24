@@ -151,10 +151,13 @@ fail_with() {
     failures+=("$current_scenario :: $label")
 }
 
-# check <label> <actual> <expected> <asserts> <produced_by> <contract>
+# check <label> <actual> <expected> <asserts> <produced_by> <contract> [run_free]
+# run_free names the input of a check that does not depend on $LTL; the PASS
+# line then ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 check() {
     if [[ -n "$2" && "$2" == "$3" ]]; then
-        pass_with "$1 ($2)"
+        pass_with "$1 ($2)${7:+ [run-free: $7]}"
     else
         fail_with "$1" "$4" "$5" "$6" "expected: $3" "actual:   ${2:-MISSING-ANCHOR}"
     fi
@@ -477,7 +480,7 @@ scenario_help_rows() {
     check "-D in --help" "$(grep -cE '^\s*-D, +--debug ' <<< "$help")" "1" \
         '-D, --debug has a --help row' 'print_help() in ltl' "$C_HELP"
     check "-D in docs/usage.md" "$(grep -c '^| `-D, --debug` |' "$REPO_DIR/docs/usage.md")" "1" \
-        '-D, --debug has a docs/usage.md row' 'docs/usage.md' "$C_HELP"
+        '-D, --debug has a docs/usage.md row' 'docs/usage.md' "$C_HELP" 'docs/usage.md'
     # An absence read on a --help that printed no option table holds; the -D
     # row, checked above, is the table's evidence.
     if ! grep -qE '^\s*-D, +--debug ' <<< "$help"; then
