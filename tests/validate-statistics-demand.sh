@@ -197,7 +197,9 @@ assert_command() {
     : "${produced_by:?assert_command requires produced_by}"
     : "${contract:?assert_command requires contract}"
 
-    if eval "$command" >/dev/null 2>&1; then
+    # In a subshell: an unbound name or an exit in the command ends that, not
+    # the harness (HARNESS-DESIGN.md shape 15).
+    if ( eval "$command" ) >/dev/null 2>&1; then
         echo "  PASS  $current_scenario :: $label"
         pass=$((pass + 1))
     else
@@ -762,8 +764,8 @@ assert_line "$out" \
     produced_by 'emit_benchmark_data_verbose() in ltl (re-emitted $stats_population_messages)' \
     contract    'tests/HARNESS-DESIGN.md section Counters serving benchmark attribution — one source, two surfaces'
 assert_command \
-    command     "! grep -qE 'TOP (OVERALL|HIGHLIGHTED) MESSAGES' '$out.plain'" \
-    label       'neither messages-table header is rendered' \
+    command     "grep -qE '^[[:space:]]+timestamp[[:space:]]+legend[[:space:]]' '$out.plain' && ! grep -qE 'TOP (OVERALL|HIGHLIGHTED) MESSAGES' '$out.plain'" \
+    label       'neither messages-table header is rendered (the timeline is)' \
     asserts     'The message summary table is skipped entirely - not printed empty, and not printed with a header only' \
     produced_by 'pipeline_render() in ltl (print_message_summary is not called when no message is retained)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
@@ -836,8 +838,8 @@ assert_command \
     produced_by 'pipeline_render() in ltl (STATS CSV open, gated only on the CSV request)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
 assert_command \
-    command     "! ls '$CSV_ONLY_DIR'/*-LTL-MESSAGES-*.csv" \
-    label       'no MESSAGES CSV file is created' \
+    command     "ls '$CSV_ONLY_DIR'/*-LTL-STATS-*.csv && ! ls '$CSV_ONLY_DIR'/*-LTL-MESSAGES-*.csv" \
+    label       'no MESSAGES CSV file is created (the STATS CSV is)' \
     asserts     'The MESSAGES CSV is the per-message store written out: with nothing retained no file is created, not even a header-only one' \
     produced_by 'pipeline_render() in ltl (MESSAGES CSV open gated on message retention)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'

@@ -693,7 +693,7 @@ counts) is then checked for a call inside `$( )`.
 | 3 | An absence check | an empty capture, or an error message, holds none of the text | the run's exit 0 and a non-empty capture first; on an empty capture the check is a FAIL |
 | 4 | A width or shape check over every line or record | an empty capture, or one without the table, has no line or record to break the rule | the capture is non-empty first, and an inspector that walks records fails when it checked none; `assert_no_soft_wrap` fails an empty capture itself |
 | 5 | A presence check the seed satisfies | a fixture, or an earlier run, already holds a line of the right shape | look up the row or key this run writes (its date, its value), never any line of the shape |
-| 6 | A refusal asserted by its exit code alone | any failure exits non-zero | the exit code and the message both |
+| 6 | A refusal asserted by its exit code alone | any failure exits non-zero; an exit-code check counts a pass of its own even when the next check reads the message | the exit code and the message both, in one check: the message is the exit check's evidence |
 | 7 | A count compared to 0 over source read through `$LTL` | a stub's source holds none of what is counted | a presence check, first, of an anchor the source always carries (the sub the count is about) |
 | 8 | The runtime-warning check counted as a pass | an empty standard error holds no warning | count it only after the run's exit code and capture are checked |
 | 9 | A path derived from the location of `$LTL` | a stub's directory holds no checkout | derive it from `REPO_DIR` |
@@ -712,7 +712,12 @@ take, each counting the run's failure once and skipping what reads it:
   (`<capture>.rc`) and counts one FAIL on a non-zero exit or an empty capture;
 - a check names the captures it reads (a `reads` field on `assert_command`,
   or a `produced <tag> <pattern> <label>` guard that also fails the check when
-  the run lacks the line it reads), and is skipped when one of them failed;
+  the run lacks the line it reads), and is skipped when one of them failed; a
+  check whose first argument is its capture (`assert_line`, `assert_absent`)
+  skips it when the capture's `.rc` records a failure, so only the checks that
+  read something else name their captures;
+- the steps that edit or read what a run writes besides its capture (an index
+  file, a CSV) are skipped with its checks when that run failed;
 - a scenario that needs an input the harness failed to obtain is skipped
   whole (`needs <scenario> <input>`).
 

@@ -198,31 +198,38 @@ assert_no_line() {
     fi
 }
 
-# Assert the captured ltl exit code matches an expected value.
+# Assert the captured ltl exit code matches an expected value, and that the
+# run wrote the line it always writes on that outcome (`evidence`, a pattern,
+# `in` its capture): a run that printed nothing exits 0 too, and any failure
+# exits non-zero (HARNESS-DESIGN.md Trap 13).
 assert_exit() {
     local actual="$1"
     local expected="$2"
     shift 2
-    local asserts produced_by contract
+    local evidence in asserts produced_by contract
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            evidence)    evidence="$2";    shift 2 ;;
+            in)          in="$2";          shift 2 ;;
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
             *) echo "assert_exit: unknown field '$1'"; exit 2 ;;
         esac
     done
+    : "${evidence:?assert_exit requires evidence}"
+    : "${in:?assert_exit requires in}"
     : "${asserts:?assert_exit requires asserts}"
     : "${produced_by:?assert_exit requires produced_by}"
     : "${contract:?assert_exit requires contract}"
 
-    if [[ "$actual" -eq "$expected" ]]; then
+    if [[ "$actual" -eq "$expected" ]] && grep -qE -- "$evidence" "$in"; then
         echo "  PASS  $current_scenario :: exit=$expected"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario"
-        echo "        expected exit: $expected"
-        echo "        actual exit:   $actual"
+        echo "        expected exit: $expected, and a line matching $evidence in $in"
+        echo "        actual exit:   $actual$(grep -qE -- "$evidence" "$in" || echo ", no such line")"
         echo "        asserts:       $asserts"
         echo "        produced_by:   $produced_by"
         echo "        contract:      $contract"
@@ -422,6 +429,7 @@ scenario_all_topics_render() {
         check_capture_warnings "$out"
 
         assert_exit "$ec" 0 \
+            evidence    'See also' in "$out" \
             asserts     "ltl --explain <known-topic> exits 0 after emitting the topic" \
             produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch block)' \
             contract    'Issue #261: every known topic in %explain_topics is renderable'
@@ -533,11 +541,12 @@ scenario_so_names_explain() {
     for so_name in bytes_sum bytes_occurrences; do
         result=$(run_ltl "so-name-$so_name" --explain "$so_name")
         check_capture_warnings "${result#*:}"
+        local refused="${result#*:}"
         assert_exit "${result%%:*}" 1 \
+            evidence    "unknown --explain topic '$so_name'" in "${refused%.txt}.stderr" \
             asserts     "ltl --explain $so_name stays an unknown topic: neither a sum nor a metric's occurrences has a topic" \
             produced_by 'resolve_explain_topic() in ltl' \
             contract    "$contract"
-        local refused="${result#*:}"
         assert_line "${refused%.txt}.stderr" \
             pattern     "unknown --explain topic '$so_name'" \
             asserts     "The refusal is the unknown-topic error naming $so_name, not some other failure" \
@@ -557,6 +566,7 @@ scenario_registry() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 0 \
+        evidence    '^STATISTICS$' in "$out" \
         asserts     "ltl --explain (no argument) exits 0 after printing the topic registry" \
         produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch block, empty-string branch)' \
         contract    'Issue #261: bare --explain prints the grouped registry'
@@ -617,6 +627,7 @@ scenario_unknown_topic() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 1 \
+        evidence    "unknown --explain topic 'nope'" in "${out%.txt}.stderr" \
         asserts     "ltl --explain <unknown-topic> exits 1 with an error" \
         produced_by 'adapt_to_command_line_options() in ltl (die print_usage on unknown topic)' \
         contract    'Issue #261: unknown topics are a hard error, not silent fall-through'
@@ -641,6 +652,7 @@ scenario_help_statistics() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 0 \
+        evidence    '^STATISTICS$' in "$out" \
         asserts     "ltl --help statistics exits 0 after printing the index" \
         produced_by 'adapt_to_command_line_options() in ltl (--help dispatch, statistics branch)' \
         contract    'Issue #261: --help statistics is a recognized topic'
@@ -709,6 +721,7 @@ scenario_help_unknown() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 1 \
+        evidence    "unknown --help topic 'bogus'" in "${out%.txt}.stderr" \
         asserts     "ltl --help <unknown-topic> exits 1 with an error" \
         produced_by 'adapt_to_command_line_options() in ltl (die print_usage on unknown --help topic)' \
         contract    'Issue #261: unknown --help topics are a hard error'
@@ -733,6 +746,7 @@ scenario_help_bare() {
     check_capture_warnings "$out"
 
     assert_exit "$ec" 0 \
+        evidence    '^USAGE$' in "$out" \
         asserts     "Bare ltl --help still exits 0 and prints full help (backward-compatibility)" \
         produced_by 'adapt_to_command_line_options() in ltl (--help dispatch, empty-string branch)' \
         contract    'Issue #261: extending --help to accept an optional argument must not regress bare --help'
@@ -762,6 +776,7 @@ scenario_reflow() {
         check_capture_warnings "$out"
 
         assert_exit "$ec" 0 \
+            evidence    '^KURTOSIS$' in "$out" \
             asserts     "ltl --tw $w --explain kurtosis exits 0" \
             produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch)' \
             contract    'Issue #261: --terminal-width override controls reflow without affecting exit code'
@@ -1307,6 +1322,7 @@ scenario_technique_topics_render() {
         check_capture_warnings "$out"
 
         assert_exit "$ec" 0 \
+            evidence    '^  See also$' in "$out" \
             asserts     "ltl --explain $topic exits 0 after emitting the technique-family page" \
             produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch block)' \
             contract    'Issue #504 AC2: every technique-family topic is reachable by the distinctive words of its name in kebab case'
@@ -1647,6 +1663,7 @@ scenario_load_over_time_reading() {
     local out="${result#*:}"
     check_capture_warnings "$out"
     assert_exit "$ec" 0 \
+        evidence    '^  See also$' in "$out" \
         asserts     "ltl --explain load-over-time exits 0" \
         produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch)' \
         contract    'features/652-load-over-time-reading.md AC1-AC6: the page under assertion must render'

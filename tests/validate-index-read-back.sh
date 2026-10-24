@@ -175,25 +175,58 @@ current_scenario=""
 # ---------------------------------------------------------------------------
 
 # Run ltl in the current cwd, capture stdout to a temp file (stderr beside it
-# as <capture>.stderr), echo path.
+# as <capture>.stderr), echo path. run_ltl runs inside $( ), where a failure
+# it counted would be lost (HARNESS-DESIGN.md Trap 12), so it records the
+# run's outcome beside the capture as <capture>.rc: the exit code, "empty"
+# when it exited 0 having printed nothing, or "no-section" when a run asked
+# for -V index-read-back printed no such section.
 # Usage: out=$(run_ltl <ltl args...>)
 run_ltl() {
-    local outfile
+    local outfile rc=0
     outfile=$(mktemp)
-    "$LTL" "$@" > "$outfile" 2>"$outfile.stderr" || true
+    "$LTL" "$@" > "$outfile" 2>"$outfile.stderr" || rc=$?
+    if [[ "$rc" == 0 && ! -s "$outfile" ]]; then
+        rc=empty
+    elif [[ "$rc" == 0 && " $* " == *" -V index-read-back "* ]] && ! grep -q '^=== index-read-back ===$' "$outfile"; then
+        rc=no-section
+    fi
+    echo "$rc" > "$outfile.rc"
     echo "$outfile"
 }
 
-# Runtime-warning cleanliness for a run_ltl/run_ltl_v capture (its stderr
-# lives beside the captured stdout as <capture>.stderr). Runs in the main
-# shell so the fail counters persist - a command-substitution subshell could
-# not update them. HARNESS-DESIGN.md section Runtime-warning cleanliness.
-check_capture_warnings() {
+# failed_run CAPTURE: the run that wrote CAPTURE recorded an outcome other
+# than 0. The checks that read it, or the index it wrote, are skipped and
+# count nothing; check_run counted the failure once (HARNESS-DESIGN.md
+# Trap 13).
+failed_run() {
+    [[ -f "$1.rc" && "$(cat "$1.rc")" != 0 ]]
+}
+
+# Called in the main shell after each run, so the counters persist: a failed
+# run is one FAIL; a run that completed has its stderr checked for runtime
+# warnings (HARNESS-DESIGN.md section Runtime-warning cleanliness).
+check_run() {
     local capture="$1"
+    if failed_run "$capture"; then
+        echo "  FAIL  $current_scenario :: ltl run failed ($(cat "$capture.rc"))"
+        echo "        asserts:     the scenario's ltl run exits 0 and writes what its checks read"
+        echo "        produced_by: the run as a whole in ltl (stderr names where it stopped)"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13 - a check made against a run that did not happen is skipped, its cause counted once"
+        sed 's/^/        | /' "$capture.stderr" | head -5
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: ltl run failed")
+        return 0
+    fi
     if ! assert_no_runtime_warnings "$capture.stderr" "$current_scenario"; then
         fail=$((fail + 1))
         failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
     fi
+}
+
+# The steps after a run that writes the index edit or read what it wrote; that
+# run failed (check_run counted it), so they are skipped.
+skip_rest() {
+    echo "  SKIP  $current_scenario :: the steps that edit or read its index (the run that writes it failed)"
 }
 
 # Convenience: run ltl with -V index-read-back and the COMMON flags,
@@ -380,6 +413,10 @@ assert_line() {
     : "${produced_by:?assert_line requires produced_by}"
     : "${contract:?assert_line requires contract}"
 
+    if failed_run "$outfile"; then
+        echo "  SKIP  $current_scenario :: $pattern (its run failed)"
+        return 0
+    fi
     if grep -qE "$pattern" "$outfile"; then
         echo "  PASS  $current_scenario :: $pattern"
         pass=$((pass + 1))
@@ -415,6 +452,10 @@ assert_no_line() {
     : "${produced_by:?assert_no_line requires produced_by}"
     : "${contract:?assert_no_line requires contract}"
 
+    if failed_run "$outfile"; then
+        echo "  SKIP  $current_scenario :: !$pattern (its run failed)"
+        return 0
+    fi
     if grep -qE "$pattern" "$outfile"; then
         echo "  FAIL  $current_scenario"
         echo "        pattern:     !$pattern (unexpectedly present)"
@@ -435,10 +476,12 @@ assert_no_line() {
 # comparisons). Required named fields: command, label, asserts,
 # produced_by, contract. `label` is a short human-readable summary of
 # what the command is checking (used in PASS lines, where the command
-# itself would be too verbose).
+# itself would be too verbose). A command that reads what runs wrote (their
+# captures, or the index they write) names those runs' captures in
+# `reads "CAPTURE ..."`, and is skipped when one of them failed.
 # Reads $current_scenario for the scenario label.
 assert_command() {
-    local command label asserts produced_by contract
+    local command label asserts produced_by contract reads=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -446,6 +489,7 @@ assert_command() {
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            reads)       reads="$2";       shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -455,7 +499,16 @@ assert_command() {
     : "${produced_by:?assert_command requires produced_by}"
     : "${contract:?assert_command requires contract}"
 
-    if eval "$command"; then
+    local capture
+    for capture in $reads; do
+        if failed_run "$capture"; then
+            echo "  SKIP  $current_scenario :: $label (its run failed)"
+            return 0
+        fi
+    done
+    # In a subshell: an unbound name or an exit in the command ends that, not
+    # the harness (HARNESS-DESIGN.md shape 15).
+    if ( eval "$command" ); then
         echo "  PASS  $current_scenario :: $label"
         pass=$((pass + 1))
     else
@@ -557,7 +610,7 @@ scenario_cold_no_index() {
 
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -566,6 +619,7 @@ scenario_cold_no_index() {
         contract    'features/179-index-read-back.md section "-V verbose output" Layer 1 - Run-level summary; locked index_used field'
 
     assert_command \
+        reads       "$out" \
         command     '[[ -f ltl-index.csv ]] && grep -q "^file," ltl-index.csv && grep -q "^selection," ltl-index.csv' \
         label       'cold run writes index with file and selection rows' \
         asserts     'A cold run must still write a fresh ltl-index.csv at end-of-run carrying at least one file row and one selection row so the next run has a warm index to read back' \
@@ -580,7 +634,7 @@ scenario_warm_unfiltered() {
     seed_from_fixture
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -621,7 +675,7 @@ scenario_cold_filtered_tier2_fallback() {
     delete_index_rows "entry_type=selection AND filters=-dmin=50"
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -642,6 +696,7 @@ scenario_cold_filtered_tier2_fallback() {
         contract    'features/179-index-read-back.md section "-V verbose output" Layer 1 - Run-level summary; locked field'
 
     assert_command \
+        reads       "$out" \
         command     'grep -q "^selection,.*,-dmin=50$" ltl-index.csv' \
         label       'selection row written for -dmin=50' \
         asserts     'After a Tier 2 fallback run, the end-of-run write appends a fresh selection row for the requested filter signature so the next run with the same filters hits Tier 1' \
@@ -658,7 +713,7 @@ scenario_warm_tier1_filtered() {
     seed_from_fixture
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -694,7 +749,7 @@ scenario_warm_tier2_different_filters() {
     seed_from_fixture
     local out
     out=$(run_ltl_v -dmin 100 "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  lookup: tier_2_file$' \
@@ -709,6 +764,7 @@ scenario_warm_tier2_different_filters() {
         contract    'features/179-index-read-back.md section "-V verbose output" Layer 1'
 
     assert_command \
+        reads       "$out" \
         command     'grep -q "^selection,.*,-dmin=50$" ltl-index.csv && grep -q "^selection,.*,-dmin=100$" ltl-index.csv' \
         label       'both -dmin=50 and -dmin=100 selection rows preserved after write' \
         asserts     'After the run, the end-of-run write must preserve the pre-existing -dmin=50 selection row AND append a new -dmin=100 selection row - the write side never discards selection rows for filter signatures it did not see this run' \
@@ -728,12 +784,12 @@ scenario_stale_mtime() {
     cp "$ACCESS_LOG" "$local_log"
     local seed_out
     seed_out=$(run_ltl $COMMON -V index-read-back "$local_log")
-    check_capture_warnings "$seed_out"
+    check_run "$seed_out"
     sleep 1
     touch "$local_log"   # advance mtime past stored value
     local out
     out=$(run_ltl_v "$local_log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -759,11 +815,12 @@ scenario_stale_size() {
     cp "$ACCESS_LOG" "$local_log"
     local seed_out
     seed_out=$(run_ltl $COMMON -V index-read-back "$local_log")
-    check_capture_warnings "$seed_out"
+    check_run "$seed_out"
+    if failed_run "$seed_out"; then skip_rest; return 0; fi
     edit_index_row "entry_type=file" "file_size=42"
     local out
     out=$(run_ltl_v "$local_log")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -798,7 +855,7 @@ scenario_drift_refresh_tier1() {
     edit_index_row "entry_type=selection AND filters=-dmin=50" "duration_max=$narrowed"
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -828,7 +885,7 @@ scenario_drift_refresh_tier1() {
     current_scenario="drift-refresh-tier1-recovery"
     local out2
     out2=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
-    check_capture_warnings "$out2"
+    check_run "$out2"
 
     assert_line "$out2" \
         pattern     '^drift_detected: no$' \
@@ -858,7 +915,7 @@ scenario_drift_refresh_tier2() {
     edit_index_row "entry_type=file" "duration_max=$narrowed"
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^  lookup: tier_2_file$' \
@@ -889,7 +946,7 @@ scenario_multi_file_all_fresh_tier2_unfiltered() {
     delete_index_rows "entry_type=selection"
     local out
     out=$(run_ltl_v "$ACCESS_LOG" "$SCRIPT_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -898,6 +955,7 @@ scenario_multi_file_all_fresh_tier2_unfiltered() {
         contract    'features/179-index-read-back.md section "-V verbose output" Layer 1; section Behavior - Multi-file aggregation'
 
     assert_command \
+        reads       "$out" \
         command     "[[ \"\$(grep -c '^  lookup: tier_2_file\$' \"$out\" || true)\" -eq 2 ]]" \
         label       'both files report tier_2_file' \
         asserts     'In a multi-file run, each file produces its own per-file lookup block - when all files fall back to Tier 2, the output contains exactly one tier_2_file line per file' \
@@ -925,7 +983,7 @@ scenario_multi_file_all_fresh_tier1() {
     seed_from_fixture
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG" "$SCRIPT_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -934,6 +992,7 @@ scenario_multi_file_all_fresh_tier1() {
         contract    'features/179-index-read-back.md section "-V verbose output" Layer 1'
 
     assert_command \
+        reads       "$out" \
         command     "[[ \"\$(grep -c '^  lookup: tier_1_selection\$' \"$out\" || true)\" -eq 2 ]]" \
         label       'both files report tier_1_selection' \
         asserts     'In a multi-file run with matching selection rows for both files, each per-file lookup block independently reports tier_1_selection - multi-file aggregation does not collapse or share per-file lookup results' \
@@ -951,7 +1010,7 @@ scenario_multi_file_mixed_tiers() {
     delete_index_rows "entry_type=selection AND file_path=$SCRIPT_LOG AND filters=-dmin=50"
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG" "$SCRIPT_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -990,12 +1049,12 @@ scenario_multi_file_one_stale() {
     cp "$SCRIPT_LOG" "$f2"
     local seed_out
     seed_out=$(run_ltl $COMMON -V index-read-back "$f1" "$f2")
-    check_capture_warnings "$seed_out"
+    check_run "$seed_out"
     sleep 1
     touch "$f1"   # advance only $f1's mtime
     local out
     out=$(run_ltl_v "$f1" "$f2")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -1029,7 +1088,7 @@ scenario_malformed_index() {
     corrupt_index_file malform
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: no$' \
@@ -1038,6 +1097,7 @@ scenario_malformed_index() {
         contract    'features/179-index-read-back.md section Behavior - Malformed index handling; section Acceptance criteria'
 
     assert_command \
+        reads       "$out" \
         command     'perl -MText::CSV -e '"'"'
             my $csv = Text::CSV->new({binary=>1, eol=>$/});
             open my $f, "<", "ltl-index.csv" or exit 1;
@@ -1060,7 +1120,7 @@ scenario_missing_bound_column() {
     delete_index_rows "entry_type=selection"   # force Tier 2
     local out
     out=$(run_ltl_v "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
 
     assert_line "$out" \
         pattern     '^index_used: yes$' \
@@ -1089,7 +1149,7 @@ scenario_expired_selection_entry() {
     set_entry_date "entry_type=selection AND filters=-dmin=50" 91
     local out
     out=$(run_ltl_v -dmin 50 "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
     # The expired selection row is purged at end-of-run write per #46 logic;
     # at read-back time it may still match Tier 1 (read-back doesn't expire).
     # The acceptance criterion is that after the run, the prior expired row
@@ -1102,6 +1162,7 @@ scenario_expired_selection_entry() {
     age=$(perl -MTime::Local=timegm -e 'my ($y,$mo,$d,$h,$mi,$s) = ($ARGV[0] // "") =~ /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)$/ or do { print -1; exit }; print time() - timegm($s,$mi,$h,$d,$mo-1,$y)' "$refreshed")
 
     assert_command \
+        reads       "$out" \
         command     "[ '$age' -ge 0 ] && [ '$age' -lt 86400 ]" \
         label       "the -dmin=50 selection row is rewritten with a current entry_date (was 91 days old; now ${refreshed:-absent}, age ${age}s)" \
         asserts     'A selection row with entry_date older than the retention horizon (91 days here) is replaced by a fresh selection row at end-of-run write - read-back itself does not expire rows, but the write side does, so expiration is self-healing on the next run' \
@@ -1120,15 +1181,16 @@ scenario_signature_canonicalization() {
     # is written and can be re-matched.
     local outA outB sigA sigB
     outA=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -e GET -e POST "$ACCESS_LOG")
-    check_capture_warnings "$outA"
+    check_run "$outA"
     sigA=$(extract_v_value "$outA" 'index_filter_signature')
 
     outB=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -e POST -e GET "$ACCESS_LOG")
-    check_capture_warnings "$outB"
+    check_run "$outB"
     sigB=$(extract_v_value "$outB" 'index_filter_signature')
 
     assert_command \
-        command     "[ \"$sigA\" = \"$sigB\" ]" \
+        reads       "$outA $outB" \
+        command     "[ -n \"$sigA\" ] && [ \"$sigA\" = \"$sigB\" ]" \
         label       "permuted intra-flag order yields identical signature ($sigA)" \
         asserts     'serialize_filters() sorts the values within each repeated flag, so the same logical selection produces one byte-identical filter signature regardless of the order the values were given on the command line' \
         produced_by 'serialize_filters() in ltl (intra-flag value sort), surfaced as index_filter_signature by emit_index_readback_verbose()' \
@@ -1167,13 +1229,13 @@ scenario_filtered_tier2_no_leak() {
     # second run so it exercises the same Tier-2 path.
     local out1 out2 max1 max2
     out1=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -hm duration -dmin 50 "$ACCESS_LOG")
-    check_capture_warnings "$out1"
+    check_run "$out1"
     max1=$(extract_v_value "$out1" 'heatmap_preseed_max')
 
     delete_index_rows "entry_type=selection AND filters=-dmin=50"
     edit_index_row "entry_type=file AND file_path=$ACCESS_LOG" "duration_max=999999999"
     out2=$(PERL_PERTURB_KEYS=1 run_ltl $COMMON -V index-read-back -hm duration -dmin 50 "$ACCESS_LOG")
-    check_capture_warnings "$out2"
+    check_run "$out2"
     max2=$(extract_v_value "$out2" 'heatmap_preseed_max')
 
     assert_line "$out1" \
@@ -1183,6 +1245,7 @@ scenario_filtered_tier2_no_leak() {
         contract    'features/179-index-read-back.md section Behavior - Pre-seeded values (Tier 2 fallback)'
 
     assert_command \
+        reads       "$out1" \
         command     "[ \"$max1\" = \"$filtered_max\" ]" \
         label       "filtered Tier-2 heatmap max is the filtered max ($max1), not the inflated file-row value" \
         asserts     'A filtered run that falls back to Tier 2 is NOT pre-seeded with the whole-file maximum; the live pass discovers the filtered max cold, so the served heatmap max equals the filtered population max even when the file row holds a much larger (unfiltered or stale) value' \
@@ -1190,7 +1253,8 @@ scenario_filtered_tier2_no_leak() {
         contract    'features/179-index-read-back.md section Motivation - file-entry bounds over-state a filtered run; Issue #310 Fix A'
 
     assert_command \
-        command     "[ \"$max1\" = \"$max2\" ]" \
+        reads       "$out1 $out2" \
+        command     "[ -n \"$max1\" ] && [ \"$max1\" = \"$max2\" ]" \
         label       "served heatmap max is deterministic across runs ($max1)" \
         asserts     'The served heatmap max is identical across repeated invocations under hash-order perturbation, so the same filtered command reproduces the same auto-scaled maximum every run' \
         produced_by 'read_index_file() in ltl (tier-gated pre-seed) + live parse pass' \
@@ -1216,25 +1280,26 @@ scenario_index_means_fixed_precision() {
         rm -f ltl-index.csv
         if [[ "$cp" == default ]]; then out=$(run_ltl $COMMON "$SINGLE_SAMPLE_FIXTURE")
         else out=$(run_ltl $COMMON -cp "$cp" "$SINGLE_SAMPLE_FIXTURE"); fi
-        check_capture_warnings "$out"
-        v=$(read_index_column duration_mean 'entry_type=file')
+        check_run "$out"
+        v=$(read_index_column duration_mean 'entry_type=file') || v=""
         assert_command \
+            reads       "$out" \
             command     "[ \"$v\" = 128.75 ]" \
             label       "-cp $cp: the file row's duration_mean is 128.75 ('$v')" \
             asserts     'The index writes its means at two decimals whatever -cp the run was given: the index is a durable file compared across runs, so a per-run precision must not change what it holds for the same file' \
             produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
     done
     for row in file selection; do
-        v=$(read_index_column entry_type "entry_type=$row")
-        assert_command command "[ \"$v\" = $row ]" label "the index holds a $row row" \
+        v=$(read_index_column entry_type "entry_type=$row") || v=""
+        assert_command reads "$out" command "[ \"$v\" = $row ]" label "the index holds a $row row" \
             asserts 'The rows the cell reads below address exist, so an empty read is the cell and not a missing row' \
             produced_by 'write_index_file() in ltl' contract "$IDX616_CONTRACT"
-        v=$(read_index_column count_mean "entry_type=$row")
-        assert_command command "[ -z \"$v\" ]" label "$row row: count_mean is empty for a file with no count lines ('$v')" \
+        v=$(read_index_column count_mean "entry_type=$row") || v=""
+        assert_command reads "$out" command "[ -z \"$v\" ]" label "$row row: count_mean is empty for a file with no count lines ('$v')" \
             asserts 'A mean with no observation writes the empty cell every CSV surface writes for no data, not a placeholder' \
             produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
-        v=$(read_index_column count_min "entry_type=$row")
-        assert_command command "[ \"$v\" = - ]" label "$row row: the count_min bound keeps '-' ('$v')" \
+        v=$(read_index_column count_min "entry_type=$row") || v=""
+        assert_command reads "$out" command "[ \"$v\" = - ]" label "$row row: the count_min bound keeps '-' ('$v')" \
             asserts 'A missing bound keeps the - the read-back side reads as no bound' \
             produced_by 'write_index_file() in ltl' contract 'features/179-index-read-back.md (a missing bound is -); features/616-gated-mean-derivation.md D15'
     done
@@ -1248,9 +1313,9 @@ scenario_index_means_integral() {
         rm -f ltl-index.csv
         if [[ "$cp" == default ]]; then out=$(run_ltl $COMMON -i /gm/order "$GATED_ACCESS_FIXTURE")
         else out=$(run_ltl $COMMON -cp "$cp" -i /gm/order "$GATED_ACCESS_FIXTURE"); fi
-        check_capture_warnings "$out"
-        v=$(read_index_column duration_mean 'entry_type=selection')
-        assert_command command "[ \"$v\" = 50 ]" label "-cp $cp: a whole-number selection mean writes 50, not 50.00 ('$v')" \
+        check_run "$out"
+        v=$(read_index_column duration_mean 'entry_type=selection') || v=""
+        assert_command reads "$out" command "[ \"$v\" = 50 ]" label "-cp $cp: a whole-number selection mean writes 50, not 50.00 ('$v')" \
             asserts 'The formatter strips trailing zeros, so a mean that is a whole number carries no decimals' \
             produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
     done
@@ -1261,18 +1326,18 @@ scenario_index_bytes_counted() {
     echo "[$current_scenario]"
     local out occ bmin bmean stats smean
     out=$(run_ltl $COMMON -o -cp 2 "$SINGLE_SAMPLE_FIXTURE")
-    check_capture_warnings "$out"
-    occ=$(read_index_column file_bytes_occurrences 'entry_type=file')
-    bmin=$(read_index_column file_bytes_min 'entry_type=file')
-    bmean=$(read_index_column file_bytes_mean 'entry_type=file')
-    stats=$(ls ./*-LTL-STATS-*.csv 2>/dev/null | head -1)
-    smean=$([[ -n "$stats" ]] && perl -MText::CSV -e 'my $c=Text::CSV->new({binary=>1}); open my $f,"<",$ARGV[0] or die; my $h=$c->getline($f); my %i; @i{@$h}=0..$#$h; my $r=$c->getline($f); print $r->[$i{bytes_mean}] // ""' "$stats")
-    assert_command command "[ \"$occ\" = 12 ] && [ \"$bmin\" = 0 ] && [ \"$bmean\" = 18683.33 ]" \
+    check_run "$out"
+    occ=$(read_index_column file_bytes_occurrences 'entry_type=file') || occ=""
+    bmin=$(read_index_column file_bytes_min 'entry_type=file') || bmin=""
+    bmean=$(read_index_column file_bytes_mean 'entry_type=file') || bmean=""
+    stats=$({ ls ./*-LTL-STATS-*.csv 2>/dev/null || true; } | head -1)
+    smean=$([[ -n "$stats" ]] && perl -MText::CSV -e 'my $c=Text::CSV->new({binary=>1}); open my $f,"<",$ARGV[0] or die; my $h=$c->getline($f); my %i; @i{@$h}=0..$#$h; my $r=$c->getline($f); print $r->[$i{bytes_mean}] // ""' "$stats") || smean=""
+    assert_command reads "$out" command "[ \"$occ\" = 12 ] && [ \"$bmin\" = 0 ] && [ \"$bmean\" = 18683.33 ]" \
         label "the index counts the zero-byte response: occurrences $occ, min $bmin, mean $bmean" \
         asserts 'A zero-byte response is a bytes observation in the index as it is in both statistics stores: the count, the minimum and the mean include it' \
         produced_by 'read_and_process_logs() in ltl (the per-file index bytes accumulation) and write_index_file()' \
         contract 'features/616-gated-mean-derivation.md D17 (the index bytes population is the stores)'
-    assert_command command "[ \"$smean\" = \"$bmean\" ]" \
+    assert_command reads "$out" command "[ -n \"$smean\" ] && [ \"$smean\" = \"$bmean\" ]" \
         label "the STATS CSV under -cp 2 writes the same bytes mean ('$smean')" \
         asserts 'The index and the STATS CSV hold one bytes mean for one file' \
         produced_by 'write_index_file() and print_bar_graph() in ltl' \
@@ -1284,13 +1349,14 @@ scenario_index_heatmap_bytes_preseed() {
     echo "[$current_scenario]"
     local out v
     out=$(run_ltl $COMMON "$SINGLE_SAMPLE_FIXTURE")
-    check_capture_warnings "$out"
+    check_run "$out"
+    if failed_run "$out"; then skip_rest; return 0; fi
     edit_index_row 'entry_type=file' 'file_bytes_max=999999'
     edit_index_row 'entry_type=selection' 'file_bytes_max=999999'
     out=$(run_ltl_v -hm bytes "$SINGLE_SAMPLE_FIXTURE")
-    check_capture_warnings "$out"
+    check_run "$out"
     v=$(extract_v_value "$out" heatmap_preseed_max)
-    assert_command command "[ \"$v\" = 999999 ]" \
+    assert_command reads "$out" command "[ \"$v\" = 999999 ]" \
         label "-hm bytes is pre-seeded from the index's bytes bound ($v)" \
         asserts 'The bytes heatmap takes its starting range from the bytes bounds the index writes (file_bytes_min, file_bytes_max), as the duration heatmap does from its duration bounds' \
         produced_by 'read_index_file() in ltl (heatmap pre-seed) + emit_index_readback_verbose() (heatmap_preseed_max)' \
@@ -1312,8 +1378,9 @@ scenario_default_writes_no_index() {
     echo "[$current_scenario]"
     local out
     out=$(run_ltl $COMMON_DEFAULT -V index-read-back "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
     assert_command \
+        reads       "$out" \
         command     '[[ ! -e ltl-index.csv ]] && ! compgen -G ".ltl-index.*.tmp" >/dev/null' \
         label       'a default run leaves no ltl-index.csv and no temp index behind' \
         asserts     'A run without -idx does not write the index: neither ltl-index.csv nor its write-side temp file exists afterwards in a directory that held neither' \
@@ -1335,9 +1402,10 @@ scenario_default_leaves_index_untouched() {
     sum_before=$(shasum ltl-index.csv | cut -d' ' -f1)
     mtime_before=$(index_mtime)
     out=$(run_ltl $COMMON_DEFAULT -V index-read-back "$ACCESS_LOG")
-    check_capture_warnings "$out"
+    check_run "$out"
     sum_after=$(shasum ltl-index.csv | cut -d' ' -f1)
     assert_command \
+        reads       "$out" \
         command     "[[ '$sum_after' == '$sum_before' && \"\$(index_mtime)\" == '$mtime_before' ]]" \
         label       'a default run leaves an existing ltl-index.csv byte-identical, its modification time unchanged' \
         asserts     'A run without -idx neither rewrites nor touches an index already in the directory, even one holding a fresh entry for the file being read' \
@@ -1354,6 +1422,7 @@ scenario_default_leaves_index_untouched() {
         produced_by 'emit_index_readback_verbose() in ltl (no %index_preseed entry: lookup none)' \
         contract    "$IDX708_CONTRACT"
     assert_command \
+        reads       "$out" \
         command     "! grep -qi 'index' '$out.stderr'" \
         label       'nothing about the index on stderr' \
         asserts     'The deprecation is silent: a default run beside an existing index prints no notice, warning or other line about the index' \
@@ -1370,16 +1439,18 @@ scenario_no_index_is_noop() {
     sum_before=$(shasum ltl-index.csv | cut -d' ' -f1)
     mtime_before=$(index_mtime)
     out_default=$(run_ltl $COMMON_DEFAULT "$ACCESS_LOG")
-    check_capture_warnings "$out_default"
+    check_run "$out_default"
     out_ni=$(run_ltl $COMMON_DEFAULT -ni "$ACCESS_LOG")
-    check_capture_warnings "$out_ni"
+    check_run "$out_ni"
     assert_command \
+        reads       "$out_default $out_ni" \
         command     "grep -Eq 'command-line options: .* -ni([^a-z-]|\$)' '$out_ni' && cmp -s <(grep -v 'command-line options:' '$out_default') <(grep -v 'command-line options:' '$out_ni') && cmp -s '$out_default.stderr' '$out_ni.stderr'" \
         label       'a -ni run prints what a default run prints, its echoed options line apart, on stdout and stderr' \
         asserts     '-ni is accepted and has no effect: no notice and no difference in output, except that the options line under the timeline echoes -ni as typed' \
         produced_by "the 'no-index|ni' GetOptions entry in ltl, read by nothing" \
         contract    "$IDX708_CONTRACT"
     assert_command \
+        reads       "$out_default $out_ni" \
         command     "[[ \"\$(shasum ltl-index.csv | cut -d' ' -f1)\" == '$sum_before' && \"\$(index_mtime)\" == '$mtime_before' ]]" \
         label       'neither the default nor the -ni run touched the existing index' \
         asserts     'A run with -ni, like a default run, leaves an existing index byte-identical with its modification time unchanged' \
@@ -1387,8 +1458,9 @@ scenario_no_index_is_noop() {
         contract    "$IDX708_CONTRACT"
     rm -f ltl-index.csv
     out_both=$(run_ltl $COMMON -ni "$ACCESS_LOG")
-    check_capture_warnings "$out_both"
+    check_run "$out_both"
     assert_command \
+        reads       "$out_both" \
         command     '[[ "$(grep -c "^file," ltl-index.csv 2>/dev/null || true)" -ge 1 ]]' \
         label       '-idx -ni writes the index, as -idx alone does' \
         asserts     '-ni does not switch off an index that -idx turns on: the run writes ltl-index.csv with a file row' \
@@ -1432,11 +1504,12 @@ scenario_index_run_precision() {
         IFS='|' read -r tp file want_first want_tp <<< "$row"
         rm -f ltl-index.csv
         if [[ "$tp" == - ]]; then out=$(run_ltl $COMMON "$file"); else out=$(run_ltl $COMMON -tp "$tp" "$file"); fi
-        check_capture_warnings "$out"
+        check_run "$out"
         for entry in file selection; do
-            row_first=$(read_index_column first_timestamp "entry_type=$entry")
-            row_tp=$(read_index_column ts_precision "entry_type=$entry")
+            row_first=$(read_index_column first_timestamp "entry_type=$entry") || row_first=""
+            row_tp=$(read_index_column ts_precision "entry_type=$entry") || row_tp=""
             assert_command \
+                reads       "$out" \
                 command     "[ \"$row_first\" = \"$want_first\" ] && [ \"$row_tp\" = \"$want_tp\" ]" \
                 label       "-tp $tp: the $entry row writes $want_first under $want_tp ('$row_first', '$row_tp')" \
                 asserts     'The index writes first and last timestamps at the precision the run resolved (whole seconds at minute precision, the date-time form having nothing coarser), and every row, selection rows included, states that precision' \
@@ -1454,11 +1527,13 @@ drift_case() {
     local label="$1" write_tp="$2" edit="$3" read_tp="$4" want="$5" out
     rm -f ltl-index.csv
     if [[ "$write_tp" == - ]]; then out=$(run_ltl $COMMON three.log); else out=$(run_ltl $COMMON -tp "$write_tp" three.log); fi
-    check_capture_warnings "$out"
+    check_run "$out"
+    if failed_run "$out"; then skip_rest; return 0; fi
     if [[ -n "$edit" ]]; then edit_index_row 'entry_type=selection' "$edit"; fi
     out=$(run_ltl_v -tp "$read_tp" three.log)
-    check_capture_warnings "$out"
+    check_run "$out"
     assert_command \
+        reads       "$out" \
         command     "grep -q '^index_used: yes\$' '$out' && grep -qE '$want' '$out'" \
         label       "$label" \
         asserts     'Drift is judged at the run'"'"'s precision, or at the stored row'"'"'s precision when that is coarser, with each row read at the precision it states (or its digits carry, for a row with -), comparing numbers' \
@@ -1483,12 +1558,14 @@ scenario_drift_runtime_precision() {
     local nine_out
     for read_tp in ns us; do
         rm -f ltl-index.csv
-        nine_out=$(run_ltl $COMMON -tp ns nine.log); check_capture_warnings "$nine_out"
+        nine_out=$(run_ltl $COMMON -tp ns nine.log); check_run "$nine_out"
+        if failed_run "$nine_out"; then skip_rest; continue; fi
         edit_index_row 'entry_type=selection' 'last_timestamp=2026-01-26T10:00:02.999999998'
-        nine_out=$(run_ltl_v -tp "$read_tp" nine.log); check_capture_warnings "$nine_out"
+        nine_out=$(run_ltl_v -tp "$read_tp" nine.log); check_run "$nine_out"
         local want='^drift_detected: no$'
         [[ "$read_tp" == ns ]] && want='^  last_timestamp: live=2026-01-26T10:00:02\.999999999 preseed=2026-01-26T10:00:02\.999999998 drifted=yes$'
         assert_command \
+            reads       "$nine_out" \
             command     "grep -q '^index_used: yes\$' '$nine_out' && grep -qE '$want' '$nine_out'" \
             label       "a nanosecond row narrowed by 1 ns read by a -tp $read_tp run: $([[ $read_tp == ns ]] && echo drifted || echo no drift)" \
             asserts     'At nanosecond precision the stored and live timestamps are compared exactly, as whole seconds and nanoseconds; at a coarser precision both round to it first' \
@@ -1501,13 +1578,16 @@ scenario_drift_runtime_precision() {
     # so its row is kept) rewrites the selection row at ms.
     local out file_tp sel_tp
     rm -f ltl-index.csv
-    out=$(run_ltl $COMMON -tp s three.log); check_capture_warnings "$out"
-    out=$(run_ltl $COMMON -tp ms three.log); check_capture_warnings "$out"
-    file_tp=$(read_index_column ts_precision 'entry_type=file')
-    sel_tp=$(read_index_column ts_precision 'entry_type=selection')
+    out=$(run_ltl $COMMON -tp s three.log); check_run "$out"
+    if failed_run "$out"; then skip_rest; return 0; fi
+    out=$(run_ltl $COMMON -tp ms three.log); check_run "$out"
+    if failed_run "$out"; then skip_rest; return 0; fi
+    file_tp=$(read_index_column ts_precision 'entry_type=file') || file_tp=""
+    sel_tp=$(read_index_column ts_precision 'entry_type=selection') || sel_tp=""
     edit_index_row 'entry_type=selection' 'last_timestamp=2026-01-26T10:00:03.788'
-    out=$(run_ltl_v -tp ms three.log); check_capture_warnings "$out"
+    out=$(run_ltl_v -tp ms three.log); check_run "$out"
     assert_command \
+        reads       "$out" \
         command     "[ \"$file_tp\" = s ] && [ \"$sel_tp\" = ms ] && grep -qE '^  last_timestamp: live=2026-01-26T10:00:03\.789 preseed=2026-01-26T10:00:03\.788 drifted=yes\$' '$out'" \
         label       "a selection row at ms beside a file row at s is judged at its own millisecond (file '$file_tp', selection '$sel_tp')" \
         asserts     'A selection row states its own precision, so a later run that rewrote it at a finer precision than the preserved file row is judged at the selection row'"'"'s precision' \
@@ -1525,7 +1605,7 @@ scenario_drift_numeric_structure() {
         print "$sub:$.: $_" if /^sub _(lt|gt)\b/;
     ' "$LTL" > stray-comparisons.txt
     assert_command \
-        command     "[ ! -s stray-comparisons.txt ]" \
+        command     "grep -q '^sub read_index_file ' '$LTL' && grep -q '^sub detect_index_drift ' '$LTL' && [ ! -s stray-comparisons.txt ]" \
         label       "read_index_file() and detect_index_drift() compare no timestamp as a string" \
         asserts     'Timestamps read back from the index are compared as the instants they name, never by string order' \
         produced_by 'read_index_file() and detect_index_drift() in ltl' \
@@ -1559,9 +1639,10 @@ scenario_bound_signature_unchanged() {
         rm -f ltl-index.csv
         # shellcheck disable=SC2086
         out=$(run_ltl $COMMON -V index-read-back $args "$BOUNDARY_FIXTURE")
-        check_capture_warnings "$out"
+        check_run "$out"
         sig=$(extract_v_value "$out" 'index_filter_signature')
         assert_command \
+            reads       "$out" \
             command     "[ \"$sig\" = \"$expected\" ]" \
             label       "$args -> $expected (got ${sig:-MISSING-ANCHOR})" \
             asserts     'The filter signature of a bound command line valid before the bound declaration is byte-identical to the base build: filter bounds sorted by short name as -<short>=<value>, highlight bounds absent' \
