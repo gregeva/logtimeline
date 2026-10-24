@@ -253,9 +253,9 @@ run_no_duration_scenario() {
         contract    'tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors - a zero-match absence check over an empty render would pass vacuously'
 
     assert_command \
-        command     "! grep -qE 'latency statistics|P50:' '$render'" \
+        command     "grep -q 'TOP OVERALL MESSAGES' '$render' && grep -q 'occurrences' '$render' && ! grep -qE 'latency statistics|P50:' '$render'" \
         label       "no timeline latency column renders when the source has no duration values" \
-        asserts     'A source with no observed durations must not render the timeline latency statistics column, and no fabricated P50/P95/P99/P999 cells (previously rendered as P50:0ms from zero-defaulted samples) may appear.' \
+        asserts     'A source with no observed durations must not render the timeline latency statistics column, and no fabricated P50/P95/P99/P999 cells (previously rendered as P50:0ms from zero-defaulted samples) may appear. Read only against a render carrying the occurrences graph and the messages table, the anchor above, so a render without them fails here too.' \
         produced_by 'build_column_layout() in ltl (show_latency gate on $durations_observed) and the duration-observation gate in read_and_process_logs()' \
         contract    'docs/usage.md section Metric extraction - columns appear only for metrics detected in the data; issue #345'
 

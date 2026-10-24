@@ -145,6 +145,19 @@ assert_absent() {
         echo "  SKIP  $current_scenario :: absent: $pattern (its run failed)"
         return
     fi
+    # A notices file holding MISSING-SECTION (notice_lines found no notices
+    # section) gives the absence nothing to be read against (Trap 13).
+    if grep -qx 'MISSING-SECTION' "$outfile"; then
+        echo "  FAIL  $current_scenario"
+        echo "        pattern:     $pattern (contracted ABSENT; nothing to read it against: the run printed no notices section)"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        echo "        (read in $outfile)"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: absent: $pattern (no notices section)")
+        return
+    fi
     if grep -qE "$pattern" "$outfile"; then
         echo "  FAIL  $current_scenario"
         echo "        pattern:     $pattern (contracted ABSENT, but found)"

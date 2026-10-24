@@ -482,9 +482,9 @@ assert_pair() {
     else
         emit_fail \
             label       "$short, $long" \
-            asserts     "Both the short form ($short) and long form ($long) appear on the same row of --help output, in the canonical 'short, long' order; missing-pair regressions cost the user a discoverable surface (memory: 'short forms required for every CLI option')" \
+            asserts     "Both the short form ($short) and long form ($long) appear on the same row of --help output, in the canonical 'short, long' order; missing-pair regressions cost the user a discoverable surface" \
             produced_by 'print_help() in ltl - the option-table row that registers this flag emits short+long together' \
-            contract    "MEMORY.md feedback_short_forms_required: every CLI flag in ltl must have both short and long form; 'no short form' decisions are errors that need amending before wiring" \
+            contract    "CLAUDE.md section Before writing or changing code - a new option has a short form, a long form, a print_help() row and a docs/usage.md row in the same commit" \
             detail      "no row matched '^[[:space:]]+${short}, +${long}' in stripped --help output"
     fi
 }

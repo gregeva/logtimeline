@@ -87,7 +87,9 @@ assert_line() {
 }
 
 # Contracted absence: a line matching `pattern` must NOT be present. A
-# missing capture is a hard failure, never a pass.
+# missing capture is a hard failure, never a pass, and so is a notices file
+# holding MISSING-SECTION (notice_lines found no notices section): the run
+# wrote nothing to read the absence against (tests/HARNESS-DESIGN.md Trap 13).
 assert_absent() {
     local outfile="$1"
     shift
@@ -110,6 +112,16 @@ assert_absent() {
         echo "  FAIL  $current_scenario :: capture file missing: $outfile" >&2
         fail=$((fail + 1))
         failures+=("$current_scenario :: missing capture for absence check")
+        return
+    fi
+    if grep -qx 'MISSING-SECTION' "$outfile"; then
+        echo "  FAIL  $current_scenario"
+        echo "        pattern:     $pattern (contracted ABSENT; nothing to read it against: the run printed no notices section)"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: absent: $pattern (no notices section)")
         return
     fi
     if grep -qE "$pattern" "$outfile"; then

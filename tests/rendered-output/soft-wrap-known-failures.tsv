@@ -12,4 +12,3 @@
 #
 # scenario<TAB>issue<TAB>surface
 errrate-diagnostics-highlighted-failure-w160	497	timeline legend grows with a highlighted category and the row is not re-fitted
-classification-percentages-w120-access-120	497	run options echo prints the raw command line without fitting it to the terminal width

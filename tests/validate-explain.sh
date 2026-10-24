@@ -1161,10 +1161,10 @@ scenario_pager_ansi() {
             print;
             exit;
         }
-    ' "$LTL/../ltl" 2>/dev/null)
+    ' "$LTL")
     # Fallback: scan the whole file for the less invocation.
     if [[ -z "$pager_default" ]]; then
-        pager_default=$(grep -oE "'less[^']*'" "$REPO_DIR/ltl" | head -1 | tr -d "'") || pager_default=""
+        pager_default=$(grep -oE "'less[^']*'" "$LTL" | head -1 | tr -d "'") || pager_default=""
     fi
     local probe="$TMP_DIR/pager-probe.txt"
     echo "$pager_default" > "$probe"
@@ -1172,21 +1172,19 @@ scenario_pager_ansi() {
         pattern     'less -R' \
         asserts     "Unix-default pager is 'less -R'; the -R flag tells less to interpret ANSI color escapes from the title banner rather than render them as literal ^[[Nm text. Plain 'less' would show the codes verbatim and confuse users." \
         produced_by 'pipe_to_pager() in ltl (Unix branch when $PAGER is unset)' \
-        contract    'Issue #261: pager configuration is part of the user-visible help/explain contract; regression here would re-introduce the ANSI-leak bug the user originally reported' \
-        run_free    "the checkout's ltl source"
+        contract    'Issue #261: pager configuration is part of the user-visible help/explain contract; regression here would re-introduce the ANSI-leak bug the user originally reported'
 
     current_scenario="pager-ansi:strip_ansi-exists"
     echo "[$current_scenario]"
     # Assert strip_ansi() function is defined in ltl source (safety net for
     # Windows `more` and fallback paths).
     local sym_probe="$TMP_DIR/sym-probe.txt"
-    grep -nE '^sub strip_ansi\b' "$REPO_DIR/ltl" > "$sym_probe" || true
+    grep -nE '^sub strip_ansi\b' "$LTL" > "$sym_probe" || true
     assert_line "$sym_probe" \
         pattern     '^[0-9]+:sub strip_ansi' \
         asserts     "strip_ansi() helper exists in ltl. It is the fallback for environments where the pager cannot interpret ANSI (notably legacy Windows \`more\`) and for the pager-failure path." \
         produced_by 'strip_ansi() in ltl' \
-        contract    'Issue #261: ANSI-stripping must be available as a fallback so the title banner cannot leak as literal text in any supported configuration' \
-        run_free    "the checkout's ltl source"
+        contract    'Issue #261: ANSI-stripping must be available as a fallback so the title banner cannot leak as literal text in any supported configuration'
 
     current_scenario="pager-ansi:strip_ansi-removes-CSI"
     echo "[$current_scenario]"

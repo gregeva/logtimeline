@@ -86,6 +86,10 @@ fail=0
 failures=()
 current_scenario=""
 
+# Every capture lives under the harness's own temp directory, removed on any
+# exit (tests/HARNESS-DESIGN.md Traps 9 and 10).
+TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
+
 # Run ltl with -V heatmap-palette and the standard suppression flag.
 # Captures combined output to a temp file whose path is handed back in
 # SECTION_OUT. Args after the function name are forwarded verbatim before the
@@ -95,7 +99,7 @@ current_scenario=""
 SECTION_OUT=""
 run_section() {
     local outfile rc=0
-    outfile=$(mktemp)
+    outfile=$(mktemp "$TMP_DIR/section.XXXXXX")
     SECTION_OUT="$outfile"
     # shellcheck disable=SC2086
     "$LTL" --disable-progress -ni $SHAPE -V heatmap-palette "$@" "$SCRIPT_LOG" > "$outfile" 2>"$outfile.stderr" || rc=$?
@@ -363,7 +367,7 @@ declare -A PLAIN_BG_NUM=(
     [red]=124 [orange]=166 [pink]=169 [teal]=29 [purple]=55
 )
 
-UDM_TMP=$(mktemp -d); trap 'rm -rf "$UDM_TMP"' EXIT
+UDM_TMP="$TMP_DIR/udm"; mkdir -p "$UDM_TMP"
 
 for f in "$UDM_FIXTURE" "$NO_VALUE_FIXTURE"; do
     if [[ ! -f "$f" ]]; then

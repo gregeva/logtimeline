@@ -1035,7 +1035,11 @@ scenario_collision_operands() {
     fi
     control="$TMP_DIR/hg-control.out"
     "$LTL" --disable-progress -ni -bs 1440 -oe --terminal-width 200 -hg rows \
-        -udm rows "$COLLISION_FIXTURE" > "$control" 2>/dev/null || true
+        -udm rows "$COLLISION_FIXTURE" > "$control" 2>"$control.stderr" || true
+    if ! assert_no_runtime_warnings "$control.stderr" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr-control-run")
+    fi
 
     assert_command \
         command     "grep -q 'rows:sum Distribution' '$hg' && grep -q 'rows:delta Distribution' '$hg'" \
@@ -1069,7 +1073,7 @@ scenario_collision_operands() {
         asserts     'Resolved names are unique, so the operand list no longer shows one name twice' \
         produced_by 'available_metric_names() in ltl' \
         contract    "$CONTRACT_482"
-    rm -f "$hg" "$hg.stderr" "$control" "$unknown" "$unknown.stderr"
+    rm -f "$hg" "$hg.stderr" "$control" "$control.stderr" "$unknown" "$unknown.stderr"
 }
 
 # ---------------------------------------------------------------------------

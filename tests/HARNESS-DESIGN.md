@@ -652,7 +652,7 @@ Three assertion shapes are true of a run that failed, and so pass against it:
 - **An absence check.** An error message, or an empty capture, contains none of the forbidden text.
 - **A presence check that the seed already satisfies.** A pattern that matches rows the fixture carried in passes whether or not the run wrote anything.
 
-Each one is preceded by a check that the run produced what it reads: exit 0 and a non-empty capture before a comparison or an absence check, and a lookup of the specific row or key the run writes (its date, its value) rather than any line of the right shape. When that check fails, the checks that read the capture are skipped, so the pass count holds only checks made against a real output; an absence or width check on an empty capture is itself a failure. A refusal is asserted by its exit code **and** its message, never the exit code alone, since any failure exits non-zero.
+Each one is preceded by a check that the run produced what it reads: exit 0 and the section, table or row the check reads present before a comparison or an absence check, and a lookup of the specific row or key the run writes (its date, its value) rather than any line of the right shape. A non-empty capture is not that evidence: a run that printed one line unrelated to what it was asked for has one. When that check fails, the checks that read the capture are skipped, so the pass count holds only checks made against a real output; an absence or width check on a capture without what it reads is itself a failure. A refusal is asserted by its exit code **and** its message, never the exit code alone, since any failure exits non-zero.
 
 A lookup inside `$( )` that finds nothing (`grep` with no match, a pipeline fed by a failed `ltl` under `pipefail`) stops a `set -e` harness mid-run, so every later scenario goes unreported. Such an assignment carries `|| var=""` and the empty value is then asserted on.
 
@@ -675,23 +675,27 @@ produced it. Then ask of that run:
 1. Had it exited non-zero and printed nothing, would the check pass, and would
    the harness still reach its summary?
 2. Had it exited 0 and printed nothing, the same two questions.
+3. Had it exited 0 having printed one line unrelated to what it was asked
+   for, the same two questions. Exit 0 and a non-empty capture are not
+   evidence of the section, table, row or file a check reads; only that
+   section, table, row or file is.
 
-A check that passes in either case is a case, unless it is **run-free**: its
+A check that passes in any of the three is a case, unless it is **run-free**: its
 input is a file under `docs/` or `features/`, a fixture, an artifact the
 harness writes itself, or `ltl`'s source text. Source read through `$LTL`
 stays read through it (`features/621-generated-read-loop-body.md` D3); against
 a stub it reads the stub, so a presence check on it fails there, as it should,
 and a count compared to 0 needs the presence check the table gives. A step that
-ends the harness in either case is a case whatever its input. Every helper that
+ends the harness in any of the three is a case whatever its input. Every helper that
 counts a failure (it changes `fail` or `failures`, or prints a line the summary
 counts) is then checked for a call inside `$( )`.
 
 | # | Shape | Why it holds, or stops, on a failed run | Fix |
 |---|---|---|---|
 | 1 | A failure counted, or a status a helper records for its caller (an exit code in a global), inside `$( )` (Trap 12) | the count, the FAIL line and the recorded status stay in the subshell; the caller reads the global's earlier value, often its initial 0 | call the helper directly and hand the result back through a variable, or record the status in a file beside the capture (`<capture>.rc`) |
-| 2 | A comparison of two captures, or of two lookups in them, equal or unequal | two runs that fail alike print the same, usually nothing; two lookups that fail alike return the same sentinel, the same empty string or the same separators (`"/"`, `"\|\|"`); an inequality holds when one side is empty | each side's run exits 0 and its capture is non-empty first; a side that fails is a FAIL, and the comparison is skipped; a lookup's sentinel names the capture it looked in, or each side is required non-empty first |
-| 3 | An absence check | an empty capture, or an error message, holds none of the text | the run's exit 0 and a non-empty capture first; on an empty capture the check is a FAIL |
-| 4 | A width or shape check over every line or record | an empty capture, or one without the table, has no line or record to break the rule | the capture is non-empty first, and an inspector that walks records fails when it checked none; `assert_no_soft_wrap` fails an empty capture itself |
+| 2 | A comparison of two captures, or of two lookups in them, equal or unequal | two runs that fail alike print the same, usually nothing; two lookups that fail alike return the same sentinel, the same empty string or the same separators (`"/"`, `"\|\|"`); an inequality holds when one side is empty | each side's run exits 0 and its capture holds the section, table or row compared first (two runs that printed the same unrelated line compare equal); a side that fails is a FAIL, and the comparison is skipped; a lookup's sentinel names the capture it looked in, or each side is required non-empty first |
+| 3 | An absence check | an empty capture, an error message, or a line unrelated to what was asked, holds none of the text | the run's exit 0 and the section, table or row the absence is read in, present first; without it the check is a FAIL |
+| 4 | A width or shape check over every line or record | an empty capture, or one without the table, has no line or record to break the rule | the table or records the check walks present first (a non-empty capture is not that evidence), and an inspector that walks records fails when it checked none; `assert_no_soft_wrap` fails an empty capture itself |
 | 5 | A presence check the seed satisfies | a fixture, or an earlier run, already holds a line of the right shape | look up the row or key this run writes (its date, its value), never any line of the shape |
 | 6 | A refusal asserted by its exit code alone | any failure exits non-zero; an exit-code check counts a pass of its own even when the next check reads the message | the exit code and the message both, in one check: the message is the exit check's evidence |
 | 7 | A count compared to 0 over source read through `$LTL` | a stub's source holds none of what is counted | a presence check, first, of an anchor the source always carries (the sub the count is about) |
@@ -709,7 +713,10 @@ depends on was counted once, where the run was checked. The forms the fixes
 take, each counting the run's failure once and skipping what reads it:
 
 - a capture helper records the run's exit status beside its capture
-  (`<capture>.rc`) and counts one FAIL on a non-zero exit or an empty capture;
+  (`<capture>.rc`) and counts one FAIL on a non-zero exit, an empty capture,
+  or a capture holding none of what the run was asked for (a
+  `no-section` outcome, as format-detection's `run_format_detection`
+  records when the section its checks read is missing);
 - a check names the captures it reads (a `reads` field on `assert_command`,
   or a `produced <tag> <pattern> <label>` guard that also fails the check when
   the run lacks the line it reads), and is skipped when one of them failed; a

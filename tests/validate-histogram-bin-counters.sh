@@ -71,12 +71,16 @@ fail=0
 failures=()
 current_scenario=""
 
+# Every capture lives under the harness's own temp directory, removed on any
+# exit (tests/HARNESS-DESIGN.md Traps 9 and 10).
+TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
+
 # Run ltl with -V histogram-bin-counters and the standard suppression flag.
 # Captures combined output to a temp file, echoes the path.
 # Args after the function name are forwarded verbatim before the input file.
 run_section() {
     local outfile
-    outfile=$(mktemp)
+    outfile=$(mktemp "$TMP_DIR/capture.XXXXXX")
     # shellcheck disable=SC2086
     "$LTL" --disable-progress -ni $SHAPE -V histogram-bin-counters "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
@@ -90,7 +94,7 @@ run_section_on() {
     local logfile="$1"
     shift
     local outfile
-    outfile=$(mktemp)
+    outfile=$(mktemp "$TMP_DIR/capture.XXXXXX")
     # shellcheck disable=SC2086
     "$LTL" --disable-progress -ni $SHAPE -V histogram-bin-counters "$@" "$logfile" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
@@ -378,7 +382,7 @@ scenario_precision_out_of_range() {
 run_pa_section() {
     # Capture -V percentile-algorithm with all four surfaces on the bin model.
     local outfile
-    outfile=$(mktemp)
+    outfile=$(mktemp "$TMP_DIR/capture.XXXXXX")
     # shellcheck disable=SC2086
     "$LTL" --disable-progress -ni $SHAPE -V percentile-algorithm -hg -hm \
         -mdm bin -bdm bin "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
@@ -1137,7 +1141,7 @@ scenario_no_bucket_stats_highlight_store() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl - @consumer_order carries no per-time-bucket highlight name' \
         contract    'features/472-highlight-bin-counter-telemetry.md D2 (the per-time-bucket parity store is retired) + features/187-histogram-bin-counter-percentiles.md section Decision 8 amendment of 2026-09-12'
 
-    memout=$(mktemp)
+    memout=$(mktemp "$TMP_DIR/mem.XXXXXX")
     # shellcheck disable=SC2086
     "$LTL" --disable-progress -ni $SHAPE -mem -bdm bin -hdmin 100 "$ACCESS_LOG" \
         > "$memout" 2>"$memout.stderr" || true

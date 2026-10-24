@@ -9,7 +9,9 @@
 # have shipped silently to the wiki in the past because release-step 15
 # (wiki sync) has no gate.
 #
-# Asserts exit code 0 AND non-empty stdout for each runnable example.
+# Asserts exit code 0, non-empty stdout, and the options row ltl prints for
+# the example's command line, for each runnable example: the row is the
+# evidence the output is ltl's run of that example, which any output is not.
 # Skips: structural synopsis lines (`ltl [options] …`), -V examples
 # (deferred until #226-driven section names settle into the canonical
 # user-facing surface), examples whose placeholder filenames have no
@@ -111,6 +113,14 @@ DOCS=(
 # example's own `-bs 5` / `-n 50` still parses exactly as documented - the
 # example's options are the subject; the injection only removes empty rows.
 LTL_INJECT="--disable-progress -ni --terminal-width 120 -bs 1440 -oe"
+
+# The line every run of this shape prints: the options row, which echoes the
+# command line without its file operands and without the options standing in
+# for the terminal, so the injected options lead it, ahead of the example's
+# own (print_run_options() in ltl, printed unless the options section is
+# hidden, which no example does). Exit 0 and a non-empty stdout are not
+# evidence the example ran; this row is ltl having parsed its command line.
+EXAMPLE_EVIDENCE='command-line options: -ni -bs 1440 -oe'
 
 pass=0
 fail=0
@@ -295,7 +305,19 @@ run_doc_example() {
         return
     fi
 
-    echo "  PASS  $current_scenario"
+    # The whole stream is read (no grep -q), so the pipe cannot fail on
+    # SIGPIPE under pipefail.
+    if ! sed 's/\x1b\[[0-9;]*m//g' "$stdout_file" | grep -E "^${EXAMPLE_EVIDENCE}( |$)" > /dev/null; then
+        emit_failure \
+            label       "doc example printed no options row" \
+            asserts     "A run of a documented example prints the options row, led by the options this harness injects ('${EXAMPLE_EVIDENCE#command-line options: }'): the evidence that ltl parsed the example's command line and ran it to its output. Output without the row is not ltl's run of the example, however it exited." \
+            produced_by 'print_run_options() in ltl, through build_run_options_string()' \
+            contract    'tests/HARNESS-DESIGN.md Trap 13 - a check holds only on evidence that the run wrote what it reads (features/747-harness-checks-on-a-failed-run.md D5)' \
+            detail      "command: $LTL $LTL_INJECT $ltl_args ; stdout begins: $(head -c 120 "$stdout_file" | head -1)"
+        return
+    fi
+
+    echo "  PASS  $current_scenario :: exit 0, and the options row of its command line"
     pass=$((pass + 1))
 }
 
