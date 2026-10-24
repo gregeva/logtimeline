@@ -1031,9 +1031,9 @@ scripts, put first on `PATH` to change what one name resolves to.
       available. M L. (First written as the full suite on both hosts, which
       contradicts `CLAUDE.md`'s rule that the full suite runs once, as the
       completion gate; corrected by the architect in stage 2.)
-      - M, 2026-10-24, pass, at the completion gate: by the architect's
-        direction, a few scenarios from the harnesses whose changes differ,
-        each exit 0 (§ Completion gate).
+      - M, 2026-10-24, pass, at the completion gate, at `6fc8e800`: all 53
+        harnesses exit 0, `validate-csv-output` then `validate-statistics`
+        first, after a few scenarios from 11 of them (§ Completion gate).
       - L, 2026-10-23, Ubuntu 26.04.1, pass: 53 harnesses started; 41 listed
         their scenarios, 12 stopped at their own "not found" check for a
         corpus file; `grep -i brew` found nothing.
@@ -1874,12 +1874,14 @@ the first. Its four increments now carry `|| true`, as
 under the same label each exited 0, the second merging the first's 76 rows.
 
 **Harnesses (AC16, macOS).** By the architect's direction, a few scenarios
-from the harnesses whose changes differ, not the full suite:
-`validate-csv-output` in full, and `statistics` (apache-default,
-gated-means-access), `section-layout` (layout-baseline, progress-rendered),
-`profile` (day, profile-off), `value-display` (count-spelling, fit-sweep),
-`notices` (clean-run, tmux-modal-keys, tmux-quit). Each exited 0; no capture
-mentions `brew`, a skip or a runtime warning.
+first from 11 harnesses whose changes differ (`statistics`, `section-layout`,
+`profile`, `value-display`, `notices` with its tmux scenarios, `regression`,
+`screenshot-capture`, `histogram-colours`, `message-mask`,
+`log-level-vocabulary`, `scenario-selector`), then the full suite at
+`6fc8e800`: all 53 harnesses exit 0 in 21 minutes, `validate-csv-output` then
+`validate-statistics` first. No capture mentions `brew` or carries a runtime
+warning; the one ` at … line ` match is `validate-read-path`'s own assertion
+of a deliberate `die`.
 
 ## Troubleshooting a failed condition
 
