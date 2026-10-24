@@ -8,8 +8,9 @@ Status: drop 1 done 2026-10-24 (cdbc1205, pushed). Drop 2 done 2026-10-24
 Drop 3 done 2026-10-24 (848b26d8): ten of its eleven harnesses fixed, shape
 15 added. Drop 4 done 2026-10-24 (222eff02): six of its eight harnesses
 fixed (§ Drop 4). D4 done 2026-10-24 (51a95f55): the four selection defects
-fixed (§ D4: the selection defects). Drop 5 done 2026-10-24: five of its six
-harnesses fixed (§ Drop 5); drop 6 is next.
+fixed (§ D4: the selection defects). Drop 5 done 2026-10-24 (9ebc1bf1): five
+of its six harnesses fixed (§ Drop 5). Drop 6 done 2026-10-24: three of its
+four harnesses fixed (§ Drop 6); drop 7 is next.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. Drop 7 is not yet
 read. D3 (the architect, during drop 1) adds a final stage after drop 7.
@@ -22,11 +23,11 @@ agreed by the architect on 2026-10-24, and work started that day on branch
 carried on the issue branch: each drop's commit updates § Per-harness record
 and the status line, and the document reaches the release branch with the PR,
 as the work merged by PR #754 did with its own. D4 (the four selection
-defects) and drop 5 are done; the next step is drop 6 (message-discard,
-help-content, histogram-bin-counters, udm-specs), to the designs in § Fix
-designs read ahead, with the greps of `tests/HARNESS-DESIGN.md` run over each harness first
-(grep 15 still lists format-detection, histogram-bin-counters, index-read-back,
-statistics-demand and udm-specs, each in its own drop). The scratchpad worktree
+defects) and drops 5 and 6 are done; the next step is drop 7, the six
+harnesses changed under #726 read whole (statistics-demand, duration-display,
+filter-summary, format-detection, explain, index-read-back), with the greps
+of `tests/HARNESS-DESIGN.md` run over each harness first (grep 15 still lists
+format-detection, index-read-back and statistics-demand). The scratchpad worktree
 and stubs do not survive the session: a new session makes them again as
 § Drop 2 describes (stubs: `failing` prints nothing and exits 1, `silent`
 prints nothing and exits 0, each a two-line Perl script).
@@ -471,16 +472,16 @@ drop, while the baseline ran.
 | format-detection | 7 | `Results: N passed, M failed` | 472 (33 s) | 0 / no (0 s) | 0 / no (0 s) |  |  |
 | format-registry | 4 | `Results: N passed, M failed` | 59 (4 s) → 59 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | fixed in drop 4: `out=$(run_format_registry)` exits inside `$( )` (1, 10); unknown -lf exits non-zero: exit code alone (6); two inline runs exit (stop); unarmed measurement: absence on an empty capture (3) | none |
 | heatmap-palette | 4 | `Results: N passed, M failed` | 120 (6 s) → 120 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | fixed in drop 4: `out=$(run_section)` exits inside `$( )`: stop, failure uncounted (1, 10); run_udm exits (stop); two exits 0 by exit code alone once fixed (acceptance) | none |
-| help-content | 6 | `Results: N passed, M failed[, W warning(s)]` | 114 (5 s) | 0 / no (0 s) | 0 / no (0 s) | found by reading, not yet fixed: three top-level exits before any scenario (stop); description quality and no branch per topic: absence over a stub's source (7); no -uuid row and no long byte word: absence on an empty capture (3); four comparisons of two empty lookups (2) | B (GetOptions read from the source against docs/usage.md); the docs/usage.md halves of H, I, J, K, L, M |
+| help-content | 6 | `Results: N passed, M failed[, W warning(s)]` | 114 (5 s) → 114 | 0 / no (0 s) → 32 / yes | 0 / no (0 s) → 32 / yes | fixed in drop 6: three top-level exits before any scenario, which also ended `--list` on a stub (stop); description quality and no branch per topic: absence over a stub's source (7); no -uuid row and no long byte word: absence on an empty capture (3); four comparisons of two empty lookups (2) | B (GetOptions read from the source against docs/usage.md; skipped on a stub, whose source declares no options); the docs/usage.md halves of G, H, I, K, L and M, 32 checks (G 2, H 3, I 2, K 3, L 12, M 10), the 32 a stub run passes. J's docs/usage.md rows interpolate the lists the runs print, so they are not run-free |
 | help-layout | 2 | `Results: N passed, M failed` | 6 (0 s) → 6 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | fixed in drop 2: the layout constants missing from the source exit the harness (stop); the --help run unchecked, so the two inspectors pass on an empty capture (4); each inspector's non-zero exit, a misaligned row's included, ended the harness under `set -e` (11) | none |
-| histogram-bin-counters | 6 | `Results: N passed, M failed` | 148 (7 s) | 5 / yes (1 s) | 5 / yes (1 s) | found by reading, not yet fixed: four assert_no_line absences on an unchecked capture (3); heatmap_cells_highlighted carries no percentile field: absence on an empty block (3) |  |
+| histogram-bin-counters | 6 | `Results: N passed, M failed` | 148 (7 s) → 148 | 5 / yes (1 s) → 0 / yes | 5 / yes (1 s) → 0 / yes | fixed in drop 6: four assert_no_line absences on an unchecked capture (3); heatmap_cells_highlighted carries no percentile field: absence on an empty block (3); assert_command evaluates its command in the harness's own shell (15) |  |
 | histogram-colours | 2 | `Results: N passed, M failed` | 21 (2 s) → 21 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | fixed in drop 2: capture_run and the layout-table check exit the harness on a failed run (stop); the run exits 0 asserted by exit code alone (acceptance) | none |
 | histogram-ticks | 3 | `Total: T \| Passed: N \| Failed: M` | 21 (5 s) → 21 | 9 / yes (4 s) → 0 / yes | 9 / yes (3 s) → 0 / yes | fixed in drop 3: no tick outside the axis and tick colour parity pass on an empty capture, per width and on the multi-histogram run (3); a tick check not applicable counts a PASS (12) | none |
 | index-read-back | 7 | `Results: N passed, M failed` | 107 (21 s) | 0 / no (1 s) | 0 / no (2 s) |  |  |
 | log-level-vocabulary | 5 | `PASS: N FAIL: M` | 58 (3 s) → 58 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | fixed in drop 5: seven scenario runs exit the harness on a failed or empty run, at nine exits (stop) |  |
 | memory-usage | 2 | `Results: N passed, M failed` | 23 (4 s) → 23 | 8 / yes (0 s) → 1 / yes | 8 / yes (0 s) → 1 / yes | fixed in drop 2: absence on an empty capture: no grouping callers, no section, no debug sub-section, nothing on stderr (3); two readings per compile compares 0 with 0 (2); record shape and sample shape hold over no record (4) | debug-samples: input lines (a file the harness writes) |
 | message-control-characters | 2 | `PASS: N FAIL: M` | 11 (1 s) → 11 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | fixed in drop 2: six exits on a failed, empty or CSV-less run (stop); the summary inside the last scenario's block, fixed under D4 | none |
-| message-discard | 6 | `Results: N passed, M failed` | 82 (18 s) | 0 / yes (1 s) | 0 / yes (0 s) | none |  |
+| message-discard | 6 | `Results: N passed, M failed` | 82 (18 s) | 0 / yes (1 s) | 0 / yes (0 s) | none (read again in drop 6 with the widened greps) |  |
 | message-expose | 5 | `Results: N passed, M failed` | 62 (13 s) | 0 / yes (0 s) | 0 / yes (1 s) | none (read again in drop 5 with the widened greps) |  |
 | message-grouping | 4 | `Results: N passed, M failed` | 51 (19 s) | 0 / yes (0 s) | 0 / yes (0 s) | none under this issue's condition (read again with drop 3's greps); a selection defect, § Observations, fixed under D4 |  |
 | message-grouping-notices | 2 | `Results: N passed, M failed` | 4 (2 s) | 0 / yes (0 s) | 0 / yes (0 s) | none |  |
@@ -505,7 +506,7 @@ drop, while the baseline ran.
 | summary-contribution-bar | 5 | `PASS: N FAIL: M` | 39 (3 s) → 39 | 0 / no (0 s) → 0 / yes | 0 / no (1 s) → 0 / yes | fixed in drop 5: capture_render exits the harness on a failed run (stop); the summary inside the last scenario's block, fixed under D4 |  |
 | timestamp-precision | 5 | `Results: N passed, M failed` | 94 (20 s) → 94 | 0 / no (1 s) → 0 / yes | 0 / no (1 s) → 0 / yes | fixed in drop 5: labels() lookups stop the harness at seven assignments (10); the two STATS CSV lookups (`ls` of a glob that matches nothing) stop it (10, listed by grep 10 and found by the failing-stub run); no four-digit fraction: absence on a failed run (3); no bucket-key site reads -s or -ms: absence over a stub's source (7) |  |
 | udm-counting | 4 | `Results: N passed, M failed` | 44 (6 s) → 44 | 0 / no (1 s) → 0 / yes | 0 / no (0 s) → 0 / yes | fixed in drop 4: two bare -xu runs stop the harness (11); `assert_command` evaluated each command in the harness's own shell, where the users-in-CSV check's `exit 1` ended it (15; the stop the stub runs met) | none |
-| udm-specs | 6 | `Results: N passed, M failed` | 250 (22 s) | 0 / no (0 s) | 0 / no (1 s) | found by reading, not yet fixed: about 14 assert_absent checks pass on an empty capture or a missing notices section (3); twenty runs report one unit compares 20 empty results (2); nine prints-no-warning checks: absence on an empty stderr (3); four exits 0 by exit code alone (acceptance) |  |
+| udm-specs | 6 | `Results: N passed, M failed` | 250 (22 s) → 250 | 0 / no (0 s) → 0 / yes | 0 / no (1 s) → 0 / yes | fixed in drop 6: thirteen assert_absent checks pass on an empty capture or a missing notices section (3); "the run exits 0 where it previously died" reads an exit status `run_collision` records in a global inside `$( )`, always its initial 0 (1); five STATS, export and MESSAGES CSV lookups (`ls` of a glob that matches nothing) stop the harness (10); two STATS CSV header checks and the shorthand-names comparison compare two empty lookups (2); twenty runs report one unit compares 20 empty results (2); nine prints-no-warning checks: absence on an empty stderr (3); four exits 0 by exit code alone (14); assert_command evaluates its command in the harness's own shell (15) |  |
 | value-display | 3 | `Results: N passed, M failed` | 60 (17 s) → 60 | 0 / no (0 s) → 0 / yes | 0 / no (0 s) → 0 / yes | fixed in drop 3: the resolved-unit lookup in zero-duration stops the harness (10; found by the stub run, missed by reading); the cv-agreement `csv=` lookup (10) | none |
 | verbose-content-shape | 2 | `Results: N passed, M failed` | 1 (1 s) | 0 / yes (0 s) | 0 / yes (0 s) | none |  |
 
@@ -749,6 +750,32 @@ list taken from `--list` reads the names after its `Scenarios:` line only:
 runtime-config prints a banner line (`  ltl: <path>`) above it, which a
 pattern over every indented line takes for a scenario name, and the harness
 then refuses the selection having run nothing.
+
+### Drop 6
+
+Confirmations as in drop 3. The committed side of each proof is the
+baseline's stub run (the four harnesses are unchanged from the base commit to
+9ebc1bf1) or a run of the committed harness from the scratchpad worktree.
+Three harnesses changed; message-discard, read again, has no case: every run
+is checked where it is made (exit, MESSAGES and STATS CSVs), every scenario
+returns before reading a failed one, and each absence follows a checked run.
+The three, run from the scratchpad worktree with `LTL` unset and with each
+stub, report the same summary, exit and passed count as from the main
+checkout, 9 runs.
+
+| Harness | Change | Real | Failing / silent stub | Proof (AC6) |
+|---|---|---|---|---|
+| help-content | the selector is parsed first, so `--list` and an unknown name run nothing; the three setup steps (the `$version_number` literal and the GetOptions entries read from the source, the `--help` capture) each count one FAIL where they exited, and the scenarios that need what a step failed to obtain are skipped whole (`needs`: A and C the options and the help text, B the options, D and E the version); `assert_equal` fails on an empty actual, so two lookups that found nothing no longer agree; "the four messages print one time-unit list" needs the `-du` list first; "no -uuid row" and "no long byte word" read their help capture through `help_count`, which names a capture whose run failed or printed nothing instead of counting 0 in it; "no placeholder tokens" needs `print_help()` in the source, "no branch per topic" `dispatch_informational_options()` | 114 on all thirteen scenarios (unchanged) | failing: 32 passed, 70 failed; silent: the same; the 32 are the docs/usage.md checks of G, H, I, K, L and M (run-free) | the committed harness stops at setup on both stubs, `--list` included (baseline); against a copy of the tool whose source reads as the real one but whose every run except the setup's `--help` exits 1 printing nothing, it passes "no -uuid row", "the four messages print one time-unit list", the three name-list equalities and "no long byte word"; the fixed one fails all six |
+| histogram-bin-counters | `assert_no_line` fails when the capture holds no `-V histogram-bin-counters` section; "heatmap_cells_highlighted carries neither percentile field" needs that consumer's block first; `assert_command` evaluates its command in a subshell | 148 on all scenarios (unchanged) | failing: 0 passed, 148 failed; silent: the same | the committed harness passes the four absences and the empty-block check on both stubs (baseline, five each); now none |
+| udm-specs | `run_collision` records its exit status beside the capture (`<capture>.rc`), since its callers run it inside `$( )`, and the division-by-zero check reads it with the section's end marker; `assert_absent` fails when the run's capture holds no `-V udm-specs` section or its notices file holds MISSING-SECTION; the five CSV lookups carry `\|\| var=""` (the MESSAGES one inside its helper, `{ ls ... \|\| true; }`); the two STATS CSV header checks need the CSV, and the shorthand comparison a name on the shorthand side; the twenty-runs check needs every line to carry its unit, value and column; the nine "prints no notice or warning" checks need the run's `read_as` line; the milliseconds and columnar exits need the section's end marker and the messages table; `assert_command` evaluates in a subshell | 250 on all scenarios (unchanged) | failing: 0 passed, 250 failed; silent: the same | the committed harness stops on both stubs (baseline); run on the scenarios before its stops, on the silent stub it passes 14 (the two milliseconds exits, three absences, the division-by-zero exit, the shorthand comparison, the columnar exit and six stderr absences), and on the failing stub "the run exits 0 where it previously died" passes on a run that exited 1; the fixed one passes none |
+
+What drop 6 adds to the method: shape 1 now covers a status a helper records
+for its caller, an exit code in a global, inside `$( )`: the caller reads the
+global's earlier value, often its initial 0, and a grep for the globals a
+helper sets (`^\s+[A-Z_]+=`) lists the candidates. help-content ran its setup,
+three runs of the tool, before the selector, so a stub run of `--list`
+stopped; the selector is parsed first now, as drop 3 did for
+classification-percentages.
 
 ### Fix designs read ahead (drops 3 to 6)
 

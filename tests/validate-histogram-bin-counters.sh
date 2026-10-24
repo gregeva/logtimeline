@@ -167,7 +167,10 @@ assert_line() {
 }
 
 # Self-documenting assertion: no line matching `pattern` may be present.
-# Same field requirements as assert_line.
+# Same field requirements as assert_line. Every caller reads a
+# -V histogram-bin-counters capture, so the absence is read only when the
+# section is there: a run that printed nothing holds no line at all
+# (HARNESS-DESIGN.md Trap 13, shape 3).
 assert_no_line() {
     local outfile="$1"
     shift
@@ -186,7 +189,15 @@ assert_no_line() {
     : "${produced_by:?assert_no_line requires produced_by}"
     : "${contract:?assert_no_line requires contract}"
 
-    if grep -qE "$pattern" "$outfile"; then
+    if ! grep -q '^=== histogram-bin-counters ===$' "$outfile"; then
+        echo "  FAIL  $current_scenario"
+        echo "        pattern:     !$pattern (no histogram-bin-counters section to read the absence against)"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: !$pattern (no section)")
+    elif grep -qE "$pattern" "$outfile"; then
         echo "  FAIL  $current_scenario"
         echo "        pattern:     !$pattern (unexpectedly present)"
         echo "        asserts:     $asserts"
@@ -224,7 +235,9 @@ assert_command() {
     : "${produced_by:?assert_command requires produced_by}"
     : "${contract:?assert_command requires contract}"
 
-    if eval "$command"; then
+    # In a subshell: an unbound name or an exit in the command ends that, not
+    # the harness (HARNESS-DESIGN.md shape 15).
+    if ( eval "$command" ); then
         echo "  PASS  $current_scenario :: $label"
         pass=$((pass + 1))
     else
@@ -1031,7 +1044,7 @@ scenario_highlight_blocks_active() {
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 4 + section Decision 8 - the per-quantile audit triple none|low|high is locked'
 
     assert_command \
-        command     "! consumer_block '$out' heatmap_cells_highlighted | grep -qE '^  (percentiles_emitted|out_of_range_bounded):'" \
+        command     "consumer_block '$out' heatmap_cells_highlighted | grep -q '^consumer: ' && ! consumer_block '$out' heatmap_cells_highlighted | grep -qE '^  (percentiles_emitted|out_of_range_bounded):'" \
         label       'heatmap_cells_highlighted carries neither percentile field' \
         asserts     'The heatmap highlight derives cell counts, not quantiles, so it reports no percentile set and no audit line - the same asymmetry its parent already has against the histogram consumers.' \
         produced_by 'emit_bin_counter_mode_verbose() in ltl - no %percentile_set entry for this consumer' \

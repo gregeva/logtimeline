@@ -688,7 +688,7 @@ counts) is then checked for a call inside `$( )`.
 
 | # | Shape | Why it holds, or stops, on a failed run | Fix |
 |---|---|---|---|
-| 1 | A failure counted inside `$( )` (Trap 12) | the count and the FAIL line stay in the subshell | call the helper directly; it hands its result back through a variable |
+| 1 | A failure counted, or a status a helper records for its caller (an exit code in a global), inside `$( )` (Trap 12) | the count, the FAIL line and the recorded status stay in the subshell; the caller reads the global's earlier value, often its initial 0 | call the helper directly and hand the result back through a variable, or record the status in a file beside the capture (`<capture>.rc`) |
 | 2 | A comparison of two captures, or of two lookups in them, equal or unequal | two runs that fail alike print the same, usually nothing; two lookups that fail alike return the same sentinel, the same empty string or the same separators (`"/"`, `"\|\|"`); an inequality holds when one side is empty | each side's run exits 0 and its capture is non-empty first; a side that fails is a FAIL, and the comparison is skipped; a lookup's sentinel names the capture it looked in, or each side is required non-empty first |
 | 3 | An absence check | an empty capture, or an error message, holds none of the text | the run's exit 0 and a non-empty capture first; on an empty capture the check is a FAIL |
 | 4 | A width or shape check over every line or record | an empty capture, or one without the table, has no line or record to break the rule | the capture is non-empty first, and an inspector that walks records fails when it checked none; `assert_no_soft_wrap` fails an empty capture itself |
@@ -723,6 +723,7 @@ shape of its number; reading each line decides whether it is a case.
 H=tests/validate-<name>.sh
 grep -nE '\bfail(ures)?(=|\+=)|\(\( *fail' "$H"                  # 1: the helpers that count; then
 grep -nE '\$\( *(<helper>|<helper>)\b' "$H"                       # 1: their calls inside $( )
+grep -nE '^\s+[A-Z_]+=' "$H"                                      # 1: globals a helper sets; then its calls inside $( )
 grep -nE '\b(diff|cmp)\b|" *(==|!=) *"\$' "$H"                    # 2
 grep -nE '! +grep|grep -c|-eq 0\b|== *0\b|-z "\$\(' "$H"          # 3, 7
 grep -nE 'assert_no_soft_wrap|length\(|END *\{' "$H"              # 4

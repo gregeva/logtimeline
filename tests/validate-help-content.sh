@@ -176,7 +176,9 @@ assert_equal() {
         esac
     done
 
-    if [[ "$actual" == "$expected" ]]; then
+    # An empty actual is a lookup that found nothing, never a match: two empty
+    # lookups would otherwise agree (HARNESS-DESIGN.md Trap 13, shape 2).
+    if [[ -n "$actual" && "$actual" == "$expected" ]]; then
         echo "  PASS  $current_scenario :: $label"
         pass=$((pass + 1))
     else
@@ -186,7 +188,7 @@ assert_equal() {
         echo "        produced_by: $produced_by"
         echo "        contract:    $contract"
         echo "        expected:    $expected"
-        echo "        actual:      $actual"
+        echo "        actual:      ${actual:-(empty: the lookup found nothing)}"
         fail=$((fail + 1))
         failures+=("$current_scenario :: $label (expected=$expected actual=$actual)")
     fi
@@ -214,6 +216,59 @@ emit_warning() {
     warn=$((warn + 1))
 }
 
+# The setup below reads the source and captures --help once for scenarios A to
+# E. An input it cannot obtain is one counted FAIL, and the scenarios that need
+# it are skipped whole (HARNESS-DESIGN.md Trap 13).
+declare -A setup_ok=([version]=1 [getopts]=1 [help]=1)
+setup_failed() {
+    local input="$1" what="$2" asserts="$3" produced_by="$4"
+    echo "  FAIL  setup :: $what"
+    echo "        asserts:     $asserts"
+    echo "        produced_by: $produced_by"
+    echo "        contract:    tests/HARNESS-DESIGN.md Trap 13 - a check made against a run that did not happen is skipped, its cause counted once"
+    fail=$((fail + 1)); failures+=("setup :: $what")
+    setup_ok[$input]=0
+}
+needs() {
+    local scenario="$1" input
+    shift
+    for input in "$@"; do
+        if [[ "${setup_ok[$input]}" != 1 ]]; then
+            echo "[$scenario]"
+            echo "  SKIP  $scenario :: needs the $input input, which the setup could not obtain"
+            return 1
+        fi
+    done
+}
+
+# The count of lines matching a pattern in a --help capture, or a sentinel
+# naming the capture when its run failed or printed nothing, so a count of 0 is
+# read only from a help text that was written. Usage: help_count FILE RC ARGS...
+help_count() {
+    local file="$1" rc="$2"
+    shift 2
+    if [[ "$rc" -ne 0 || ! -s "$file" ]]; then
+        echo "no help text in $file (exit $rc)"
+        return
+    fi
+    grep -c "$@" "$file" || true
+}
+
+scenario_register A-help-contains-visible-longs \
+                  B-usage-contains-visible-longs \
+                  C-help-short-forms-match-getopts \
+                  D-dash-v-matches-version-number \
+                  E-benchmark-data-version-matches \
+                  G-udm-function-list-parity \
+                  H-mask-option-rows \
+                  I-discard-option-rows \
+                  J-unit-list-parity \
+                  K-name-list-parity \
+                  L-bound-option-rows \
+                  M-units-topic \
+                  F-description-quality-soft
+scenario_parse_args "$@"
+
 # ---------- Extract from ltl source --------------------------------------
 
 # $version_number literal. Required for scenarios D and E.
@@ -221,8 +276,9 @@ VERSION_NUMBER=$(perl -ne '
     if (/^my\s+\$version_number\s*=\s*"([^"]+)"/) { print $1; exit }
 ' "$LTL")
 if [[ -z "$VERSION_NUMBER" ]]; then
-    echo "ERROR: could not extract \$version_number from $LTL"
-    exit 1
+    setup_failed version "could not extract \$version_number from $LTL" \
+        'the ltl source read declares the $version_number literal that scenarios D and E compare the emitted versions against' \
+        'the $version_number declaration in ltl (## GLOBALS ##)'
 fi
 
 # GetOptions entries. Each line of output is TAB-separated:
@@ -276,9 +332,10 @@ perl -ne '
 
 GETOPTS_COUNT=$(wc -l < "$GETOPTS_TSV" | tr -d ' ')
 if [[ "$GETOPTS_COUNT" -lt 50 ]]; then
-    echo "ERROR: parsed only $GETOPTS_COUNT GetOptions entries - parser likely broken"
-    head "$GETOPTS_TSV"
-    exit 1
+    setup_failed getopts "parsed only $GETOPTS_COUNT GetOptions entries from $LTL" \
+        'the ltl source read declares its options in @getopt_spec and @quantity_options, which scenarios A, B and C compare --help and docs/usage.md against' \
+        '@getopt_spec and @quantity_options in ltl'
+    head "$GETOPTS_TSV" | sed 's/^/        | /'
 fi
 
 # Required-form files for set assertions.
@@ -306,13 +363,12 @@ set +e
 help_ec=$?
 set -e
 if [[ "$help_ec" -ne 0 ]]; then
-    echo "ERROR: ltl --help exited $help_ec; stderr:"
-    sed 's/^/    /' "$TMP_DIR/help.stderr"
-    exit 1
-fi
-if [[ ! -s "$HELP_OUT" ]]; then
-    echo "ERROR: ltl --help produced empty output"
-    exit 1
+    setup_failed help "ltl --help exited $help_ec" \
+        'ltl --help exits 0 and prints the help text scenarios A and C read' 'print_help() in ltl'
+    sed 's/^/        | /' "$TMP_DIR/help.stderr"
+elif [[ ! -s "$HELP_OUT" ]]; then
+    setup_failed help 'ltl --help produced empty output' \
+        'ltl --help exits 0 and prints the help text scenarios A and C read' 'print_help() in ltl'
 fi
 check_stderr_warnings "$TMP_DIR/help.stderr" "capture:--help"
 
@@ -519,6 +575,15 @@ scenario_F_description_quality_warnings() {
         }
     ' "$LTL" > "$warnings_tsv"
 
+    # An empty scan passes only over a source that carries the help rows.
+    if ! grep -qE '^sub print_help\b' "$LTL"; then
+        echo "  FAIL  $current_scenario :: no placeholder tokens or single-word descriptions found"
+        echo "        asserts:     the description scan reads the \$opt->() rows of print_help(); no print_help() in $LTL, so nothing was scanned"
+        echo "        produced_by: print_help() in ltl"
+        echo "        contract:    features/232-help-coverage.md section 5"
+        fail=$((fail + 1)); failures+=("$current_scenario :: no print_help() in the source read")
+        return
+    fi
     if [[ ! -s "$warnings_tsv" ]]; then
         echo "  PASS  $current_scenario :: no placeholder tokens or single-word descriptions found"
         pass=$((pass + 1))
@@ -566,8 +631,8 @@ scenario_H_mask_option_rows() {
     current_scenario="H-mask-option-rows"
     echo "[$current_scenario]"
 
-    local help_out="$TMP_DIR/help-mask.txt"
-    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    local help_out="$TMP_DIR/help-mask.txt" help_rc=0
+    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || help_rc=$?
     check_stderr_warnings "$help_out.stderr" "$current_scenario"
     perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$help_out"
 
@@ -581,7 +646,7 @@ scenario_H_mask_option_rows() {
         asserts     'The option is documented once, not once per name it accepts' \
         produced_by 'print_help() in ltl' \
         contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 13'
-    assert_equal "$(grep -c -E -- '(^|\s)-uuid[, ]' "$help_out")" "0" \
+    assert_equal "$(help_count "$help_out" "$help_rc" -E -- '(^|\s)-uuid[, ]')" "0" \
         label       'no -uuid row in --help' \
         asserts     '-uuid is deprecated: --help carries no row for it; the notice printed on use names its replacement' \
         produced_by 'print_help() in ltl (the -uuid row is dropped; the GetOptions entry is annotated hidden)' \
@@ -730,7 +795,7 @@ scenario_J_unit_list_parity() {
         asserts     'Each message the help rows are compared against names its vocabulary; an unmatched message is a failure, not a pass' \
         produced_by 'adapt_to_command_line_options() and parse_udm_configs() in ltl' \
         contract    "$CONTRACT_UNIT_LISTS"
-    assert_equal "$ru_list|$bs_list|$udm_time" "$du_list|$du_list|$du_list" \
+    assert_equal "$( [[ -n "$du_list" ]] && echo "$ru_list|$bs_list|$udm_time" )" "$du_list|$du_list|$du_list" \
         label       'the four messages print one time-unit list' \
         asserts     'Every time-unit message derives its list from the one time-unit ladder' \
         produced_by '$time_unit_list over @time_unit_ladder in ltl' \
@@ -975,7 +1040,7 @@ scenario_K_name_list_parity() {
             contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5"
     done
 
-    assert_equal "$(grep -cE 'elsif \(\$help_topic eq' "$LTL")" "0" \
+    assert_equal "$(grep -qE '^sub dispatch_informational_options\b' "$LTL" && { grep -cE 'elsif \(\$help_topic eq' "$LTL" || true; })" "0" \
         label       'the --help dispatch has no branch per topic' \
         asserts     'dispatch_informational_options() finds a topic in the topic table; no elsif names a topic' \
         produced_by 'dispatch_informational_options() in ltl (@help_topics)' \
@@ -1151,7 +1216,7 @@ scenario_M_units_topic() {
         asserts     'The units topic lists the count units the rejection prints' \
         produced_by 'print_help_units() in ltl ($number_unit_list)' \
         contract    "$CONTRACT_UNITS_TOPIC"
-    assert_equal "$(grep -ciE 'kilobyte|megabyte|gigabyte|terabyte|kibibyte|mebibyte|gibibyte|tebibyte' "$units_out" || true)" "0" \
+    assert_equal "$(help_count "$units_out" "$rc" -ciE 'kilobyte|megabyte|gigabyte|terabyte|kibibyte|mebibyte|gibibyte|tebibyte')" "0" \
         label       'no long byte word in --help units' \
         asserts     'The long byte words are accepted on input but listed in docs/usage.md only, not in --help' \
         produced_by 'print_help_units() in ltl' \
@@ -1194,28 +1259,13 @@ scenario_M_units_topic() {
 }
 CONTRACT_UNITS_TOPIC='features/605-input-units.md section 4 D23 (one Units section; option rows point to it; ltl --help units) and section 6 AC16'
 
-scenario_register A-help-contains-visible-longs \
-                  B-usage-contains-visible-longs \
-                  C-help-short-forms-match-getopts \
-                  D-dash-v-matches-version-number \
-                  E-benchmark-data-version-matches \
-                  G-udm-function-list-parity \
-                  H-mask-option-rows \
-                  I-discard-option-rows \
-                  J-unit-list-parity \
-                  K-name-list-parity \
-                  L-bound-option-rows \
-                  M-units-topic \
-                  F-description-quality-soft
-scenario_parse_args "$@"
-
 while read -r _scenario; do
     case "$_scenario" in
-        A-help-contains-visible-longs   ) scenario_A_help_contains_all_visible_longs ;;
-        B-usage-contains-visible-longs  ) scenario_B_usage_contains_all_visible_longs ;;
-        C-help-short-forms-match-getopts) scenario_C_help_short_forms_match_getopts ;;
-        D-dash-v-matches-version-number ) scenario_D_dash_v_matches_version_number ;;
-        E-benchmark-data-version-matches) scenario_E_benchmark_data_section_matches_version_number ;;
+        A-help-contains-visible-longs   ) if needs "$_scenario" getopts help; then scenario_A_help_contains_all_visible_longs; fi ;;
+        B-usage-contains-visible-longs  ) if needs "$_scenario" getopts; then scenario_B_usage_contains_all_visible_longs; fi ;;
+        C-help-short-forms-match-getopts) if needs "$_scenario" getopts help; then scenario_C_help_short_forms_match_getopts; fi ;;
+        D-dash-v-matches-version-number ) if needs "$_scenario" version; then scenario_D_dash_v_matches_version_number; fi ;;
+        E-benchmark-data-version-matches) if needs "$_scenario" version; then scenario_E_benchmark_data_section_matches_version_number; fi ;;
         G-udm-function-list-parity      ) scenario_G_udm_function_list_parity ;;
         H-mask-option-rows              ) scenario_H_mask_option_rows ;;
         I-discard-option-rows           ) scenario_I_discard_option_rows ;;
