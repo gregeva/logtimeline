@@ -14,7 +14,9 @@ three of its four harnesses fixed (§ Drop 6). Drop 7 done 2026-10-24
 (8d2db3cd): five of its six harnesses fixed (§ Drop 7). Drop 8 done
 2026-10-24 (b59c637d): the failed-run checker (§ Drop 8). Completion gate
 passed 2026-10-24 on e3bfbccc (§ Completion gate). Merged into
-`release/0.20.0` by PR #755 as 4c8d1fae; issue closed 2026-10-24.
+`release/0.20.0` by PR #755 as 4c8d1fae; issue closed 2026-10-24. Stage 2
+(§ Stage 2: the observations) is planned, at the architect's request, and not
+started.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -26,11 +28,13 @@ agreed by the architect on 2026-10-24, and work started that day on branch
 `747-harness-checks-on-a-failed-run` off `release/0.20.0`. This document is
 carried on the issue branch: each drop's commit updates § Per-harness record
 and the status line, and the document reaches the release branch with the PR,
-as the work merged by PR #754 did with its own. Drops 1 to 7 and D4 (the
-four selection defects) and drop 8 (D3: the failed-run checker,
-`tests/validate-harness-failed-run.sh`) are done; the next step is the
-completion gate, which passed (§ Completion gate), the PR (#755), the merge
-and the close-out; nothing is outstanding. The scratchpad worktree
+as the work merged by PR #754 did with its own. Drops 1 to 7, D4 (the four
+selection defects), drop 8 (D3: the failed-run checker,
+`tests/validate-harness-failed-run.sh`), the completion gate (§ Completion
+gate), the PR (#755), the merge and the close-out are done. The next step is
+§ Stage 2: the observations, planned 2026-10-24 at the architect's request and
+started on the architect's word: it reopens #747 and runs one drop and a gate,
+as its Delivery says. The scratchpad worktree
 and stubs do not survive the session: a new session makes them again as
 § Drop 2 describes (stubs: `failing` prints nothing and exits 1, `silent`
 prints nothing and exits 0, each a two-line Perl script).
@@ -718,7 +722,9 @@ Each fix was proven by running a scenario other than the last alone, from the
 scratchpad worktree at the committed head (a8b7dcfe) and from the main
 checkout with the fix; the PASS lines of the same scenario on real `ltl` are
 identical on both sides (category-names 17, message-control-characters 5,
-summary-contribution-bar 4), and only the summary differs.
+summary-contribution-bar 4), and only the summary differs. These proof runs
+went through a wrapper script in the scratchpad, against the note that no
+wrapper runs a harness; they ran one at a time, each scenario named.
 
 | Harness | Change | Proof |
 |---|---|---|
@@ -1045,4 +1051,89 @@ Found while reading, outside this issue's condition (a failed or silent
   `validate-histogram-bin-counters.sh` `run_section` write their captures with
   `mktemp` outside the harness's own directory; the second removes them per
   scenario, the first never does (Trap 10).
+- **Absences that hold when the section they read is missing** (found in
+  drop 7). `notice_lines` writes `MISSING-SECTION` for a capture with no
+  notices section, and no forbidden pattern matches it, so seven notice
+  absences pass on a run that prints the section asked for but no notices
+  section: filter-summary's impossible-date "no note per line or per file",
+  and format-detection's variant-ambiguity-note (three: with `-lf`, on a
+  format outside any group, under the producer-true name),
+  variant-integration-runtime-named, unit-tomcat-named and unit-httpd-named.
+  drop 6 gave udm-specs' `assert_absent` the guard these lack. In
+  duration-display's no-duration scenario, "no timeline latency column"
+  counts a pass when the anchor check before it (the occurrences and
+  messages tables present) fails. Each needs a run that exits 0 and prints
+  part of what it was asked for, outside this issue's condition; with a run
+  that prints nothing all of them are skipped or fail.
 
+## Stage 2: the observations
+
+Asked by the architect on 2026-10-24, after the close-out: "fix the issues
+under this issue", planned here as a next stage because the context window is
+cleared first. Its scope is § Observations as it stands, the selection
+defects there being fixed already under D4, and the dead source read of
+§ What is in place (`validate-explain.sh` reading `"$LTL/../ltl"`). It
+starts on the architect's word.
+
+### Scope
+
+| # | What | Where | Fix | Proof (as AC6) |
+|---|---|---|---|---|
+| S1 | `ltl`'s standard error discarded, so no runtime-warning check reads it | log-level-vocabulary `check_failure_count_rises_with_added_severities` (two runs, `2>/dev/null`) and `check_error_rate_counts_fatal` (two runs, `>/dev/null 2>&1`); udm-specs collision-operands' control run (`2>/dev/null`) | each run's standard error to a file beside its capture, read by the runtime-warning check in the harness's own shell after the check: the two log-level-vocabulary functions run inside `assert_command`'s eval, a subshell, where a count would be lost (Trap 12) | a copy of `ltl` that prints ` at ltl line 1.` on standard error for those runs and is the real tool otherwise: the committed harness passes them, the fixed one fails |
+| S2 | A stale known failure | `tests/rendered-output/soft-wrap-known-failures.tsv`, the line for `classification-percentages-w120-access-120` (#497, open) | confirm the XPASS on the release branch; find the change that made the capture fit (the line's reason is the run options echo); remove the line; say on #497 which capture no longer wraps, and why | the scenario's soft-wrap check reports a plain PASS, no XPASS |
+| S3 | A contract naming a removed record | help-layout `assert_pair`'s contract, "MEMORY.md feedback_short_forms_required" | the rule where it lives: CLAUDE.md § Before writing or changing code, a new option has a short form, a long form, a `print_help()` row and a `docs/usage.md` row | read |
+| S4 | doc-examples passes on any output | its pass condition, exit 0 and a non-empty standard output | each example also needs a line every run of its shape prints, chosen per shape when the extracted examples are read (the run summary's `LINES READ` row, `--help`'s `USAGE`, a section header), and named in the check | against a stub that exits 0 printing one unrelated line, the committed harness passes 51, the fixed one none; on the real `ltl` 51 still |
+| S5 | Captures left behind | heatmap-palette `run_section` (`mktemp`, never removed); histogram-bin-counters `run_section` (removed per scenario, not on an interrupted run) | captures under the harness's own `TMP_DIR`, removed by its `EXIT` trap (Trap 9, Trap 10) | the files under `$TMPDIR` before and after a run: none added |
+| S6 | A source read that never resolves | explain's pager default read from `"$LTL/../ltl"` (a file followed by `/..`), so its fallback, the checkout's `ltl`, is always read; `strip_ansi`'s presence read from the checkout's `ltl` | both read `"$LTL"`, as 621 D3 has every source check do; they then fail under a stub like any source check, and lose their run-free marks | the checker's explain scenario passes with 59 marked passes on each stub, not 61; the real `ltl` keeps 728 |
+| S7 | Absences that hold when the section they read is missing | filter-summary (one notice absence), format-detection (six), duration-display (the no-duration latency absence) | `assert_absent` fails on a notices file holding `MISSING-SECTION`, the form drop 6 gave udm-specs; duration-display's absence carries its anchor in the same check | a copy of `ltl` that is the real tool with its notices section removed from standard output: the committed harnesses pass the seven, the fixed ones fail them; for duration-display, one whose no-duration render lacks the two tables |
+
+### Delivery
+
+One drop, then the completion gate, as drops 2 to 8 ran:
+
+1. #747 reopened (`gh issue reopen 747`), `./process/issue-status.sh set 747
+   "in progress"`, and a comment pointing here.
+2. Branch `747-stage-2-observations` off `release/0.20.0`, synced;
+   `$version_number` stamped `0.20.0-747`; the `747-before` benchmark
+   (`single-day-access-log-standard`) on the base commit from the main
+   checkout, the diff touching harnesses (`docs/process/workflow.md` § 3).
+3. The drop: S1 to S7, each shown failing as the Proof column says before it
+   is trusted. Each changed harness is then run on the real `ltl` with every
+   scenario named, and its passed count is unchanged. Each also passes its
+   scenario of `tests/validate-harness-failed-run.sh`. The same runs are made
+   once from a scratchpad worktree with the `logs` symlink. The result goes
+   into a § Stage 2 drop table and § Per-harness record, then the drop is
+   committed and pushed, and a comment points here.
+4. The gate (`docs/process/workflow.md` § 3) runs as at stage 1:
+   `$version_number` restored, the `after` benchmark, then the full suite.
+   The suite runs csv-output and statistics first under `CI=1`, then the
+   rest, the checker last. Then `./tests/cleanup-test-artifacts.sh`. After
+   the gate: the PR into `release/0.20.0`, the merge, and the close-out (#747
+   closed again with its completion comment; the branch, the TSVs and the
+   worktree deleted).
+
+Scenario names for a run are the one-word lines after `Scenarios:` in a
+harness's `--list` (§ Drop 8); the checker makes its own stubs.
+
+### Acceptance criteria (stage 2)
+
+- [ ] **S2-AC1.** No `ltl` run in log-level-vocabulary or udm-specs discards
+      its standard error; a runtime warning on any of the five runs is a
+      counted failure. *Assertable*: S1's proof.
+- [ ] **S2-AC2.** The soft-wrap known failures carry no entry their check
+      passes; #497 says which capture stopped wrapping and why.
+      *Assertable*: S2's proof and the comment.
+- [ ] **S2-AC3.** No contract in a harness names a record that is not kept
+      in the repository. *Assertable*: a grep for `MEMORY.md` over `tests/`
+      finds nothing.
+- [ ] **S2-AC4.** doc-examples passes no example on a run whose output is
+      not `ltl`'s. *Assertable*: S4's proof.
+- [ ] **S2-AC5.** A run of heatmap-palette or histogram-bin-counters leaves
+      no file outside its own directory. *Assertable*: S5's proof.
+- [ ] **S2-AC6.** explain reads `ltl`'s source through `$LTL` only.
+      *Assertable*: S6's proof, and no `"$LTL/../` in `tests/`.
+- [ ] **S2-AC7.** The seven notice absences and duration-display's latency
+      absence fail on a run that lacks what they read. *Assertable*: S7's
+      proof.
+- [ ] **S2-AC8.** The gate: every harness exits 0 at its passed count, and
+      the checker passes every scenario. *Assertable*: the gate's run.
