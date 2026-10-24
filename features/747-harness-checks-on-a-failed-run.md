@@ -12,8 +12,9 @@ issue yet; the issue is in the backlog.
 
 ## Resuming
 
-The requirements, the acceptance criteria and the delivery plan below await
-the architect's agreement. Once agreed, work starts on branch
+The requirements, the acceptance criteria and the delivery plan below were
+agreed by the architect on 2026-10-24. Work starts, when the architect directs
+it, on branch
 `747-harness-checks-on-a-failed-run` off `release/0.20.0` with drop 1
 (§ Delivery plan). From drop 1 this document is carried on the issue branch:
 each drop's commit updates § Per-harness record and the status line, and the
