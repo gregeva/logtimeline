@@ -6,7 +6,9 @@ Issue: #747 (a harness check passes, or the harness stops early, when the
 Status: drop 1 done 2026-10-24 (cdbc1205, pushed). Drop 2 done 2026-10-24
 (bf390713): twelve of its seventeen harnesses fixed, the method revised.
 Drop 3 done 2026-10-24 (848b26d8): ten of its eleven harnesses fixed, shape
-15 added. Drop 4 done 2026-10-24: six of its eight harnesses fixed (§ Drop 4).
+15 added. Drop 4 done 2026-10-24 (222eff02): six of its eight harnesses
+fixed (§ Drop 4). On hold after drop 4 at the architect's request; D4 (the
+selection defects) comes first on resuming.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. Drop 7 is not yet
 read. D3 (the architect, during drop 1) adds a final stage after drop 7.
@@ -18,8 +20,9 @@ agreed by the architect on 2026-10-24, and work started that day on branch
 `747-harness-checks-on-a-failed-run` off `release/0.20.0`. This document is
 carried on the issue branch: each drop's commit updates § Per-harness record
 and the status line, and the document reaches the release branch with the PR,
-as the work merged by PR #754 did with its own. The next step is drop 5
-(summary-contribution-bar, section-layout, timestamp-precision, message-expose,
+as the work merged by PR #754 did with its own. Work is on hold at the
+architect's request after drop 4; when it resumes, the first step is D4 (the
+four selection defects, one commit), then drop 5 (summary-contribution-bar, section-layout, timestamp-precision, message-expose,
 log-level-vocabulary, runtime-config), to the designs in § Fix designs read
 ahead, with the greps of `tests/HARNESS-DESIGN.md` run over each harness first
 (grep 15 still lists format-detection, histogram-bin-counters, index-read-back,
@@ -225,6 +228,20 @@ decided by reading it.
   lines that differ from the passed count, or a PASS line not marked run-free;
   one harness in the suite. Measured at drop 1: the stub runs of all 52
   harnesses take about 7 minutes together.
+- **D4** (the architect, 2026-10-24, after drop 4). The four selection defects
+  of § Observations (A selection that leaves a scenario out) are fixed under
+  this issue, though outside its condition: in
+  `validate-category-names.sh`, `validate-message-control-characters.sh` and
+  `validate-summary-contribution-bar.sh` the summary and its exit move after
+  the last scenario's block, so a `--scenario` naming any other scenario
+  prints the summary and exits non-zero after a FAIL; in
+  `validate-message-grouping.sh` `DOWNLOAD_KEYS` and `out_downloads_75` are set
+  where both scenarios that read them can, so `--scenario signed-downloads-75`
+  or `--scenario signed-downloads-75-repeat` alone runs. Each fix is proven by
+  running a scenario other than the last alone, on the committed harness and
+  the fixed one, with a failure (a stub run). Not yet done: the architect put
+  the work on hold at drop 4's end; it is done when the work resumes, before
+  drop 5, in one commit of its own.
 
 ## Constraints
 
@@ -768,7 +785,8 @@ more than the method's table gives:
 Found while reading, outside this issue's condition (a failed or silent
 `ltl`); recorded here and named in the completion comment.
 
-- **A selection that leaves a scenario out.** `validate-category-names.sh`,
+- **A selection that leaves a scenario out** (to be fixed under D4).
+  `validate-category-names.sh`,
   `validate-message-control-characters.sh` and
   `validate-summary-contribution-bar.sh` print their summary and exit inside
   their last scenario's `if` block, so `--scenario` naming any other scenario
