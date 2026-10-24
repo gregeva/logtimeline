@@ -78,8 +78,11 @@ fail_with() {
 
 # assert_command: PASS when the command exits 0 (tests/HARNESS-DESIGN.md
 # section When the assertion isn't a simple line grep).
+# A check given `reads "CAPTURE ..."` is skipped, and counts nothing, when the
+# harness's own run of ltl for one of them failed; capture_ltl() counted that
+# failure once (tests/HARNESS-DESIGN.md Trap 13).
 assert_command() {
-    local command label asserts produced_by contract detail
+    local command label asserts produced_by contract detail reads=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -87,10 +90,18 @@ assert_command() {
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            reads)       reads="$2";       shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
     : "${command:?}" "${label:?}" "${asserts:?}" "${produced_by:?}" "${contract:?}"
+    local cap
+    for cap in $reads; do
+        if [[ "$(cat "$cap.rc" 2>/dev/null)" != 0 ]]; then
+            echo "  SKIP  $current_scenario :: $label (its run of ltl failed: $(basename "$cap"))"
+            return 0
+        fi
+    done
     if detail=$(eval "$command" 2>&1); then
         pass_with "$label${detail:+ ($(echo "$detail" | tail -1))}"
     else
@@ -120,15 +131,30 @@ check_warnings() {
 # expected cells, section rows and heatmap columns come from here, not from the
 # tool. -ni per Invocation coherence (it changes the options row only, which no
 # crop reads).
+# A non-zero exit or an empty capture is one failure, counted here; $out.rc
+# records the outcome, and the checks that read the capture are skipped.
 capture_ltl() {
-    local trace="$1" out="$2" args
+    local trace="$1" out="$2" args rc=0
     args=$(sed -n 's/^trace: capture run: ltl //p' "$trace")
-    [[ -n "$args" ]] || { echo "no capture run in the trace $trace"; return 1; }
+    if [[ -z "$args" ]]; then
+        echo none > "$out.rc"
+        fail_with "a capture run in the trace ($(basename "$trace"))" 'The tool traces the ltl command of its capture run' \
+            'run_recipe() in process/capture-screenshots.pl' 'tests/HARNESS-DESIGN.md Trap 13' "no capture run in the trace $trace"
+        return 0
+    fi
     # shellcheck disable=SC2086
-    ( cd "$REPO_DIR" && "$LTL" -ni --debug-layout -V section-layout $args ) > "$out" 2> "$out.stderr"
+    ( cd "$REPO_DIR" && "$LTL" -ni --debug-layout -V section-layout $args ) > "$out" 2> "$out.stderr" || rc=$?
     # The -V block prints after the last row, so rows keep their numbers.
     sed -n '/^=== section-layout ===$/,/^=== END section-layout ===$/p' "$out" > "$out.layout"
     check_warnings "$out"
+    [[ $rc -eq 0 && ! -s "$out" ]] && rc=empty
+    echo "$rc" > "$out.rc"
+    if [[ "$rc" != 0 ]]; then
+        fail_with "ltl's own run for the comparison ($(basename "$out"))" \
+            'The harness runs ltl on the command the tool traced, and the run exits 0 and prints the rows the image is compared with' \
+            'ltl' 'tests/HARNESS-DESIGN.md Trap 13' "exit: $rc" "stderr: $(head -3 "$out.stderr" | tr '\n' ' ')"
+    fi
+    return 0
 }
 
 # A section's first and last row from the harness's own section-layout.
@@ -180,12 +206,14 @@ if scenario_wanted "$current_scenario"; then
     sum_last=$(( sv_last > sf_last ? sv_last : sf_last ))
     assert_command \
         command     "[[ \"\$(traced_crop '$out' 'sections=timeline start=+3 end=-1 cols=100,-25 label=a')\" == '$((tl_first + 3)) $((tl_last - 1)) 100 175' ]]" \
+        reads       "$TMP_DIR/cells.ltl" \
         label       "timeline start=+3 end=-1 cols=100,-25 at width 200: rows $((tl_first + 3))-$((tl_last - 1)), columns 100-174" \
         asserts     'A crop runs from its first section start row plus the start offset to its last row plus the end offset, rows as -V section-layout reports them; cols 100,-25 at width 200 is columns 100 up to 25 before the right edge' \
         produced_by 'resolve_crop() in process/capture-screenshots.pl, reading print_section_layout() in ltl' \
         contract    "$CONTRACT D2, D3"
     assert_command \
         command     "[[ \"\$(traced_crop '$out' 'sections=summary-values,summary-files label=b')\" == '$sv_first $sum_last 0 200' ]]" \
+        reads       "$TMP_DIR/cells.ltl" \
         label       "summary-values,summary-files: rows $sv_first-$sum_last, to the longer of the two side-by-side parts" \
         asserts     'A crop naming side-by-side parts ends at the largest last row among them' \
         produced_by 'resolve_crop() in process/capture-screenshots.pl' \
@@ -195,6 +223,7 @@ if scenario_wanted "$current_scenario"; then
         file="$TMP_DIR/c-$(echo "$spec" | sed -E 's/sections=([^ ]*).*label=([a-z]+)/\1-\2/; s/,/+/g').svg"
         assert_command \
             command     "perl '$CELLS' chars '$file' '$TMP_DIR/cells.ltl' $first $last $cf $cs 0,0,0,0" \
+            reads       "$TMP_DIR/cells.ltl" \
             label       "characters of '$spec' equal ltl's rows $first-$last, columns $cf-$((cs - 1))" \
             asserts     'Every cell of the image carries the character ltl printed in that row and column: the crop is a slice of the output, placed on the cell grid' \
             produced_by 'render_svg() and build_grid() in process/capture-screenshots.pl' \
@@ -214,6 +243,7 @@ if scenario_wanted "$current_scenario"; then
         read -r first last cf cs <<< "$(traced_crop "$out" '')" || true
         assert_command \
             command     "perl '$CELLS' colours '$TMP_DIR/k$bg.svg' '$TMP_DIR/colours-$bg.ltl' $first $last $cf $cs 0,0,0,0" \
+            reads       "$TMP_DIR/colours-$bg.ltl" \
             label       "$bg: every colour ltl names is drawn in one colour, 256-colour indices at their xterm values" \
             asserts     'Each foreground and background colour ltl printed maps to exactly one colour in the image, through the tool colour table; indices 16 to 255 at the standard xterm values; the default background is the image background' \
             produced_by 'palette_for() and build_grid() in process/capture-screenshots.pl' \
@@ -232,6 +262,7 @@ if scenario_wanted "$current_scenario"; then
     read -r first last cf cs <<< "$(traced_crop "$out" 'sections=histogram')" || true
     assert_command \
         command     "perl '$CELLS' ticks '$TMP_DIR/t-histogram.svg' '$TMP_DIR/ticks.ltl' $first $last $cf $cs 0,0,0,0" \
+        reads       "$TMP_DIR/ticks.ltl" \
         label       'every percentile tick on the histogram axis sits in the column ltl printed it' \
         asserts     'The tick glyphs on the histogram axis row are in the same columns in the image as in ltl output, whose columns tests/validate-histogram-ticks.sh asserts' \
         produced_by 'render_svg() in process/capture-screenshots.pl; the axis row of print_histogram() in ltl' \
@@ -248,13 +279,14 @@ if scenario_wanted "$current_scenario"; then
     capture_ltl "$out" "$TMP_DIR/heat.ltl"
     args=$(sed -n 's/^trace: capture run: ltl //p' "$out")
     # shellcheck disable=SC2086
-    ( cd "$REPO_DIR" && "$LTL" -ni -V heatmap-palette $args ) > "$TMP_DIR/heat.palette" 2> "$TMP_DIR/heat.palette.stderr"
+    ( cd "$REPO_DIR" && "$LTL" -ni -V heatmap-palette $args ) > "$TMP_DIR/heat.palette" 2> "$TMP_DIR/heat.palette.stderr" || true
     check_warnings "$TMP_DIR/heat.palette"
     active=$(sed -n 's/^gradient_active: //p' "$TMP_DIR/heat.palette")
     gradient=$(sed -n "s/^gradient_$active: //p" "$TMP_DIR/heat.palette")
     read -r first last cf cs <<< "$(traced_crop "$out" 'sections=timeline')" || true
     assert_command \
         command     "[[ -n '$gradient' ]] && perl '$CELLS' heatmap '$TMP_DIR/h-timeline.svg' '$TMP_DIR/heat.ltl' $first $last $cf $cs 0,0,0,0 '$TMP_DIR/heat.ltl.stderr' '$gradient'" \
+        reads       "$TMP_DIR/heat.ltl" \
         label       "heatmap cells use only the $active gradient ($gradient) and every one is in the image" \
         asserts     'Every heatmap cell ltl printed, located by the layout engine column offsets, carries a colour of the gradient -V heatmap-palette reports, and the image carries each of them' \
         produced_by 'print_heatmap_row() in ltl; render_svg() in process/capture-screenshots.pl' \
@@ -398,6 +430,7 @@ if scenario_wanted "$current_scenario"; then
         read -r first last cf cs <<< "$(traced_crop "$out" 'sections=timeline,histogram')" || true
         assert_command \
             command     "perl '$CELLS' edges '$TMP_DIR/e-timeline+histogram.svg' '$TMP_DIR/edges.ltl' $first $last $cf $cs 0,0,0,0" \
+            reads       "$TMP_DIR/edges.ltl" \
             label       'every full block of the timeline and the histogram, as Quick Look displays it, fills its own columns' \
             asserts     'Drawn as font text, a full block sits within its cell columns as displayed: sampled 1.5 device pixels inside its left and right edges it is its own colour' \
             produced_by 'render_svg() in process/capture-screenshots.pl (textLength per run, full blocks drawn last)' \
@@ -510,7 +543,8 @@ if scenario_wanted "$current_scenario"; then
         cp "$REPO_DIR/$FIXTURE" "$folder/access.txt"
         real=$(cd "$folder" && pwd -P)
         if [[ "$case" == existing ]]; then
-            ( cd "$folder" && "$LTL" --disable-progress -idx -bs 1440 -oe -n 1 access.txt ) > "$TMP_DIR/index-seed" 2> "$TMP_DIR/index-seed.stderr"
+            # A failed seed leaves no index, which the check below fails.
+            ( cd "$folder" && "$LTL" --disable-progress -idx -bs 1440 -oe -n 1 access.txt ) > "$TMP_DIR/index-seed" 2> "$TMP_DIR/index-seed.stderr" || true
             check_warnings "$TMP_DIR/index-seed"
         fi
         had_index=$([[ -s "$folder/ltl-index.csv" ]] && echo yes || echo no)
@@ -629,12 +663,14 @@ if scenario_wanted "$current_scenario"; then
     read -r first last cf cs <<< "$(traced_crop "$out" 'sections=notices')" || true
     assert_command \
         command     "perl '$CELLS' faint '$TMP_DIR/f-notices.svg' '$TMP_DIR/faint.ltl' ${first:-0} ${last:-0} ${cf:-0} ${cs:-0} 0,0,0,0 '$DARK_TEXT'" \
+        reads       "$TMP_DIR/faint.ltl" \
         label       'the panel heading description: faint cells drawn halfway between their colour and the background' \
         asserts     'Text ltl prints faint (SGR 2) is drawn halfway between the colour it names and the background, as Terminal.app draws it, never at full strength' \
         produced_by 'build_grid() and faint_of() in process/capture-screenshots.pl' \
         contract    "$CONTRACT D27"
     assert_command \
         command     "perl '$CELLS' colours '$TMP_DIR/f-notices.svg' '$TMP_DIR/faint.ltl' ${first:-0} ${last:-0} ${cf:-0} ${cs:-0} 0,0,0,0" \
+        reads       "$TMP_DIR/faint.ltl" \
         label       'every colour of the panel, faint and full, drawn consistently' \
         asserts     'Each colour ltl names, faint or not, is drawn in one colour throughout the image' \
         produced_by 'build_grid() in process/capture-screenshots.pl' \

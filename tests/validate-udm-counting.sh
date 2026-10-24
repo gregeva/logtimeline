@@ -140,7 +140,9 @@ assert_command() {
     : "${produced_by:?assert_command requires produced_by}"
     : "${contract:?assert_command requires contract}"
 
-    if eval "$command" > /dev/null 2>&1; then
+    # In a subshell: an `exit` in the command, or an unbound variable under
+    # set -u, would otherwise end the harness (tests/HARNESS-DESIGN.md shape 15).
+    if ( eval "$command" ) > /dev/null 2>&1; then
         echo "  PASS  $current_scenario :: $label"
         pass=$((pass + 1))
     else
@@ -229,15 +231,15 @@ scenario_users_column() {
     # -xu: the thread-session fixture has one message per line, so the split
     # is proven on the ThingWorx specimen, whose messages repeat across users.
     local tw="$REPO_DIR/tests/fixtures/format-detection/thingworx-application-log.txt"
-    local with without
-    "$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 -xu "$tw" > "$TMP_DIR/xu-with.out" 2> "$TMP_DIR/xu-with.err"
+    local with without rc_with=0 rc_without=0
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 -xu "$tw" > "$TMP_DIR/xu-with.out" 2> "$TMP_DIR/xu-with.err" || rc_with=$?
     check_stderr_warnings "$TMP_DIR/xu-with.err"
-    "$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 "$tw" > "$TMP_DIR/xu-without.out" 2> "$TMP_DIR/xu-without.err"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 "$tw" > "$TMP_DIR/xu-without.out" 2> "$TMP_DIR/xu-without.err" || rc_without=$?
     check_stderr_warnings "$TMP_DIR/xu-without.err"
     with=$(sed -E 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/xu-with.out" | grep -cE ' user=(SuperUser|Administrator)( |$)') || with=0
     without=$(sed -E 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/xu-without.out" | grep -cE ' user=(SuperUser|Administrator)( |$)') || without=0
     assert_command \
-        command "[ \"$with\" -gt 0 ] && [ \"$without\" -eq 0 ]" \
+        command "[ $rc_with -eq 0 ] && [ $rc_without -eq 0 ] && [ -s '$TMP_DIR/xu-without.out' ] && [ \"$with\" -gt 0 ] && [ \"$without\" -eq 0 ]" \
         label "-xu appends the user to the end of the message key ($with rows carry a user under -xu, $without without)" \
         asserts '-xu appends user=<value> to the end of the message key, so a text logged by several users becomes one row per user, and no user reaches the key without it' \
         produced_by 'the exposed-value append in read_and_process_logs() in ltl' \

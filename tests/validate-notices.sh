@@ -104,6 +104,14 @@ run_ok() {
     fi
 }
 
+# ran <tag>: the run exited 0 and wrote its output. An absence, or a count of
+# 0, read from a run that did not holds, so such a check needs its evidence
+# first and is skipped, counting nothing, without it (tests/HARNESS-DESIGN.md
+# Trap 13); the run's failure is counted by run_ok or by the checks that read
+# what it should have written.
+ran() { [[ "$(cat "$TMP_DIR/$1.rc" 2>/dev/null)" == 0 && -s "$TMP_DIR/$1.out" ]]; }
+skipped() { echo "  SKIP  $current_scenario :: $1 (no evidence the run it reads happened)"; }
+
 # section <tag>: the notices section's body, delimiters excluded; empty when absent.
 section() { awk '/^=== notices ===$/ { s = 1; next } /^=== END notices ===$/ { s = 0 } s' "$TMP_DIR/$1.out"; }
 # has_section <tag>: yes when the section's opening and closing delimiters are both present.
@@ -231,8 +239,10 @@ scenario_record_fields() {
         'A deferred, visible notice is drawn by the panel; an invisible one by no surface' 'draw_deferred_notices() in ltl' "$C_STORE"
     check "choice yes and no" "$(block_field fields fixture-statement choice)|$(block_field fields fixture-choice-buttons choice)|$(block_field fields fixture-choice-options choice)" "no|yes|yes" \
         'A record with a question or buttons carries a choice' 'emit_notices_verbose() in ltl' "$C_SECTION"
+    if [[ -n "$(block fields fixture-choice-buttons)" ]]; then
     check "buttons only: no headings, no options" "$(block fields fixture-choice-buttons | grep -cE '^  (headings|option): ' || true)" "0" \
         'A choice with buttons and no options list has no headings and no option blocks' 'emit_notices_verbose() in ltl' "$C_SECTION"
+    else skipped "buttons only: no headings, no options"; fi
     check "default headings" "$(block_field fields fixture-choice-options headings)" "What? | How? | Why?" \
         'Options given no headings are headed What? How? Why?, as many as their parts' 'notice() in ltl' "$C_STORE"
     check "the producer's headings" "$(block_field fields fixture-choice-headings headings)" "Order | Option" \
@@ -275,8 +285,10 @@ scenario_shape() {
         'Every line of the section is in the harness content shape' 'emit_notices_verbose() in ltl' \
         "tests/HARNESS-DESIGN.md § Content shape; $C_SECTION"
     [[ "$rc" -eq 0 ]] || echo "$departures" | sed 's/^/        /' | head -10
+    if [[ -n "$(section shape)" ]]; then
     check "ASCII only" "$(section shape | LC_ALL=C grep -c '[^[:print:][:space:]]' || true)" "0" \
         'The section is ASCII; glyphs and bullets belong to the surfaces' 'emit_notices_verbose() in ltl' "$C_SECTION"
+    else skipped "ASCII only"; fi
     run_ok layout "$LTL" -bs 5 --notice-fixture record-fields -V section-layout "$DURATION_FIXTURE"
     run_ok layout-notices "$LTL" -bs 5 --notice-fixture record-fields -V section-layout,notices "$DURATION_FIXTURE"
     local a b
@@ -340,8 +352,10 @@ scenario_panel_placement() {
     read -r state timeline _ <<<"$(layout place timeline)"
     check "after the title, before the timeline" "$(( $(layout place title | awk '{ print $2 + $3 }') + 1 ))|$(( first + rows + 1 ))" "$first|$timeline" \
         'One blank row after the title, the panel, one blank row, then the timeline' 'open_section() in ltl' "$C_PANEL"
+    if ran place; then
     check "on standard output only" "$(wc -c < "$TMP_DIR/place.err" | tr -d ' ')" "0" \
         'The panel prints on standard output; standard error carries nothing' 'draw_notice_panel() in ltl' "$C_PANEL"
+    else skipped "on standard output only"; fi
 }
 
 scenario_panel_none() {
@@ -551,8 +565,11 @@ scenario_migration_categories() {
     done
     local extra
     extra=$(cut -d= -f1 <<<"$raised" | grep -vxF -f <(printf '%s\n' "${MIGRATED_KINDS[@]%%=*}") | paste -sd, - || true)
+    # A source without notice() calls (a stub's) raises no kind outside it.
+    if [[ -n "$raised" ]]; then
     check "no kind outside the inventory" "${extra:-none}" "none" \
         'Every kind ltl raises is one the inventory names' 'notice() calls in ltl' "$C_MIGRATION"
+    else skipped "no kind outside the inventory"; fi
 }
 
 scenario_migration_raised() {
@@ -570,8 +587,10 @@ scenario_migration_raised() {
             'A migrated notice is recorded by the sub that raised it, in the stage it ran in, deferred, and drawn in the panel' \
             "$producer() and notice() in ltl" "$C_MIGRATION"
     done
+    if ran raised; then
     check "nothing on standard error" "$(wc -c < "$TMP_DIR/raised.err" | tr -d ' ')" "0" \
         'The notices raised after the read and at finalize reach the panel, never standard error' 'draw_deferred_notices() in ltl' "$C_MIGRATION"
+    else skipped "nothing on standard error"; fi
 }
 
 # Nothing prints on standard error but what the inventory's table of what is
@@ -587,9 +606,12 @@ scenario_stderr_sites() {
     check "the scan finds the sites" "$([[ -n "$subs" ]] && grep -c . <<<"$subs" | awk '$1 > 0 { print "found" }')" "found" \
         'The scan reads ltl and finds its standard error sites, so an empty result cannot pass' 'ltl source' "$C_MIGRATION"
     outside=$(grep -vE "$NOT_NOTICE_SUBS" <<<"$subs" | paste -sd, - || true)
+    # Counted by "the scan finds the sites" when the scan found nothing.
+    if [[ -z "$subs" ]]; then skipped "every standard error site is one the table names"; else
     check "every standard error site is one the table names" "${outside:-none}" "none" \
         'Every print STDERR, warn and die left in ltl is in a sub the table of what is not a notice names; a notice goes through notice() or ask()' \
         'ltl source' "$C_MIGRATION"
+    fi
 }
 
 # The run index (rows 32 to 34), each in a directory of its own, since the index
@@ -710,8 +732,11 @@ scenario_tmux_modal_keys() {
         'Shift-Tab moves the highlight one button left, Tab one right, wrapping round' 'ask() in ltl (the stage-one key handling)' "$C_ASK"
     check "Esc takes the default" "$(pane_answer mk fixture-ask)|$(pane_exit mk)" "button=c option=- how=esc|0" \
         'Esc closes the surface and takes the default, recorded how=esc' 'ask() in ltl' "$C_ASK"
+    # No box left holds on a pane that never drew one: the box up first.
+    if grep -q '╭' "$TMP_DIR/mk.up.txt"; then
     check "the screen is given back" "$(cat "$TMP_DIR/mk.state")|$(grep -c '╭' "$TMP_DIR/mk.screen.txt" || true)" "0 1|0" \
         'Leaving, the alternate screen is closed, the cursor shown, and no box row is left' 'notice_close_drawer() and notice_restore_terminal() in ltl' "$C_ASK"
+    else skipped "the screen is given back"; fi
 }
 
 scenario_tmux_countdown() {
@@ -852,7 +877,7 @@ scenario_preread() {
     tmux_ready || return 0
     tmux_run ps "sleep:2.5 cap:up state:up s sleep:1.5" -bs 1440 -oe -n 1 -so time -V notices "$DURATION_FIXTURE"
     local title_row
-    title_row=$(grep -n "log timeline" "$TMP_DIR/ps.up.txt" | head -1 | cut -d: -f1)
+    title_row=$(grep -n "log timeline" "$TMP_DIR/ps.up.txt" | head -1 | cut -d: -f1) || title_row=""
     check "in a terminal the question is the compact box under the title" "$(grep -c 'Continue with these options?  Stop and correct them' "$TMP_DIR/ps.up.txt")|$(cut -d' ' -f1 "$TMP_DIR/ps.up.state")|$(grep -n '╭' "$TMP_DIR/ps.up.txt" | head -1 | cut -d: -f1)" \
         "1|0|$(( title_row + 2 ))" \
         'In a terminal the question is the compact box with its choice, on the normal screen, on the row after the title with no empty row before it, waiting with its countdown (D19)' 'ask_about_option_notices() and ask() in ltl' "$DOC § D19; $C_ASK"
@@ -906,8 +931,12 @@ scenario_tmux_browser() {
         'Enter on a notice with a choice opens its options list as a modal over the browser, which stays under it' 'notice_ask_surface() in ltl (stage two, under the browser)' "$C_BROWSER"
     check "the answer marks it and shows what was chosen" "$(grep -c '▶ ➤ the focus a notice with options to choose in the browser .*◆' "$TMP_DIR/tb.chosen.txt")|$(grep -c 'chosen: the second -so bytes' "$TMP_DIR/tb.chosen.txt")" "1|1" \
         'Once answered the notice is marked ◆ and its detail shows what was chosen; the browser is back as it was' 'notice_browser() in ltl' "$C_BROWSER"
+    # Two captures of a pane that never drew compare equal: the answered
+    # marker first.
+    if grep -q '◆' "$TMP_DIR/tb.chosen.txt"; then
     check "an answered choice is locked" "$(diff -q "$TMP_DIR/tb.chosen.txt" "$TMP_DIR/tb.again.txt" > /dev/null && echo locked || echo reopened)" "locked" \
         'Enter on a choice already taken opens nothing: the answer is locked (D11)' 'notice_browser() in ltl' "$C_BROWSER"
+    else skipped "an answered choice is locked"; fi
     check "the answer is on the record, c closes" "$(pane_answer tb fixture-browser-choice | paste -sd'#' -)|$(cat "$TMP_DIR/tb.state")|$(grep -c 'LINES READ' "$TMP_DIR/tb.final.txt")" \
         "button=l option=second how=key#-|0 1|1" \
         'The browser sets the answer on the notice through the layered ask (D12); c closes it, the terminal given back and the run going on' 'notice_ask_surface() and notice_browser() in ltl' "$C_BROWSER"

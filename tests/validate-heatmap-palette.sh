@@ -87,18 +87,34 @@ failures=()
 current_scenario=""
 
 # Run ltl with -V heatmap-palette and the standard suppression flag.
-# Captures combined output to a temp file, echoes the path.
-# Args after the function name are forwarded verbatim before the input file.
+# Captures combined output to a temp file whose path is handed back in
+# SECTION_OUT. Args after the function name are forwarded verbatim before the
+# input file. Called directly, never inside $( ): a non-zero exit or an empty
+# capture is one failure, counted here in the main shell, and the caller skips
+# its checks (tests/HARNESS-DESIGN.md Trap 12 and Trap 13).
+SECTION_OUT=""
 run_section() {
-    local outfile
+    local outfile rc=0
     outfile=$(mktemp)
+    SECTION_OUT="$outfile"
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress -ni $SHAPE -V heatmap-palette "$@" "$SCRIPT_LOG" > "$outfile" 2>"$outfile.stderr" || true
-    if [[ ! -s "$outfile" ]]; then
-        echo "FAIL: captured output is empty for: $LTL --disable-progress -ni $SHAPE -V heatmap-palette $* $SCRIPT_LOG" >&2
-        exit 1
+    "$LTL" --disable-progress -ni $SHAPE -V heatmap-palette "$@" "$SCRIPT_LOG" > "$outfile" 2>"$outfile.stderr" || rc=$?
+    if [[ $rc -ne 0 || ! -s "$outfile" ]]; then
+        run_failed "the -V heatmap-palette run (exit $rc, $(wc -c < "$outfile" | tr -d ' ') bytes): $*" "$outfile.stderr"
+        return 1
     fi
-    echo "$outfile"
+}
+
+# run_failed REASON STDERR: one failure for a run that gave nothing to read;
+# the caller skips its checks.
+run_failed() {
+    echo "  FAIL  $current_scenario :: $1"
+    echo "        asserts:     the run exits 0 and writes the output its checks read"
+    echo "        produced_by: ltl"
+    echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+    sed 's/^/        | /' "$2" | head -5
+    echo "  SKIP  $current_scenario :: its checks (the run gave nothing to read)"
+    fail=$((fail + 1)); failures+=("$current_scenario :: $1")
 }
 
 # Runtime-warning cleanliness for a run_section capture (its stderr lives
@@ -171,7 +187,8 @@ scenario_no_heatmap() {
     current_scenario="no-heatmap"
     echo "[$current_scenario]"
     local out
-    out=$(run_section)
+    run_section || return 0
+    out="$SECTION_OUT"
     check_capture_warnings "$out"
 
     assert_header_present "$out"
@@ -212,7 +229,8 @@ scenario_background() {
     echo "[$current_scenario]"
     local out
     # shellcheck disable=SC2086
-    out=$(run_section $ltl_args)
+    run_section $ltl_args || return 0
+    out="$SECTION_OUT"
     check_capture_warnings "$out"
 
     assert_header_present "$out"
@@ -261,7 +279,8 @@ scenario_palette() {
     echo "[$current_scenario]"
     local out
     # shellcheck disable=SC2086
-    out=$(run_section $ltl_args)
+    run_section $ltl_args || return 0
+    out="$SECTION_OUT"
     check_capture_warnings "$out"
 
     assert_header_present "$out"
@@ -367,11 +386,13 @@ run_udm() {
     echo "$?" > "$base.exit"
     set -e
     cat "$base.stderr" "$base.out" > "$base.all"
-    if [[ ! -s "$base.out" ]]; then
-        echo "FAIL: captured output is empty for: $LTL --disable-progress $UDM_SHAPE -V heatmap-palette $* $input" >&2
-        exit 1
-    fi
     check_capture_warnings "$base"
+    # A run that printed nothing exits 0 too: an empty capture is one failure
+    # and the caller's checks, the exit-status ones among them, are skipped.
+    if [[ ! -s "$base.out" ]]; then
+        run_failed "the run $name printed nothing (exit $(cat "$base.exit")): $*" "$base.stderr"
+        return 1
+    fi
 }
 
 # Self-documenting assertion over a command (eval'd; PASS on exit 0).
@@ -431,8 +452,8 @@ scenario_udm_all_zero() {
     current_scenario="udm-all-zero"
     echo "[$current_scenario]"
     sed 's/elapsed=0/elapsed=5/' "$UDM_FIXTURE" > "$UDM_TMP/elapsed-five.txt"
-    run_udm zero    "$UDM_FIXTURE"              -udm 'elapsed:s:max' -hm elapsed
-    run_udm control "$UDM_TMP/elapsed-five.txt" -udm 'elapsed:s:max' -hm elapsed
+    run_udm zero    "$UDM_FIXTURE"              -udm 'elapsed:s:max' -hm elapsed || return 0
+    run_udm control "$UDM_TMP/elapsed-five.txt" -udm 'elapsed:s:max' -hm elapsed || return 0
 
     assert_command \
         command     "[[ \$(cat '$UDM_TMP/zero.exit') == 0 ]] || { echo \"exit \$(cat '$UDM_TMP/zero.exit')\"; tail -3 '$UDM_TMP/zero.stderr'; false; }" \
@@ -454,7 +475,7 @@ scenario_udm_no_value() {
     scenario_wanted udm-no-value || return 0
     current_scenario="udm-no-value"
     echo "[$current_scenario]"
-    run_udm none "$NO_VALUE_FIXTURE" -udm x::max -hm x
+    run_udm none "$NO_VALUE_FIXTURE" -udm x::max -hm x || return 0
 
     assert_command \
         command     "[[ \$(cat '$UDM_TMP/none.exit') == 0 ]] || { echo \"exit \$(cat '$UDM_TMP/none.exit')\"; tail -3 '$UDM_TMP/none.stderr'; false; }" \
@@ -503,8 +524,8 @@ scenario_udm_colour_by_position() {
     scenario_wanted udm-colour-by-position || return 0
     current_scenario="udm-colour-by-position"
     echo "[$current_scenario]"
-    run_udm first-empty "$UDM_FIXTURE" -udm x::max -udm b::max -hm b
-    run_udm both        "$UDM_FIXTURE" -udm a::max -udm b::max -hm b
+    run_udm first-empty "$UDM_FIXTURE" -udm x::max -udm b::max -hm b || return 0
+    run_udm both        "$UDM_FIXTURE" -udm a::max -udm b::max -hm b || return 0
 
     assert_command \
         command     "e=\$(column_fill first-empty udm_b) && c=\$(column_fill both udm_b) && [[ \$e != none && \$e == \$c ]] || { echo \"first spec empty: \$e  both capture: \$c\"; false; }" \
@@ -519,7 +540,7 @@ scenario_udm_heatmap_matches_column() {
     scenario_wanted udm-heatmap-matches-column || return 0
     current_scenario="udm-heatmap-matches-column"
     echo "[$current_scenario]"
-    run_udm first-empty-hm "$UDM_FIXTURE" -udm x::max -udm b::max -hm b
+    run_udm first-empty-hm "$UDM_FIXTURE" -udm x::max -udm b::max -hm b || return 0
 
     assert_command \
         command     "n=\$(palette_colour first-empty-hm) && f=\$(column_fill first-empty-hm udm_b) && [[ -n \${PLAIN_BG_NUM[\$n]:-} && \$f == \"256:\${PLAIN_BG_NUM[\$n]}\" ]] || { echo \"heatmap colour: \$n (fill 256:\${PLAIN_BG_NUM[\$n]:-?})  column fill: \$f\"; false; }" \
