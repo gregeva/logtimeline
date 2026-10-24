@@ -189,6 +189,9 @@ check_render_columns() {
 # Takes a file and a description; scans the whole file, so it also catches a
 # control character that reached a surface the row scan above does not read.
 # LF is excluded because it is the record separator of every surface checked.
+# The absence is read against the fixture's messages, so a surface that
+# carries none of them (its logger name in the bracketed key prefix) is a
+# failure, not a pass.
 check_no_control_chars() {
     "$PERL" -e '
         my ($path, $what, $allow) = @ARGV;
@@ -196,6 +199,7 @@ check_no_control_chars() {
         open my $fh, "<", $path or die "cannot open $path: $!\n";
         local $/; my $data = <$fh>; close $fh;
         unless (length $data) { print "anchor not found: $path is empty\n"; exit 1 }
+        unless ($data =~ /\[wt\.method\.server\./) { print "anchor not found: no fixture message in $what\n"; exit 1 }
         my %ok = map { $_ => 1 } (0x0a, map { hex } split /,/, $allow ? $allow : "");
         my %seen;
         while ($data =~ /([\x00-\x1f\x7f])/g) {

@@ -104,9 +104,10 @@ assert_command() {
 
 # capture OUTFILE EXTRA_ARGS... — one counter-shaped run: coarsest bucket, no
 # empty buckets, minimal messages table, classification block requested.
-# A non-zero exit or an empty capture is one failure, counted here; the exit
-# status is kept in OUTFILE.rc, and the checks that read the capture are
-# skipped (captured()).
+# A non-zero exit, an empty capture, or one without the classification block
+# every check reads is one failure, counted here; the outcome is kept in
+# OUTFILE.rc (the exit code, "empty" or "no-section"), and the checks that
+# read the capture are skipped (captured()).
 capture() {
     local outfile="$1"; shift
     local rc
@@ -115,10 +116,15 @@ capture() {
         > "$outfile" 2> "$outfile.stderr"
     rc=$?
     set -e
+    if [[ $rc -eq 0 && ! -s "$outfile" ]]; then
+        rc=empty
+    elif [[ $rc -eq 0 ]] && ! grep -qE '^=== format-detection / classification ===$' "$outfile"; then
+        rc=no-section
+    fi
     echo "$rc" > "$outfile.rc"
-    if [[ $rc -ne 0 || ! -s "$outfile" ]]; then
-        echo "  FAIL  $current_scenario :: capture $(basename "$outfile") (exit $rc, $(wc -c < "$outfile" | tr -d ' ') bytes): $*"
-        echo "        asserts:     every capture run exits 0 and writes its output"
+    if [[ $rc != 0 ]]; then
+        echo "  FAIL  $current_scenario :: capture $(basename "$outfile") ($rc, $(wc -c < "$outfile" | tr -d ' ') bytes): $*"
+        echo "        asserts:     every capture run exits 0 and writes the classification block of -V format-detection"
         echo "        produced_by: ltl"
         echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
         sed 's/^/        | /' "$outfile.stderr" | head -5
@@ -126,8 +132,8 @@ capture() {
     fi
 }
 
-# captured CAPTURE: the run exited 0 and wrote its output.
-captured() { [[ "$(cat "$1.rc" 2>/dev/null)" == 0 && -s "$1" ]]; }
+# captured CAPTURE: the run exited 0 and wrote its classification block.
+captured() { [[ "$(cat "$1.rc" 2>/dev/null)" == 0 ]]; }
 
 # refused_as_unknown OPTION [ARG]: ltl exits non-zero and its error names
 # OPTION as an unknown option. A refusal is its exit code and its message,

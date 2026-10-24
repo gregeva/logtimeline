@@ -278,8 +278,11 @@ csv_cache_produce() {
         return 1
     fi
 
+    # The run directory sits under the cache directory, so a run interrupted
+    # here leaves it where cleanup-test-artifacts.sh removes it, never in
+    # $TMPDIR (tests/HARNESS-DESIGN.md Trap 10).
     local tmp_dir
-    tmp_dir="$(mktemp -d)"
+    tmp_dir="$(mktemp -d "$_CSV_CACHE_DIR/produce.XXXXXX")"
     local rc=0
     (
         cd "$tmp_dir"

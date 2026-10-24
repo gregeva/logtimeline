@@ -60,8 +60,8 @@ if [[ ! -x "$EXTRACTOR" ]]; then
 fi
 
 # Substitution table: placeholder name -> derived fixture under $TMP_DIR.
-# Per repo memory (feedback_test_logs.md), do NOT use
-# logs/AccessLogs/localhost_access_log.2025-03-21.txt - corrupt lines.
+# docs/test-logs.md marks logs/AccessLogs/localhost_access_log.2025-03-21.txt
+# corrupt (concatenated records), so it is not used.
 #
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
 # the harness asserts "the example parses and runs", never what the data
