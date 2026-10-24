@@ -29,9 +29,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# Always the script itself, never an override: this harness chooses both paths
-# explicitly, counts the markers in the source and injects faults into a copy.
-LTL="$REPO_DIR/ltl"
+# Taken from the environment like every other harness, so a run against an
+# ltl that fails can be pointed here. The release gate's second pass, which
+# points LTL at a copy of ltl with the read-path threshold at 0, leaves this
+# harness out: it chooses both paths explicitly itself, and checks the default
+# threshold (features/621-generated-read-loop-body.md D3 as amended;
+# features/747-harness-checks-on-a-failed-run.md D1).
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"

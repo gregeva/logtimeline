@@ -305,13 +305,14 @@ architect, is a last resort after the steps have been tried singly.
    copy of `ltl` whose one difference is a threshold of 0, so each file takes the
    generated body; the harnesses that read the source read the same source. The
    cache is cleared before and after, since it does not know which `ltl` filled
-   it. `tests/validate-read-path.sh` runs `ltl` itself and compares the two paths
-   on its own.
+   it. `tests/validate-read-path.sh` is left out of this pass: it compares the
+   two paths on its own and checks the default threshold, which the copy
+   changes, so it runs in the first pass only.
    ```bash
    gen="$(mktemp -d)/ltl"
    sed 's/^my \$read_path_threshold       = 2_097_152;/my $read_path_threshold       = 0;/' ltl > "$gen" && chmod +x "$gen"
    diff ltl "$gen" | grep -c '^>'      # exactly 1, or the copy is wrong
-   LTL="$gen" CI=1 ./tests/validate-csv-output.sh   # then validate-statistics.sh, then the rest
+   LTL="$gen" CI=1 ./tests/validate-csv-output.sh   # then validate-statistics.sh, then the rest but validate-read-path.sh
    ./tests/cleanup-test-artifacts.sh
    ```
 5. `caffeinate -s ./tests/baseline/run-benchmark.sh all --label vX.Y.Z` (≈2.5 h; `all` is required, `full` is not sufficient).

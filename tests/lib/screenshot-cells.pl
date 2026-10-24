@@ -92,6 +92,14 @@ for my $n ( 1 .. $last ) {
     $state .= join '', $line =~ /(\e\[[0-9;]*m)/g;
 }
 
+# A crop of the capture with no character in it compares the image with
+# nothing, so every check below would hold: the run ltl was asked for printed
+# nothing there (tests/HARNESS-DESIGN.md Trap 13). The png mode reads no capture.
+if ( $mode ne 'png' && !grep { grep { $_->{ch} ne ' ' } @$_ } @expected ) {
+    printf "the capture holds no character in rows %d-%d, columns %d-%d: nothing to compare\n", $first, $last, $col_first, $col_stop - 1;
+    exit 1;
+}
+
 my @problems = @placement_errors;
 sub report { my $label = shift; if (@problems) { print "$_\n" for @problems[ 0 .. ( $#problems < 9 ? $#problems : 9 ) ]; print "... ", scalar @problems, " in all\n" if @problems > 10; exit 1 } print "$label\n"; exit 0 }
 
