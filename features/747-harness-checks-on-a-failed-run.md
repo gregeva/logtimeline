@@ -26,7 +26,7 @@ question, four fixed, and D6's three in that group (§ Drop S2-2). Drop
 S2-3 done 2026-10-25 (c2481bd3): drop 3's eleven read, three fixed, and D6's two in
 that group (§ Drop S2-3). Drop S2-4 done 2026-10-25 (d22f7cf7): drop 4's eight read,
 three fixed (§ Drop S2-4). Drop S2-5 done 2026-10-25 (89ac5a19): drop 5's six read, two
-fixed (§ Drop S2-5). Drop S2-6 done 2026-10-25: drop 6's four read, two
+fixed (§ Drop S2-5). Drop S2-6 done 2026-10-25 (3e2f7221): drop 6's four read, two
 fixed, and D6's one in that group (§ Drop S2-6). Next: § Resuming stage 2.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
@@ -1455,25 +1455,25 @@ message-discard 82), and every run against the failing, silent and noise
 stubs reaches its summary and exits 1, help-content passing only its 32
 run-free `docs/usage.md` checks and message-discard nothing. The eight runs
 add nothing to `$TMPDIR`. The checker passes their scenarios, 22 checks.
+The same 8 runs from the scratchpad worktree at 3e2f7221 report the same
+summary, exit status, passed and failed counts as the main checkout.
 
 ### Resuming stage 2
 
-Where the work stands, 2026-10-25, after drop S2-6's commit:
+Where the work stands, 2026-10-25, after drop S2-6's worktree
+confirmation:
 
-- **Done**: drops S2-1 to S2-6, each with its record above; S2-2 to S2-5
+- **Done**: drops S2-1 to S2-6, each with its record above; S2-2 to S2-6
   confirmed from a worktree.
 - **Next, in order**:
-  1. Drop S2-6's worktree confirmation: the eight runs of § Drop S2-6 from
-     the worktree moved to drop S2-6's commit, compared with the main
-     checkout's; recorded here, committed, pushed, and #747 told.
-  2. Drop S2-7, stage 1's drop 7 harnesses (statistics-demand,
+  1. Drop S2-7, stage 1's drop 7 harnesses (statistics-demand,
      duration-display, filter-summary, format-detection, explain,
      index-read-back). Noise baseline: explain 200 unmarked passes,
      format-detection 2, index-read-back 2 and a stop before its summary at
      `index-heatmap-bytes-preseed`. D6: index-read-back's `run_ltl` and
      statistics-demand's two capture helpers and its `rep_out`, `num_out` and
      `spell_out`, all by a bare `mktemp`.
-  3. Drop S2-8 and the gate, as § Stage 2 Delivery says.
+  2. Drop S2-8 and the gate, as § Stage 2 Delivery says.
 - **How each drop runs**: the harnesses read whole, with the review-gate
   greps of shapes 2, 3, 4 and 14 beside the noise baseline's unmarked list;
   each fix shown on the noise stub, the committed harness from the
