@@ -4,7 +4,7 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: in progress, on the issue branch `750-interpreter-resolution`.
+Status: complete, merged into `release/0.20.0` by PR #754 on 2026-10-24.
 Stage 1 (the macOS development host) and stage 2 (the Linux development
 host) complete on 2026-10-23, stage 3 (the Windows development host) and
 stage 4 (the container builds) on 2026-10-24; the completion gate passed
@@ -26,8 +26,8 @@ Perl, wrote Windows setup's `--repair` and `--validate` with `BASH_ENV`
 `build/cpanfile.windows`, and settled D18 (condition 8's severity per tool)
 and D19 (Git for Windows' `.bash_profile`).
 
-The completion gate passed on 2026-10-24 (§ Completion gate). **Next: the
-PR and close-out.** The standing description of the check, the
+The completion gate passed on 2026-10-24 (§ Completion gate); merged by
+PR #754 and closed the same day. The standing description of the check, the
 setup per host and the troubleshooting entries is
 `docs/development-environment.md`.
 
