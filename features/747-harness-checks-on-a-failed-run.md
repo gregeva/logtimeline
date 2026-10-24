@@ -13,7 +13,8 @@ of its six harnesses fixed (§ Drop 5). Drop 6 done 2026-10-24 (ffd7a142):
 three of its four harnesses fixed (§ Drop 6). Drop 7 done 2026-10-24
 (8d2db3cd): five of its six harnesses fixed (§ Drop 7). Drop 8 done
 2026-10-24 (b59c637d): the failed-run checker (§ Drop 8). Completion gate
-passed 2026-10-24 on e3bfbccc (§ Completion gate).
+passed 2026-10-24 on e3bfbccc (§ Completion gate). Merged into
+`release/0.20.0` by PR #755 as 4c8d1fae; issue closed 2026-10-24.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -28,8 +29,8 @@ and the status line, and the document reaches the release branch with the PR,
 as the work merged by PR #754 did with its own. Drops 1 to 7 and D4 (the
 four selection defects) and drop 8 (D3: the failed-run checker,
 `tests/validate-harness-failed-run.sh`) are done; the next step is the
-completion gate, which passed (§ Completion gate); the PR, the merge and the
-close-out follow. The scratchpad worktree
+completion gate, which passed (§ Completion gate), the PR (#755), the merge
+and the close-out; nothing is outstanding. The scratchpad worktree
 and stubs do not survive the session: a new session makes them again as
 § Drop 2 describes (stubs: `failing` prints nothing and exits 1, `silent`
 prints nothing and exits 0, each a two-line Perl script).
