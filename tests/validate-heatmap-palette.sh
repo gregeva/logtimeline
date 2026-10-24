@@ -391,10 +391,16 @@ run_udm() {
     set -e
     cat "$base.stderr" "$base.out" > "$base.all"
     check_capture_warnings "$base"
-    # A run that printed nothing exits 0 too: an empty capture is one failure
-    # and the caller's checks, the exit-status ones among them, are skipped.
+    # A run that printed nothing, or printed something without the
+    # heatmap-palette section it was asked for, exits 0 too: such a capture is
+    # one failure and the caller's checks, the exit-status ones among them, are
+    # skipped (tests/HARNESS-DESIGN.md Trap 13).
     if [[ ! -s "$base.out" ]]; then
         run_failed "the run $name printed nothing (exit $(cat "$base.exit")): $*" "$base.stderr"
+        return 1
+    fi
+    if ! grep -q '^=== heatmap-palette ===$' "$base.out"; then
+        run_failed "the run $name printed no heatmap-palette section (exit $(cat "$base.exit")): $*" "$base.stderr"
         return 1
     fi
 }

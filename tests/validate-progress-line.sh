@@ -269,6 +269,15 @@ run_failed() {
 # captured FRAMES: the run exited 0 and wrote its output.
 captured() { [[ "$(cat "$1.rc" 2>/dev/null)" == 0 ]]; }
 
+# frames_painted FRAMES: the run painted at least one progress frame, the
+# evidence an absence or a width check over its frames needs, since over no
+# frame both hold (tests/HARNESS-DESIGN.md Trap 13, shapes 3 and 4).
+frames_painted() { grep -q '^Processing ' "$1" || { echo "no progress frame in $(basename "$1")"; return 1; }; }
+
+# summary_printed CAPTURE: the run printed its run summary, the evidence an
+# absence of frames needs on a run that paints none by design.
+summary_printed() { grep -qE '^ +LINES INCLUDED ' "$1" || { echo "no run summary in $(basename "$1")"; return 1; }; }
+
 # ---------------------------------------------------------------------------
 # Scenario: multi-file — the full line, and the overall percentage's arithmetic
 # ---------------------------------------------------------------------------
@@ -365,7 +374,7 @@ assert_command \
 # frames are measured: the rendered table and its rules are laid out by the
 # column engine and are not this surface.
 assert_command \
-    command     "! grep '^Processing ' '$MULTI' | awk -v w=$WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
+    command     "frames_painted '$MULTI' && ! grep '^Processing ' '$MULTI' | awk -v w=$WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
     reads       "$MULTI" \
     label       "no frame exceeds the width the line-clear covers ($((WIDTH - 1)) characters)" \
     asserts     'Every frame fits within terminal_width - 1 characters, which is exactly what the line-clear writes: a longer frame would leave its tail on screen when a shorter one replaced it, and would wrap on a real terminal' \
@@ -415,7 +424,7 @@ assert_command \
     contract    'features/446-overall-progress-indicator.md D5 — the single-file form is locked'
 
 assert_command \
-    command     "! grep -qE '^Processing .*\\(file ' '$SINGLE'" \
+    command     "frames_painted '$SINGLE' && ! grep -qE '^Processing .*\\(file ' '$SINGLE'" \
     reads       "$SINGLE" \
     label       'no file counter on a single-file run' \
     asserts     'A one-file run shows no file counter: (file 1/1) reports nothing the reader does not already know' \
@@ -423,7 +432,7 @@ assert_command \
     contract    'features/446-overall-progress-indicator.md R4/D2 — with one file the run behaves exactly as before the overall figure existed'
 
 assert_command \
-    command     "! grep -qE '^Processing +[0-9]+%/[0-9]+%' '$SINGLE'" \
+    command     "frames_painted '$SINGLE' && ! grep -qE '^Processing +[0-9]+%/[0-9]+%' '$SINGLE'" \
     reads       "$SINGLE" \
     label       'no overall percentage on a single-file run' \
     asserts     'A one-file run shows no overall percentage: it would equal the file percentage, and two identical figures side by side say nothing' \
@@ -453,7 +462,7 @@ capture_frames "$PAINTING" \
     "$PART1" "$PART2" "$PART3"
 
 assert_command \
-    command     "! grep -q '^Processing' '$QUIET'" \
+    command     "summary_printed '$QUIET' && ! grep -q '^Processing' '$QUIET'" \
     reads       "$QUIET" \
     label       'no progress frame and no completion line under --disable-progress' \
     asserts     'The progress line is an indicator, so --disable-progress suppresses it entirely — including the completion line. This is the only suppression: the indicator gets no option of its own' \
@@ -486,7 +495,7 @@ capture_frames "$NARROW" \
     "$PART1" "$PART2" "$PART3"
 
 assert_command \
-    command     "! grep '^Processing ' '$NARROW' | awk -v w=$NARROW_WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
+    command     "frames_painted '$NARROW' && ! grep '^Processing ' '$NARROW' | awk -v w=$NARROW_WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
     reads       "$NARROW" \
     label       "no frame exceeds $((NARROW_WIDTH - 1)) characters at a 60-column width" \
     asserts     'The line is fitted to the terminal it is painted on: at a narrow width the filename is shortened, and the rate is dropped before the name, so the numerics stay readable and the line never wraps' \
@@ -558,7 +567,7 @@ assert_command \
     contract    'features/532-progress-line-file-path.md — requirement: shortened in the middle so the start of the path and the end of the file name both remain visible'
 
 assert_command \
-    command     "! grep '^Processing ' '$LONG_PATHED' | awk -v w=$NARROW_WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
+    command     "frames_painted '$LONG_PATHED' && ! grep '^Processing ' '$LONG_PATHED' | awk -v w=$NARROW_WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
     reads       "$LONG_PATHED" \
     label       "no frame with a shortened path exceeds $((NARROW_WIDTH - 1)) characters" \
     asserts     'Keeping the directory does not change what absorbs the fit: the name is still shortened to the room the numerics leave, and the line never wraps' \
@@ -589,7 +598,7 @@ capture_frames "$EMPTY_RUN" \
     "$PART1" "$EMPTY_PART" "$PART3"
 
 assert_command \
-    command     "! grep -qE '^Processing +[0-9]+% \\(file ' '$EMPTY_RUN'" \
+    command     "frames_painted '$EMPTY_RUN' && ! grep -qE '^Processing +[0-9]+% \\(file ' '$EMPTY_RUN'" \
     reads       "$EMPTY_RUN" \
     label       'no multi-file frame carries a single percentage' \
     asserts     'Every frame of a multi-file run shows the file percentage over the overall one. A frame carrying just one figure beside the file counter is the empty-file path having dropped the file percentage, which leaves the overall figure standing in the file figure position with nothing to say which it is' \
@@ -658,7 +667,7 @@ assert_command \
     contract    'features/log-format-registry.md section Drop 1.5 I6 — a default-basis selection surfaces the assumption'
 
 assert_command \
-    command     "! grep -E '^Processing .*(Note:|the detected log format)' '$COLLIDE'" \
+    command     "frames_painted '$COLLIDE' && ! grep -E '^Processing .*(Note:|the detected log format)' '$COLLIDE'" \
     reads       "$COLLIDE" \
     label       'no progress frame carries a notice in its row' \
     asserts     'A notice discovered while reading is held until the read ends, so it never lands in the row the progress line is holding open; a notice printed where it is discovered would appear appended to a Processing frame' \
