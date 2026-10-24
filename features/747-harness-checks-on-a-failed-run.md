@@ -21,7 +21,7 @@ at cd4c3639, the `747-before` benchmark captured there. Drop S2-1 done
 2026-10-24 (67a60617): the noise-stub baseline, the method's third question, and the
 recorded observations S1 to S7 fixed (§ Drop S2-1). D6 (the architect):
 the two observations drop S2-1 found are fixed in their harnesses' drops.
-Drop S2-2 done 2026-10-24: drop 2's seventeen harnesses read for the third
+Drop S2-2 done 2026-10-24 (8c9259a6): drop 2's seventeen harnesses read for the third
 question, four fixed, and D6's three in that group (§ Drop S2-2). Next:
 drop S2-3.
 Drops 5 and 6 were read during the baseline run; their cases are in
@@ -1331,3 +1331,5 @@ histogram-colours 21, category-names 26, message-control-characters 11,
 help-layout 6, csv-output 44, doc-examples 51), and every run against the
 failing, silent and noise stubs reaches its summary, exits 1 and passes
 nothing. The checker passes their scenarios and statistics', 88 checks.
+The same 28 runs from the scratchpad worktree at 8c9259a6 report the same
+summary, exit status, passed and failed counts as the main checkout.
