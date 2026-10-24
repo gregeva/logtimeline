@@ -25,7 +25,8 @@ Drop S2-2 done 2026-10-24 (8c9259a6): drop 2's seventeen harnesses read for the 
 question, four fixed, and D6's three in that group (§ Drop S2-2). Drop
 S2-3 done 2026-10-25 (c2481bd3): drop 3's eleven read, three fixed, and D6's two in
 that group (§ Drop S2-3). Drop S2-4 done 2026-10-25: drop 4's eight read,
-three fixed (§ Drop S2-4). Next: drop S2-5.
+three fixed (§ Drop S2-4). Drop S2-5 done 2026-10-25: drop 5's six read, two
+fixed (§ Drop S2-5). Next: § Resuming stage 2.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -1398,3 +1399,80 @@ heatmap-palette 120, notices 188), and every run against the failing, silent
 and noise stubs reaches its summary, exits 1 and passes only notices' one
 marked check. The twelve runs add nothing to `$TMPDIR`. The checker passes
 their scenarios, 33 checks.
+
+### Drop S2-5
+
+Stage 1's drop 5 harnesses, six, read whole for the third question with the
+review-gate greps of shapes 2, 3, 4 and 14 beside the noise-stub baseline;
+D6 has none in this group. Two have checks that hold on the noise stub; four
+have none: summary-contribution-bar (every comparison reads a row
+`row_bar_report` finds, a missing row a failure), timestamp-precision (the
+timeline comparisons need a bucket row first; a "no notice" expectation reads
+`MISSING-SECTION` over a missing notices section, which is one line, not
+none), message-expose (every absence over the MESSAGES CSV follows
+`run_messages`, which fails a run that wrote none) and log-level-vocabulary
+(its checks read category rows they must find).
+
+| Harness | Case | Change | Proof (as AC6) |
+|---|---|---|---|
+| section-layout | 45 checks comparing two runs (`same_streams`, `same_rows`, `cmp`) or reading an absence (`text_absent`) hold on runs that printed the same unrelated line: `run_ltl` accepted any non-empty capture (shapes 2, 3) | `run_ltl` fails a capture holding neither the title nor, where the title is hidden, the `-V section-layout` report; every run of the harness prints one of the two | noise stub: committed 45 passed, fixed 0 |
+| runtime-config | five comparisons of two single-section renders (the deprecated `time` spelling on `-hg` and `-so`; `BYTES` on `-hg`, `-so` and `--hide`) hold on two runs that printed the same unrelated line: `assert_same_file` required the first file non-empty only (shape 2) | `assert_same_file` takes an optional anchor both files must hold, the section the runs render (`Distribution`, `TOP OVERALL MESSAGES`, `timestamp`) | noise stub: committed 5, fixed 0 |
+
+Runs, every scenario named, from the main checkout: the two changed
+harnesses keep their passed counts on the real `ltl` (section-layout 186,
+runtime-config 119), and every run against the failing, silent and noise
+stubs reaches its summary, exits 1 and passes nothing. The eight runs add
+nothing to `$TMPDIR`. The checker passes their scenarios, 22 checks. The
+worktree confirmation of this drop is the first step on resuming.
+
+### Resuming stage 2
+
+Where the work stood when the context was compacted, 2026-10-25, after drop
+S2-5's commit:
+
+- **Done**: drops S2-1 to S2-5, each with its record above; S2-2 to S2-4
+  confirmed from a worktree.
+- **Next, in order**:
+  1. Drop S2-5's worktree confirmation: the eight runs of § Drop S2-5 from
+     the worktree moved to drop S2-5's commit, compared with the main
+     checkout's; recorded here, committed, pushed, and #747 told.
+  2. Drop S2-6, stage 1's drop 6 harnesses (message-discard, help-content,
+     histogram-bin-counters, udm-specs). The noise baseline names
+     help-content's two absences, "no -uuid row in --help" and "no long byte
+     word in --help units", both read through `help_count`, which accepts any
+     non-empty capture. The planned fix gives `help_count` an anchor naming
+     the help text it reads: `OPTIONS` for `--help`, `Units:` for
+     `--help units`. D6: help-content's `TEST_LOG` comment cites
+     "repo memory (feedback_test_logs.md)"; it names `docs/test-logs.md`
+     instead, as doc-examples' does.
+  3. Drop S2-7, stage 1's drop 7 harnesses (statistics-demand,
+     duration-display, filter-summary, format-detection, explain,
+     index-read-back). Noise baseline: explain 200 unmarked passes,
+     format-detection 2, index-read-back 2 and a stop before its summary at
+     `index-heatmap-bytes-preseed`. D6: index-read-back's `run_ltl` and
+     statistics-demand's two capture helpers and its `rep_out`, `num_out` and
+     `spell_out`, all by a bare `mktemp`.
+  4. Drop S2-8 and the gate, as § Stage 2 Delivery says.
+- **How each drop runs**: the harnesses read whole, with the review-gate
+  greps of shapes 2, 3, 4 and 14 beside the noise baseline's unmarked list;
+  each fix shown on the noise stub, the committed harness from the
+  scratchpad worktree at the previous commit beside the fixed one from the
+  main checkout; the changed harnesses run on the real `ltl` and the three
+  stubs, every scenario named, with `$TMPDIR` listed before and after; their
+  checker scenarios; the record, a commit and a push; the same runs from the
+  worktree moved to the drop's commit, compared; a second commit recording
+  that; a comment on #747.
+- **The scratchpad** (the session's, lost with it): the three stubs
+  (`stubs/{failing,silent,noise}/ltl`, the noise one printing
+  `an unrelated line` and exiting 0); the worktree `wt747` with its `logs`
+  symlink to the main checkout's corpus; the noise baseline
+  (`s2/noise-base/`, `s2/noise-base-unmarked.txt`, one block of unmarked
+  PASS lines per harness); and per drop `s2/dN/` holding its scenario lists,
+  generated run commands, proofs and run tables. A new session makes the
+  stubs and the worktree again as § Resuming describes, and the baseline by
+  running every harness against the noise stub on cd4c3639, every scenario
+  named.
+- **The commands**: every harness run is written out with each scenario named,
+  since the Bash guard asks about a harness run without `--scenario`; the
+  long ones are generated into a scratchpad file and pasted, never run from
+  a script the guard cannot see.

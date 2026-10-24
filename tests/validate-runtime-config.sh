@@ -575,9 +575,17 @@ assert_command() {
     fi
 }
 
+# assert_same_file ONE TWO LABEL PRODUCED_BY CONTRACT [ANCHOR]: ONE and TWO are
+# identical and, given ANCHOR, both hold it (the section the runs rendered):
+# two runs that printed the same unrelated text compare equal
+# (tests/HARNESS-DESIGN.md Trap 13).
 assert_same_file() {
-    local one="$1" two="$2" label="$3" produced_by="$4" contract="$5"
-    if [[ -s "$one" ]] && diff -q "$one" "$two" >/dev/null; then
+    local one="$1" two="$2" label="$3" produced_by="$4" contract="$5" anchor="${6:-}" missing=""
+    if [[ -n "$anchor" ]]; then
+        grep -qF -- "$anchor" "$one" 2>/dev/null || missing="$one"
+        grep -qF -- "$anchor" "$two" 2>/dev/null || missing+="${missing:+ and }$two"
+    fi
+    if [[ -s "$one" && -z "$missing" ]] && diff -q "$one" "$two" >/dev/null; then
         echo "  PASS  $current_scenario :: $label"
         pass=$((pass + 1))
     else
@@ -585,7 +593,8 @@ assert_same_file() {
         echo "        asserts:     $label"
         echo "        produced_by: $produced_by"
         echo "        contract:    $contract"
-        if [[ -s "$one" ]]; then diff "$one" "$two" | head -10 | sed 's/^/        | /' || true; else echo "        (empty capture $one)"; fi
+        if [[ -n "$missing" ]]; then echo "        (no '$anchor' in $missing)"
+        elif [[ -s "$one" ]]; then diff "$one" "$two" | head -10 | sed 's/^/        | /' || true; else echo "        (empty capture $one)"; fi
         fail=$((fail + 1))
         failures+=("$current_scenario :: $label")
     fi
@@ -615,7 +624,7 @@ scenario_deprecated_metric_spellings() {
     without_notice_boxes "$RUN_STDOUT" > "$RUN_STDOUT.rendered"
     notice_lines "$RUN_STDOUT" > "$RUN_STDOUT.notices"
     assert_same_file "$hg_duration.rendered" "$RUN_STDOUT.rendered" '-hg time renders the histogram -hg duration renders' \
-        'handle_histogram_option() in ltl, through builtin_metric_name()' "$CONTRACT_DEPRECATED"
+        'handle_histogram_option() in ltl, through builtin_metric_name()' "$CONTRACT_DEPRECATED" Distribution
     assert_one_line "$RUN_STDOUT.notices" "$TIME_NOTICE" '-hg time raises exactly one deprecation notice, though -hg is read inside the option parser' \
         'handle_histogram_option() records it; print_deprecation_notices() prints it at option settlement'
 
@@ -626,7 +635,7 @@ scenario_deprecated_metric_spellings() {
     without_notice_boxes "$RUN_STDOUT" > "$RUN_STDOUT.rendered"
     notice_lines "$RUN_STDOUT" > "$RUN_STDOUT.notices"
     assert_same_file "$so_duration.rendered" "$RUN_STDOUT.rendered" '-so time ranks the messages as -so duration does' \
-        'adapt_to_command_line_options() in ltl (the -so bare metric word, through builtin_metric_name())' "$CONTRACT_DEPRECATED"
+        'adapt_to_command_line_options() in ltl (the -so bare metric word, through builtin_metric_name())' "$CONTRACT_DEPRECATED" 'TOP OVERALL MESSAGES'
     assert_one_line "$RUN_STDOUT.notices" "$TIME_NOTICE" '-so time raises exactly one deprecation notice' \
         'record_deprecation() and print_deprecation_notices() in ltl'
 
@@ -682,17 +691,17 @@ scenario_metric_name_case() {
     run_section_only "case-hg-lower" histogram -hg bytes "$METRIC_FIXTURE"
     local hg_lower="$RUN_STDOUT"
     run_section_only "case-hg-upper" histogram -hg BYTES "$METRIC_FIXTURE"
-    assert_same_file "$hg_lower" "$RUN_STDOUT" '-hg BYTES renders the histogram -hg bytes renders' 'builtin_metric_name() in ltl' "$contract"
+    assert_same_file "$hg_lower" "$RUN_STDOUT" '-hg BYTES renders the histogram -hg bytes renders' 'builtin_metric_name() in ltl' "$contract" Distribution
 
     run_section_only "case-so-lower" messages -so bytes "$METRIC_FIXTURE"
     local so_lower="$RUN_STDOUT"
     run_section_only "case-so-upper" messages -so Bytes "$METRIC_FIXTURE"
-    assert_same_file "$so_lower" "$RUN_STDOUT" '-so Bytes ranks the messages as -so bytes does' 'builtin_metric_name() in ltl' "$contract"
+    assert_same_file "$so_lower" "$RUN_STDOUT" '-so Bytes ranks the messages as -so bytes does' 'builtin_metric_name() in ltl' "$contract" 'TOP OVERALL MESSAGES'
 
     run_section_only "case-hide-lower" timeline --hide bytes "$METRIC_FIXTURE"
     local hide_lower="$RUN_STDOUT"
     run_section_only "case-hide-upper" timeline --hide Bytes "$METRIC_FIXTURE"
-    assert_same_file "$hide_lower" "$RUN_STDOUT" '--hide Bytes hides the column --hide bytes hides' 'resolve_visibility_name() in ltl' "$contract"
+    assert_same_file "$hide_lower" "$RUN_STDOUT" '--hide Bytes hides the column --hide bytes hides' 'resolve_visibility_name() in ltl' "$contract" timestamp
 }
 
 # Issue #613 criterion 15 (D3): durationMs is a key spelling, not a metric

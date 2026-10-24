@@ -110,6 +110,14 @@ run_ltl() {
         echo "  FAIL  $current_scenario :: standard output is empty ($tag)"
         fail=$((fail + 1)); failures+=("$current_scenario :: empty capture"); return 1
     fi
+    # Two runs that printed the same unrelated text compare equal, and an
+    # absence holds over it: every run here prints the title, or, with the
+    # title hidden, the -V section-layout report, the evidence the checks
+    # reading the run need (tests/HARNESS-DESIGN.md Trap 13).
+    if ! grep -qF 'log timeline' "$dir/out" && ! grep -q '^=== section-layout ===$' "$dir/out"; then
+        echo "  FAIL  $current_scenario :: standard output holds neither the title nor the section-layout report ($tag)"
+        fail=$((fail + 1)); failures+=("$current_scenario :: no title or report"); return 1
+    fi
     if ! assert_no_runtime_warnings "$dir/err" "$current_scenario"; then
         fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); return 1
     fi
