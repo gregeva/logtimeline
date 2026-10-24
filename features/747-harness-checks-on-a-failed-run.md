@@ -18,7 +18,7 @@ passed 2026-10-24 on e3bfbccc (§ Completion gate). Merged into
 (§ Stage 2: the observations) started 2026-10-24 on the architect's word: #747
 reopened, branch `747-harness-checks-on-a-failed-run-2` off `release/0.20.0`
 at cd4c3639, the `747-before` benchmark captured there. Drop S2-1 done
-2026-10-24: the noise-stub baseline, the method's third question, and the
+2026-10-24 (67a60617): the noise-stub baseline, the method's third question, and the
 recorded observations S1 to S7 fixed (§ Drop S2-1). Next: drop S2-2.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
@@ -1197,7 +1197,7 @@ harness's `--list` (§ Drop 8); the checker makes its own stubs.
 - [x] **S2-AC1.** No `ltl` run in log-level-vocabulary or udm-specs discards
       its standard error; a runtime warning on any of the five runs is a
       counted failure. *Assertable*: S1's proof.
-- [ ] **S2-AC2.** The soft-wrap known failures carry no entry their check
+- [x] **S2-AC2.** The soft-wrap known failures carry no entry their check
       passes; #497 says which capture stopped wrapping and why.
       *Assertable*: S2's proof and the comment.
 - [x] **S2-AC3.** No contract in a harness names a record that is not kept
@@ -1263,4 +1263,7 @@ On the noise stub, explain still passes 200 unmarked checks, format-detection
 2 and heatmap-palette 2, each left to its harness's drop. The checker passes
 the ten harnesses' scenarios, 110 checks. classification-percentages' soft-wrap
 and regression's `errrate-diagnostics-highlighted-failure-w160` read the
-known failures as above.
+known failures as above. The same 42 runs from the scratchpad worktree at
+67a60617 (its `logs` a symlink to the main checkout's corpus) report the same
+summary, exit status, passed and failed counts as the main checkout. #497 is
+told which capture stopped wrapping and why.
