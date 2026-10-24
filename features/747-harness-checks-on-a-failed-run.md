@@ -19,7 +19,9 @@ passed 2026-10-24 on e3bfbccc (§ Completion gate). Merged into
 reopened, branch `747-harness-checks-on-a-failed-run-2` off `release/0.20.0`
 at cd4c3639, the `747-before` benchmark captured there. Drop S2-1 done
 2026-10-24 (67a60617): the noise-stub baseline, the method's third question, and the
-recorded observations S1 to S7 fixed (§ Drop S2-1). Next: drop S2-2.
+recorded observations S1 to S7 fixed (§ Drop S2-1). D6 (the architect):
+the two observations drop S2-1 found are fixed in their harnesses' drops.
+Next: drop S2-2.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -264,6 +266,17 @@ decided by reading it.
   exit 0 and a non-empty capture are not that evidence. Chosen over keeping
   stage 2 to the recorded observations and filing the condition as an issue
   of its own.
+- **D6** (the architect, 2026-10-24, after drop S2-1). The two observations
+  drop S2-1 found (§ Observations: captures left behind beyond S5's two, and
+  two comments that cite a record no longer kept) are fixed under stage 2,
+  each in the drop that reads its harness whole: help-layout, csv-output and
+  doc-examples in S2-2; histogram-ticks and statistics in S2-3; help-content
+  in S2-6; index-read-back and statistics-demand in S2-7. S2-AC5 widens to
+  every harness (no run leaves a file outside its own directory), S2-AC3 to
+  every comment (none cites a record not kept). Chosen over fixing all of
+  them in one follow-up of drop S2-1, which would run those harnesses twice,
+  and over leaving them recorded only, which leaves every run of
+  index-read-back and statistics-demand adding files to `$TMPDIR`.
 
 ## Constraints
 
@@ -1094,14 +1107,15 @@ Found while reading, outside this issue's condition (a failed or silent
   Three remove theirs on a normal exit only, none through an `EXIT` trap:
   histogram-ticks' two run captures, help-layout's `HELP_OUT` and `STRIPPED`,
   statistics' `tmp` (Trap 10). On 2026-10-24 `$TMPDIR` held 10,927 `tmp.*`
-  entries, all written that day.
+  entries, all written that day. Fixed under D6, each in its harness's drop.
 - **Two comments that cite a record no longer kept** (found in drop S2-1).
   `validate-doc-examples.sh` (the fixture table) and
   `validate-help-content.sh` (its `TEST_LOG`) give "repo memory
   (feedback_test_logs.md)" as the reason the corrupt 2025-03-21 access log
   is avoided. The file was removed; `docs/test-logs.md` carries the reason
   (its AccessLogs table marks the file "CORRUPT — do not use for
-  clean-output testing"). S3 covers only help-layout's contract.
+  clean-output testing"). S3 covers only help-layout's contract. Fixed
+  under D6, each in its harness's drop.
 
 ## Stage 2: the observations
 
@@ -1159,7 +1173,10 @@ commit and a push on the branch, and a comment pointing here.
    S2-6 drop 6's four, S2-7 drop 7's six. Each harness is read whole for the
    third question, with the review-gate greps of shapes 2, 3, 4 and 14 as
    its candidate list beside the noise-stub baseline. Each case is fixed to
-   the section or row it reads.
+   the section or row it reads. By D6 the drop also fixes, in its own
+   harnesses, the captures left in `$TMPDIR` (under the harness's `TMP_DIR`,
+   removed by its `EXIT` trap, as S5) and the comments citing a removed
+   record (`docs/test-logs.md` named instead, as S3).
    - **Proof:** each fix is shown on the noise stub, the committed harness
      beside the fixed one.
    - **Runs:** each changed harness runs on the real `ltl` and against the
@@ -1200,13 +1217,19 @@ harness's `--list` (§ Drop 8); the checker makes its own stubs.
 - [x] **S2-AC2.** The soft-wrap known failures carry no entry their check
       passes; #497 says which capture stopped wrapping and why.
       *Assertable*: S2's proof and the comment.
-- [x] **S2-AC3.** No contract in a harness names a record that is not kept
-      in the repository. *Assertable*: a grep for `MEMORY.md` over `tests/`
-      finds nothing.
+- [ ] **S2-AC3.** No contract or comment in a harness names a record that is
+      not kept in the repository (D6 widened it from contracts).
+      *Assertable*: a grep for `MEMORY.md`, `repo memory` and `feedback_`
+      over `tests/` finds nothing (the contract fixed in drop S2-1, the two
+      comments in drops S2-2 and S2-6).
 - [x] **S2-AC4.** doc-examples passes no example on a run whose output is
       not `ltl`'s. *Assertable*: S4's proof.
-- [x] **S2-AC5.** A run of heatmap-palette or histogram-bin-counters leaves
-      no file outside its own directory. *Assertable*: S5's proof.
+- [ ] **S2-AC5.** No harness run leaves a file outside its own directory
+      (D6 widened it from heatmap-palette and histogram-bin-counters).
+      *Assertable*: S5's proof; for the seven harnesses of D6, the entries a
+      real run adds to `$TMPDIR`, counted in each one's drop: none; for the
+      rest, `$TMPDIR` listed before and after the gate's full suite: no entry
+      added by a harness.
 - [x] **S2-AC6.** explain reads `ltl`'s source through `$LTL` only.
       *Assertable*: S6's proof, and no `"$LTL/../` in `tests/`.
 - [x] **S2-AC7.** The seven notice absences and duration-display's latency
