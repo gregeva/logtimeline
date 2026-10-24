@@ -12,7 +12,8 @@ fixed (§ D4: the selection defects). Drop 5 done 2026-10-24 (9ebc1bf1): five
 of its six harnesses fixed (§ Drop 5). Drop 6 done 2026-10-24 (ffd7a142):
 three of its four harnesses fixed (§ Drop 6). Drop 7 done 2026-10-24
 (8d2db3cd): five of its six harnesses fixed (§ Drop 7). Drop 8 done
-2026-10-24: the failed-run checker (§ Drop 8); the completion gate is next.
+2026-10-24 (b59c637d): the failed-run checker (§ Drop 8). Completion gate
+passed 2026-10-24 on e3bfbccc (§ Completion gate).
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -27,8 +28,8 @@ and the status line, and the document reaches the release branch with the PR,
 as the work merged by PR #754 did with its own. Drops 1 to 7 and D4 (the
 four selection defects) and drop 8 (D3: the failed-run checker,
 `tests/validate-harness-failed-run.sh`) are done; the next step is the
-completion gate, whose sweep of every harness against the stubs is the
-checker's whole run. The scratchpad worktree
+completion gate, which passed (§ Completion gate); the PR, the merge and the
+close-out follow. The scratchpad worktree
 and stubs do not survive the session: a new session makes them again as
 § Drop 2 describes (stubs: `failing` prints nothing and exits 1, `silent`
 prints nothing and exits 0, each a two-line Perl script).
@@ -312,12 +313,12 @@ an artifact the harness writes itself, or `ltl`'s source text. Source read
 through `$LTL` is the stub's under a stub run, so such a check is run-free and
 still fails there; it is recorded as failing against the stubs.
 
-- [ ] **AC1. Against the failing stub, every harness reaches its summary.**
+- [x] **AC1. Against the failing stub, every harness reaches its summary.**
       `LTL=<failing stub> ./tests/validate-<name>.sh`, for each harness that
       runs `ltl`. Pass when: the output ends with the harness's summary line
       and the exit status is non-zero. *Assertable*: the run and its captured
       output.
-- [ ] **AC2. Against the failing stub, only run-free checks pass.** Pass
+- [x] **AC2. Against the failing stub, only run-free checks pass.** Pass
       when: every check the run counts as passed is one named for that harness
       in § Per-harness record as run-free, and the run's PASS lines number as
       many as its passed count; a harness with none reports 0 passed. One
@@ -326,27 +327,27 @@ still fails there; it is recorded as failing against the stubs.
       ran the repository's `ltl`; each is named in the record as such.
       *Assertable*: the run's PASS lines against the list, through the
       capture checker of drop 1.
-- [ ] **AC3. The silent stub, the same.** AC1 and AC2 hold with the silent
+- [x] **AC3. The silent stub, the same.** AC1 and AC2 hold with the silent
       stub, which exits 0 and so reaches the checks that read the capture
       rather than the exit code. *Assertable*: as AC1 and AC2.
-- [ ] **AC4. A healthy run loses no check.** Against the real `ltl`, every
+- [x] **AC4. A healthy run loses no check.** Against the real `ltl`, every
       harness exits 0, and its passed count equals the count before this work
       plus the checks this work adds, each named in § Per-harness record.
       *Assertable*: the summary counts of drop 1's baseline run of the full
       suite on the base commit, against the gate's run, on the same machine.
-- [ ] **AC5. Every harness takes the stub.** Every harness that runs `ltl`
+- [x] **AC5. Every harness takes the stub.** Every harness that runs `ltl`
       reads it from `LTL` when set, `validate-read-path.sh` included (D1).
       *Assertable*: AC1 runs on every such harness.
-- [ ] **AC6. Each fix can fail.** A check this work adds or changes is shown
+- [x] **AC6. Each fix can fail.** A check this work adds or changes is shown
       to fail on the stub run or on a doctored capture before it is trusted
       (`tests/HARNESS-DESIGN.md` § Proving a new assertion can fail).
       *Assertable*: the run is recorded with the fix.
-- [ ] **AC7. The method is written down.** `tests/HARNESS-DESIGN.md` carries
+- [x] **AC7. The method is written down.** `tests/HARNESS-DESIGN.md` carries
       the reading of R4: a row and a review-gate grep for every shape R1
       names and every shape the drops added. *Assertable*: at the gate the
       greps run over every harness, and each line they list is accounted for
       in § Per-harness record, as a case fixed or as read and not a case.
-- [ ] **AC8. The release procedure and read-path agree (D1).** The second
+- [x] **AC8. The release procedure and read-path agree (D1).** The second
       pass in `docs/process/workflow.md` § 5, step 4 leaves
       `validate-read-path.sh` out and says why, and the screenshot tool's
       `my $ltl` carries the comment D1 asks for. *Assertable* by reading the
@@ -892,6 +893,45 @@ What drop 8 adds to the method: the review-gate greps stay the reader's
 candidate list, and the checker is the subset certain without reading, run
 on every change. "Confirming a fix" in the method now names the checker's
 scenario.
+
+### Completion gate
+
+Run 2026-10-24 on e3bfbccc, `$version_number` restored to `0.20.0`; `ltl` is
+byte-identical to the base commit (c0fa5283).
+
+- **Benchmark** (`single-day-access-log-standard`, both sides from the main
+  checkout): `747-before` against `747-after`, total 5.0 s against 5.0 s
+  (+0.6%), rss_peak +0.8%. With the code identical the difference is the
+  machine's, and two more `after` runs measured it: total +4.0% and +2.3%,
+  rss_peak −0.1% and +1.7%, unattributed memory −0.2% and +3.4%, each run as
+  far from the next as from `before`.
+- **The full suite**, csv-output and statistics first under `CI=1`, the
+  checker last: every one of the 54 harnesses exits 0, in 28 minutes
+  (1,686 s). Each harness of drop 1's baseline reports the passed count it
+  reported there (AC4), 5,246 passed in all with the checker's 572.
+  csv-output's 112 PASS lines against its 44 passed are as drop 1 recorded
+  them (a PASS line per CSV file, the summary counting scenarios).
+- **AC1 to AC3, and AC5**: the checker's run, 572 passed and 0 failed. Each of
+  the 52 harnesses that run `ltl` reaches its summary against both stubs,
+  exits non-zero, prints as many PASS lines as it counts, and passes only
+  checks marked run-free; a harness that ignored `LTL` would pass unmarked
+  checks there, as read-path at the base commit did.
+- **AC7**: the greps of `tests/HARNESS-DESIGN.md` run over every harness list
+  3,263 lines. Each harness was read whole with them in its drop, and its row
+  above records the cases fixed, or none. The lines of greps added after a
+  harness's drop: grep 10 as widened by drop 3 lists no further stop in drop
+  2's harnesses (§ Drop 3); grep 15 lists one line, summary-contribution-bar's
+  Perl `eval` of the colour tables inside a `perl` program, not a shell
+  `eval`, so not a case; grep 1b lists 85, and a scan of every harness for a
+  helper that sets a variable it does not declare local and runs inside
+  `$( )` finds none whose variable a caller reads, the same scan finding
+  `run_collision` in udm-specs as it was before drop 6.
+- **AC8**, read: `docs/process/workflow.md` § 5 step 4 leaves
+  `validate-read-path.sh` out of the second pass and says why, and
+  `process/capture-screenshots.pl` carries the D1 comment beside `my $ltl`.
+  The same pass now also leaves out `validate-harness-failed-run.sh`, which
+  runs every harness against stubs of its own whatever `LTL` names.
+- `./tests/cleanup-test-artifacts.sh` ran after the suite.
 
 ### Fix designs read ahead (drops 3 to 6)
 
