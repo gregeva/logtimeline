@@ -4,12 +4,69 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: specification stage complete (2026-10-23); next, investigation stage 1
-(the macOS development host, § Phase 4: investigation stages, one per
-environment) on the issue branch `750-interpreter-resolution`. What is in
-place today is recorded as found, not as the contract: most of it was put in
-piecemeal to get past a problem at the time, and the analysis is expected to
-challenge it.
+Status: in progress, on the issue branch `750-interpreter-resolution`.
+Stage 1 (the macOS development host) and stage 2 (the Linux development
+host) complete on 2026-10-23, stage 3 (the Windows development host) and
+stage 4 (the container builds) on 2026-10-24; the completion gate passed
+the same day. Each test case run on each host is recorded under it; § Resuming says
+where to start, what the completion gate runs, and the state this work left
+outside the repository. What is in place before this work is recorded as found, not as
+the contract: most of it was put in piecemeal to get past a problem at the
+time, and the analysis is expected to challenge it.
+
+## Resuming
+
+Stages 1 to 4 have nothing open. Stage 4 (§ Stage 4: the container builds)
+made tmux required on macOS and Linux, with macOS setup installing it (D20),
+and built the two Ubuntu binaries and the Windows one in their containers,
+none carrying the profiler (AC19). Stage 3 (§ Stage 3: the Windows
+development host) gave the check a Windows story and made it run under any
+Perl, wrote Windows setup's `--repair` and `--validate` with `BASH_ENV`
+(D17), removed the `/opt/homebrew/bin/perl` wrapper, put the develop block in
+`build/cpanfile.windows`, and settled D18 (condition 8's severity per tool)
+and D19 (Git for Windows' `.bash_profile`).
+
+The completion gate passed on 2026-10-24 (§ Completion gate). **Next: the
+PR and close-out.** The standing description of the check, the
+setup per host and the troubleshooting entries is
+`docs/development-environment.md`.
+
+Not run on Linux since stage 3 changed the files all hosts share:
+`process/check-environment.pl` (the Windows launcher, `run_capture_windows`,
+condition 7's interpreter line, `%tool_severity`, the message's handling of a
+missing tool, condition 9 failing under D20), `tests/profile/profiling-preflight.sh` (the script directories
+searched, the cpanfile named) and `process/claude-hooks/guard-write.sh` (paths
+in forward-slash form). Each keeps its Linux behaviour by
+construction; the next session on Linux runs `--validate` and a profiling
+preflight before anything else. On macOS both ran on 2026-10-24 (§ Stage 4:
+the container builds).
+
+The completion gate runs once, after stage 4, on one macOS development host
+(`docs/process/workflow.md` § 3): the `before` benchmark and the `after` side
+are captured on the same machine, each from a worktree, side by side: `before`
+at the base commit `7d0b57f8`, `after` at the branch tip
+(`./tests/baseline/run-benchmark.sh single-day-access-log-standard --label
+750-before`, then `--label 750-after`), compared; then the full harness suite
+(AC16). A `750-before.tsv` captured on another host is not compared with an
+`after` from this one.
+
+State outside the repository, on the Windows development host: `BASH_ENV`
+set to `~/.bashrc` as a user environment variable (D17); the wrapper at
+`C:\Program Files\Git\opt\homebrew\bin\perl` and the `opt` directory removed by
+the full setup.
+
+State outside the repository, on the first macOS development host only (the
+one the keg measurement was parked from):
+
+- `tests/baseline/results/750-before.tsv`, untracked, in the `release/0.20.0`
+  worktree (`.claude/worktrees/release-0.20.0`), captured at `7d0b57f8`; compared
+  only with an `after` captured on that machine.
+- `~/.zprofile`, created by `--repair` in step 5, holding the one marked
+  Homebrew block.
+- PAR::Packer is not installed for Homebrew Perl 5.44.
+
+State outside the repository, on the second macOS development host: tmux 3.8
+installed by the full setup (D20); Rancher Desktop's engine started for stage 4.
 
 ## The architect's framing (2026-10-23)
 
@@ -44,6 +101,16 @@ challenge it.
   about a host from another one.
 - The way forward is the cleanest, most coherent one the analysis finds, and
   it may change earlier decisions; nothing is locked up front.
+- **The check judges the environment; setup does not overwrite it**
+  (2026-10-23, at the start of stage 1). The point of the work is to check
+  that the environment is set up properly, whatever configured it. Homebrew is
+  not used by ltl alone: many developers use it all the time and already carry
+  its configuration in their shell files, so setup does not overwrite that
+  configuration or add a redundant copy of it. Adding a piece is legitimate
+  when `--repair` runs and the check has found that piece missing, or when
+  setup itself installed Homebrew. The architect then settled that Homebrew
+  is a requirement of the macOS host: setup stops when it is absent and never
+  installs it (D13), so only the first case arises.
 
 ## What it is for
 
@@ -202,16 +269,15 @@ by trusting the Perl the check runs under.
 |---|---|---|---|---|---|
 | 1 | a `perl` is on `PATH` | | | | fail |
 | 2 | it is the development Perl, not another on the host | Homebrew's, not `/usr/bin` or `/System` | the distribution's | Strawberry Perl's, not Git's own `/usr/bin/perl` | fail |
-| 3 | it loads every runtime module the cpanfile requires | `build/cpanfile` | `build/cpanfile` | `build/cpanfile.windows` | fail |
+| 3 | it loads every runtime module the cpanfile requires, each from the Perl's own install or the setup's, once (D16) | `build/cpanfile` | `build/cpanfile` | `build/cpanfile.windows` | fail |
 | 4 | it loads the development-only modules (the profiler) | when installed (`--dev-deps`) | when installed (`--dev-deps`) | when installed (`--dev-deps`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
-| 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
+| 5 | retired under D3 as settled in stage 2: no setup installs modules under the home | | | | |
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
-| 7 | `python3` on `PATH` imports NumPy and SciPy | Homebrew's, not `/usr/bin/python3` | the distribution's | the WinGet Python | fail where the harnesses run, note on Windows |
-| 8 | the shell configuration carries the setup's managed block | the file every login zsh reads | the file every login bash reads | `~/.bashrc`, read by `~/.bash_profile` | fail |
-| 9 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7 | | | | fail |
-| 10 | `tmux` is on `PATH` | expected | expected | not expected | note |
-| 11 | the screenshot tools are present | `swiftc` (Xcode command line tools) | established in the Linux stage | not expected | note |
-| 12 | the repository checks files out with LF endings | n/a | n/a | `core.autocrlf=false` | fail |
+| 7 | `python3` on `PATH` imports NumPy and SciPy, each from the setup's install (D15) | Homebrew's, not `/usr/bin/python3`; each module's file resolves into its own formula's Cellar; on every host, neither module from the user's `site-packages` nor installed more than once | the distribution's; NumPy and SciPy from its packages, in `/usr/lib/python3/dist-packages` (D3) | the WinGet Python; the modules' place established in the Windows stage | fail where the harnesses run, note on Windows |
+| 8 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7; the report also shows, for context, what a new terminal tab (an interactive login shell) and a plain non-login shell resolve | `zsh -lc`; `~/.zprofile` (D6) | a login bash | a Git Bash login shell | fail |
+| 9 | `tmux` is on `PATH` | expected | expected | not expected | fail (D20) |
+| 10 | the screenshot tools are present | `swiftc` (Xcode command line tools) | not expected: the PNG is drawn by WebKit on macOS (`features/598-screenshot-capture.md` D23) | not expected | note |
+| 11 | the repository checks files out with LF endings | n/a | n/a | `core.autocrlf=false` | fail |
 
 **Profiling on Windows (architect, 2026-10-23):** profiling works on Windows
 too; 544 D5a is amended so that `build/cpanfile.windows` carries the develop
@@ -224,7 +290,7 @@ host states "`-DevDeps` adds the profiler" and the script's own help says
 "Also install the development-only Perl modules (the profiler)". Not yet run
 on a Windows host.
 
-Condition 9 is the measured fault of phase 1: the Homebrew interpreters were
+Condition 8 is the measured fault of phase 1: the Homebrew interpreters were
 set up only in `~/.zshrc`, read by interactive shells alone.
 
 ### Phase 4: where macOS setup writes its shell configuration (measured)
@@ -242,8 +308,66 @@ macOS development host, 2026-10-23:
 `.zshenv` alone loses every login shell, because `/etc/zprofile` runs
 `path_helper` after it and puts `/usr/bin` back in front; `.zprofile` alone
 misses every shell that is not a login shell. Only the block in both files
-meets condition 9 in every mode, so macOS setup writes its managed block into
-both `~/.zshenv` and `~/.zprofile`.
+resolves Homebrew's tools in every mode.
+
+**Decided by the architect (2026-10-23): the tools must resolve in every login
+shell, as Homebrew advises; on macOS the place is `~/.zprofile` alone.**
+Homebrew's installer puts its line in `~/.zprofile`, so a developer who
+followed it already passes and nothing of ltl's is added. Login shells cover
+every new terminal tab and what descends from it (Claude Code, its Bash tool,
+its hooks, the harnesses), `ssh host command`, and a script's `zsh -l`. Not
+covered, and not required: an application's plain `zsh -c`, which reads only
+`~/.zshenv`. A copy in `~/.zshenv` was set aside because it adds to the
+user's configuration beyond what Homebrew asks for, runs `brew shellenv` in
+every zsh (about 20 ms measured, including each agent command), and still
+misses the `sh` and `bash` children of applications, such as git hooks run
+by a graphical client, which read no zsh file at all.
+
+This host, each mode started from a clean environment (2026-10-23), with the
+developer's Homebrew lines in `~/.zshrc` and no `~/.zprofile`:
+
+| Mode | `perl` | `bash` | `python3` |
+|---|---|---|---|
+| `-c` | `/usr/bin/perl` | `/bin/bash` | `/usr/bin/python3` |
+| `-lc` | `/usr/bin/perl` | `/bin/bash` | `/usr/bin/python3` |
+| `-ic` | `/opt/homebrew/opt/perl/bin/perl` | `/opt/homebrew/bin/bash` | `/opt/homebrew/bin/python3` |
+| `-lic` | `/opt/homebrew/opt/perl/bin/perl` | `/opt/homebrew/bin/bash` | `/opt/homebrew/bin/python3` |
+
+Every terminal tab is right, and every non-interactive login shell runs the
+system tools; under this decision the clean login shell condition fails here
+until Homebrew's line is in `~/.zprofile`.
+
+### Phase 4: what Homebrew's own configuration already provides on macOS (measured)
+
+A login zsh started from a clean environment (`env -i HOME="$HOME" /bin/zsh
+-lc`) on the macOS development host, 2026-10-23, read-only: first with the
+developer's files as they are (no `~/.zprofile`; the Homebrew lines only in
+`~/.zshrc`), then with Homebrew's own line, `eval "$(/opt/homebrew/bin/brew
+shellenv)"`, run first in the same shell.
+
+| Tool | Files as they are | Homebrew's line alone |
+|---|---|---|
+| `perl` | `/usr/bin/perl` | `/opt/homebrew/bin/perl`, a link into the Cellar (5.44.0); `Text::CSV`, `YAML::PP`, `Term::ReadKey` and `Devel::Size` load |
+| `bash` | `/bin/bash` (3.2) | `/opt/homebrew/bin/bash` (5.3) |
+| `python3` | `/usr/bin/python3` | `/opt/homebrew/bin/python3`; NumPy and SciPy import |
+| `nytprofhtml` | not found | not found |
+| `pp` | `/usr/bin/pp`, the system Perl's script (`#!/usr/bin/perl`) | `/usr/bin/pp` |
+
+Homebrew's own line meets the Perl, bash and Python conditions. The Perl keg
+line that `~/.zshrc` adds (`$(brew --prefix)/opt/perl/bin` first) is ltl's only
+addition beyond it. The keg's `bin` holds the scripts cpanm installs for
+Homebrew Perl (`nytprofhtml` and the other profiler tools, `scandeps.pl`, the
+`yamlpp-*` tools), which Homebrew does not link. The profiling preflight finds
+`nytprofhtml` through the interpreter's own `installsitescript` (544 D7) and
+needs no `PATH` entry for it. `build/macos-package.sh` starts `perl -S pp`,
+which searches `PATH`; without the keg line it finds the system Perl's
+`/usr/bin/pp`. Whether that still packages correctly is not measured:
+PAR::Packer is not installed for Homebrew Perl 5.44 on this host, and measuring
+it means installing it.
+
+The condition this host fails today is the clean login shell (condition 8):
+the developer's Homebrew lines are in `~/.zshrc`, which only an interactive
+shell reads.
 
 ### Phase 4: re-running setup is not safe for the shell configuration
 
@@ -259,13 +383,16 @@ right.
 
 | Mode | Installs | Writes the shell configuration | Runs the check |
 |---|---|---|---|
-| full setup (no switch) | yes | yes | yes, last |
-| `--repair` | no | yes, the managed blocks only | yes, after writing |
+| full setup (no switch) | yes | as `--repair` | yes, last |
+| `--repair` | no | only the pieces the check found missing, each added once | yes, before writing and after |
 | `--validate` | no | no | yes |
 
 `--repair` cannot install or upgrade anything by construction; it is what puts
 the shell configuration right once the cause of a failed condition is found
-to lie there. Making the
+to lie there. It never rewrites or duplicates a line the user already has
+(§ The architect's framing): it adds a piece only when the check reports that
+piece missing, delimited so that a later run recognises its own addition and
+adds nothing. Making the
 full setup safe to re-run was the alternative, set aside because every install
 step on every host (Homebrew's upgrade-on-install, WinGet, cpanm) would have
 to become a guaranteed no-op, each a separate promise to keep and test.
@@ -292,7 +419,7 @@ architect named the development option `--dev-deps`; it passes cpanm
 | (none) | full setup: install the runtime tools and modules, write the shell configuration, run the check | |
 | `--dev-deps` | full setup, plus the development-only modules (the profiler) | `LTL_INSTALL_DEV_DEPS=1` on macOS, `-DevDeps` on Windows |
 | `--package` | full setup, plus PAR::Packer, for building the static binary | `-Package` on Windows; on macOS PAR::Packer is installed unconditionally today |
-| `--repair` | write the shell configuration only, then run the check | |
+| `--repair` | run the check, add to the shell configuration only the pieces it found missing, then run the check again | |
 | `--validate` | run the check only | |
 | `-h`, `--help` | usage | |
 
@@ -305,9 +432,11 @@ architect named the development option `--dev-deps`; it passes cpanm
   parser, goes with the modes.
 - `-Phase Machine` stays internal to `build/windows-setup.ps1` (the script
   re-launching itself elevated) and is not part of the set.
-- Not yet known: whether `powershell -File build\windows-setup.ps1 --validate`
-  reaches the script as `--validate` through PowerShell's own parameter
-  binding, or has to be read from `$args`. Stage 3 settles it.
+- Settled in stage 3 (2026-10-24): PowerShell's parameter binding refuses
+  `--validate` ("A parameter cannot be found that matches parameter name
+  '-validate'"); with no `param()` block, `powershell -File` hands every
+  argument to `$args` as written, so `build/windows-setup.ps1` reads its
+  options from `$args`.
 
 ### Phase 4: the one rule every script follows
 
@@ -323,8 +452,8 @@ takes `perl`, `bash` and `python3` from `PATH` and nothing else:
   (`build/ubuntu-package.sh` inside `ubuntu:20.04`, `build/windows-package.sh`
   naming Strawberry Perl inside its Wine container).
 - `tests/lib/require-bash.sh` stays: it guards a harness started from any
-  shell, inside a session or not. Its message names the host's setup and its
-  `--validate`, not Homebrew.
+  shell, inside a session or not. Its message points at the environment
+  check, the same line on every host, not at Homebrew.
 
 What the rule removes or rewrites, against the inventory in § The class of
 fault:
@@ -335,11 +464,32 @@ fault:
 | the Windows shim at Git's `/opt/homebrew/bin/perl` | no longer written; full setup removes one left by an earlier run |
 | `PERL="${PERL:-/opt/homebrew/bin/perl}"` in 15 harnesses | `PERL="${PERL:-perl}"`, and the per-harness fallback line goes |
 | `PATH` set from `brew --prefix` in the two notice-surface prototype scripts | removed |
-| `#!/usr/bin/perl` in five prototype scripts, `/opt/homebrew/bin/perl` in `prototype/426-asbuilt-run.sh` | `env perl`, bare `perl` |
+| `#!/usr/bin/perl` in seven prototype scripts (the five of phase 3, plus `prototype/colors` and `prototype/colors-256`), `/opt/homebrew/bin/perl` in `prototype/426-asbuilt-run.sh` | `env perl`, bare `perl` |
 | the example in `tests/profile/checks/README.md` | bare `perl` |
 | the `export PATH="$(brew --prefix)..."` lines in `CLAUDE.md` and `README.md` | the host's setup, and its `--validate` |
-| `require-bash.sh`'s Homebrew hint | names the host's setup and `--validate` |
-| historical records (`tests/profile/results/*`, `releases/*`, past investigations) | untouched: they record the interpreter of their time |
+| `require-bash.sh`'s Homebrew hint | points at the environment check: `perl process/check-environment.pl` |
+| `#!/bin/bash`, bash 3.2 on macOS, in 18 scripts: `build/generate-cpanfile.sh`, `build/install-deps.sh`, `build/macos-package.sh`, `tests/baseline/run-benchmark.sh`, `tests/baseline/compare-results.sh`, `tests/profile/run-profile.sh`, `tests/profile/profiling-preflight.sh`, and 11 prototype scripts | `#!/usr/bin/env bash`. `build/macos-setup.sh` and the two container builds keep it, as exceptions |
+| the Python install hints in `tests/validate-statistics.sh`, `tests/validate-profile.sh`, `tests/validate-distribution-shape.sh` and `tests/distribution-shape/generate-anchor.py`, which printed a macOS `brew` remedy on every host and advised installing into the command-line-tools Python or a `PATH` change | point at the environment check and at `README.md` § Test-harness dependencies, the same two lines on every host |
+| the macOS bullets of `tests/statistics-drift/README.md` § External dependencies, naming Homebrew's and the command-line-tools Python by path | the macOS setup and its `--validate` |
+| historical records (`tests/profile/results/*`, `releases/*`, past investigations, `build/packaging-notes`, the prototype reports that name the Perl they ran under) | untouched: they record the interpreter of their time |
+| `prototype/720-packed-generated-loop/pack-windows.sh`, which sets `PATH` to Strawberry Perl inside its Wine container | untouched: the container steps of `build/windows-package.sh`, a sealed environment |
+| `tests/validate-screenshot-capture.sh`, which runs the capture tool with `PATH` cut down to a directory without the tools | untouched: the test's own fixture for an absent tool |
+
+Stage 1 audit (2026-10-23): the AC13 search over the issue branch at
+`54b29fe2` printed 52 lines; beyond the inventory above it found
+`#!/usr/bin/perl` in `prototype/colors` and `prototype/colors-256`, added to the
+prototype row, and the three untouched rows just above.
+
+Stage 1 step 4 (2026-10-23): a census of every tracked file's first line
+found `#!/bin/bash` in 22 scripts, which AC13's pattern did not search for:
+the 18 of the row above, the three exceptions, and one under
+`tests/profile/results/`, a historical record. AC13's pattern gains
+`^#!/bin/bash`. The rule already covered them (architect, 2026-10-23: more
+sites, the same decision). Also found: `#!/bin/zsh` in
+`prototype/426-revalidate-v2.sh` and `#!/bin/sh` in
+`prototype/426-revalidate-v5-run.sh`, left as they are: neither is one of the
+three interpreters the rule governs, and each names the only one of its kind
+on the host.
 
 ### Phase 4: investigation stages, one per environment
 
@@ -348,10 +498,31 @@ records what it finds here before the next.
 
 | Stage | Host | What it establishes |
 |---|---|---|
-| 1 | macOS development host | the check script, the session-start hook, `build/macos-setup.sh` with `--repair` and `--validate`, the rule applied to every script; the harness suite passes |
-| 2 | Linux development host | a new Linux setup script (the distribution's Perl, `local::lib`), the check's Linux column, the screenshot tools on Linux; the harness suite passes |
+| 1 | macOS development host | the check script, the session-start hook, `build/macos-setup.sh` with `--repair` and `--validate`, the rule applied to every script |
+| 2 | Linux development host | a new Linux setup script (the distribution's packages, D3), the check's Linux column, the screenshot tools on Linux (not expected), every harness starting under it (AC16) |
 | 3 | Windows development host | `build/windows-setup.ps1` with `--repair` and `--validate`, the check under Git Bash, `./ltl` through `env perl` with no shim, the hooks, the profiler with `--dev-deps`, the option set parsed by PowerShell |
 | 4 | the container builds | `build/windows-package.sh` (Wine) and `build/ubuntu-package.sh` build as before, with the develop block in `build/cpanfile.windows` |
+
+**One tool or module installed two ways: what detects it on each host.**
+Found on a second macOS host whose Python was set up by hand (§ Step 5, the
+second host): a check that a tool runs and a module imports passes while the
+copy that wins is not the setup's. The check detects the class on every host
+now, without waiting for a stage to find it there: for Python, a module from
+the user's `site-packages` and a module installed more than once fail
+condition 7 on every host (D15); for Perl, a module from outside the Perl's built-in `@INC` and the setup's directory, or with two copies outside the core, fails condition 3 on every host (D16); and each host's place test adds what only
+that host's layout can tell. The forms for Linux and Windows are read, not
+measured; stages 2 and 3 run them on their hosts under AC3a, AC4a and AC10b. Stage
+4's containers run no harness and install into a fresh image, so none of
+these forms arises there.
+
+| Form | macOS | Linux | Windows | Detected by |
+|---|---|---|---|---|
+| another interpreter comes first | Homebrew's Python only as a versioned formula, so no `python3` link and `/usr/bin/python3` first (measured) | a `python3` from pyenv, conda or Homebrew on Linux ahead of the distribution's | another Python ahead of the setup's; the Microsoft Store stub | the place test of condition 7 on macOS and Linux; on Windows, an import failing (the stub runs no Python). on Windows, since stage 3 step 4, the interpreter the `~/bin/python3` wrapper starts, which must be the WinGet Python |
+| a module installed outside the setup's install shadows the setup's | `pip` into Homebrew Python's `site-packages` (measured) | `pip install --user` over the distribution's packages | `pip install --user` over the install's own `site-packages` | every host: a module from the user's `site-packages`; a module installed more than once. macOS also: a module outside its formula's Cellar |
+| a stale copy left beside the setup's | `pip`'s NumPy metadata left under Homebrew's files (measured) | a `pip` copy beside the distribution's package | a second copy after a reinstall | every host: a module installed more than once |
+| the setup's package installed but not in effect | a formula installed but not linked (measured) | the distribution's package present, another copy first | modules installed for one Python while `PATH` reaches another | every host: an import failing, or a module installed more than once; macOS setup's link step names the files in the way |
+| the setup's default moved past what is installed | Homebrew's `python` alias names 3.15 while the modules were on 3.14 (measured) | a distribution upgrade changing `python3`'s minor version | WinGet upgrading Python, leaving the modules on the old one | every host: an import failing on the Python now first |
+| the same for Perl | a Homebrew Perl upgrade across a minor version leaving the modules in the old keg (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism) | a module in `~/perl5` and the distribution's `lib*-perl` package at different versions | Strawberry Perl reinstalled, its `site\lib` from the earlier one | every host: condition 3 when a module no longer loads, loads from outside the Perl's built-in `@INC` and the setup's directory, or has two copies outside the core (D16) |
 
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
 
@@ -372,6 +543,9 @@ https://code.claude.com/docs/en/hooks-guide.md:
 - **Languages:** the examples are shell with `jq`, PowerShell for Windows, and
   Node for exec form; there is no section on writing hooks for several
   platforms.
+- **Several hooks for one event** (read 2026-10-23): "When an event fires,
+  its matching hooks run in parallel." "When several hooks return
+  `additionalContext` for the same event, Claude receives all of the values."
 - **SessionStart:** plain stdout, or `additionalContext`, goes into the
   model's context; `systemMessage` is shown to the user; exit 2 shows stderr
   as a hook error notice and the session proceeds. Default timeout 600 s; the
@@ -393,7 +567,7 @@ https://code.claude.com/docs/en/hooks-guide.md:
 | #751 (harnesses on Windows) | read: not planned; bounds what "validated on Windows" can cover |
 | `features/nytprof-profiling-workflow.md`, `tests/profile/profiling-preflight.sh` | read: already resolve through `perl` from `PATH` (544 D7) |
 | `features/227-binary-smoke-coverage.md`, `features/503-yaml-aggregate-export.md`, `features/189-histogram-bin-counter-primitives.md`, `features/342-redundant-logic-surfaces-audit-report.md`, `features/213-consolidation-regression-investigation.md`, `features/memory-tracking-improvements.md`, `releases/v0.12.2.md`, `tests/profile/results/*` | dismissed: records of past runs and past releases, which name the interpreter of their time |
-| `tests/distribution-shape/generate-anchor.py`, the Python hints in `tests/validate-statistics.sh`, `tests/validate-profile.sh`, `tests/validate-distribution-shape.sh` | dismissed: each hint is labelled with the platform it is for |
+| `tests/distribution-shape/generate-anchor.py`, the Python hints in `tests/validate-statistics.sh`, `tests/validate-profile.sh`, `tests/validate-distribution-shape.sh` | first dismissed, as labelled with the platform each is for; rewritten in stage 1 step 4 under R7 and R9 (§ Phase 4: the one rule every script follows) |
 | #106, #138, #328, #434, #541 | dismissed: closed, matched a term in passing |
 
 
@@ -401,13 +575,14 @@ https://code.claude.com/docs/en/hooks-guide.md:
 
 Written in the specification stage; the architect closed the stage without a line-by-line review (2026-10-23).
 
-- **R1. One environment check.** A single Perl script tests the twelve
+- **R1. One environment check.** A single Perl script tests the eleven
   conditions of § Phase 4: the expected conditions, and reports each one by
   number with its result (pass, fail, note), what it expected on this host,
   what it found (the path and version of the tool on `PATH`, the module that
   did not load), the context it ran in (the Perl it ran under, the `PATH` it
   saw), and, for every condition not passing, a pointer to that condition's
-  entry in § Troubleshooting a failed condition of this document. It does not
+  entry in `docs/development-environment.md` § Troubleshooting a failed
+  condition. It does not
   carry remedies: whoever reads the report, the developer or the agent, reads
   the entry and investigates the host it is on. It is read-only: it installs,
   writes and changes nothing.
@@ -428,12 +603,18 @@ Written in the specification stage; the architect closed the stage without a lin
   for the shell configuration). `--repair` and `--validate` install and
   upgrade nothing. The full setup ends by running the check. All three take
   the one option set of § Phase 4: one option set for every setup script.
-- **R5. Setup owns the shell configuration.** Each setup writes one managed
-  block, delimited so that rewriting it leaves everything else in the file
-  untouched: macOS into `~/.zshenv` and `~/.zprofile` (measured, § Phase 4:
-  where macOS setup writes its shell configuration), Linux into the files its
-  stage establishes, Windows into `~/.bashrc`, as today. Writing it again
-  changes nothing.
+- **R5. Setup adds only what is missing from the shell configuration.** The
+  check judges whether the shell configuration resolves the expected tools,
+  whoever wrote its lines. Setup never rewrites, removes or duplicates a line
+  the user already has. It adds a piece only when the check reports that piece
+  missing (`--repair`, and the full setup's shell step, which is the same).
+  Homebrew is a requirement of the macOS host, not something setup installs
+  (D13). Each addition is delimited,
+  so that a later run recognises it and adds nothing. On macOS, Homebrew's
+  own line already meets the Perl, bash and Python conditions (§ Phase 4: what
+  Homebrew's own configuration already provides on macOS); the Perl keg line
+  is ltl's only addition beyond it, and is added only for what is measured to
+  need it.
 - **R6. One rule for every script** (§ Phase 4: the one rule every script
   follows): interpreters from `PATH`, by `env` first lines and bare names; no
   absolute interpreter path, no `brew --prefix`, no change to `PATH`, outside
@@ -458,17 +639,26 @@ Written in the specification stage; the architect closed the stage without a lin
 
 | | Decision | By |
 |---|---|---|
-| D1 | One read-only check, in Perl, one list of conditions with per-host alternatives; the twelve conditions as listed | architect |
+| D1 | One read-only check, in Perl, one list of conditions with per-host alternatives; the conditions as listed, twelve when decided, eleven once the one about setup's block was retired under D12 | architect |
 | D2 | The session-start hook: shell form, an `sh` launcher, the Perl check | architect |
-| D3 | Linux starts from the distribution's Perl with `local::lib`; not a hard requirement, settled in the Linux stage | architect |
+| D3 | Linux takes everything from the distribution's packages: its Perl, a `lib*-perl` package per cpanfile module, `python3-numpy` and `python3-scipy`; no `local::lib`, no `~/perl5`, no `PERL5LIB`, nothing added to the shell configuration. Condition 5 (`PERL5LIB` carries `~/perl5`) is retired, its number not reused; D16's setup directory is none on any host. Settled by the architect in stage 2 (2026-10-23), replacing the first wording (the distribution's Perl with `local::lib`) | architect |
 | D4 | Setup modes: full, `--repair`, `--validate` | architect |
 | D9 | One option set on every setup script: `--dev-deps`, `--package`, `--repair`, `--validate`, `-h`/`--help`; CI's macOS step runs `--package`; 544 D6's environment variable goes | architect |
 | D5 | Profiling on every host; 544 D5a amended | architect |
-| D6 | macOS writes its block into both `~/.zshenv` and `~/.zprofile` | delegated, from the measurement |
+| D6 | The development tools must resolve in every login shell, as Homebrew advises; on macOS the place is `~/.zprofile` alone, and a plain non-login `zsh -c` is not required to resolve them (first taken, delegated, as both `~/.zshenv` and `~/.zprofile`; changed under D12) | architect |
 | D7 | The one rule and its exceptions; `require-bash.sh` stays as a guard with a host-neutral message | delegated |
 | D8 | The environment check is its own SessionStart hook entry | delegated |
 | D10 | No harness for this work. The acceptance criteria are test cases written out in this document; the developer runs each one by hand on the hosts it names, at that host's stage, and records the result under it | architect |
-| D11 | The check reports what it expected, what it found and the context it ran in, and points at the failed condition's entry in this document's § Troubleshooting a failed condition; it carries no remedies, and the agent or developer reading it works out the cause on the host from that entry | architect |
+| D11 | The check reports what it expected, what it found and the context it ran in, and points at the failed condition's entry in § Troubleshooting a failed condition (now `docs/development-environment.md`, so that nothing the check shows or points at names an issue: the agent's first reply on AC7's run framed the host's environment against this issue); it carries no remedies, and the agent or developer reading it works out the cause on the host from that entry. Amended by the architect 2026-10-23, after AC7: at session start the user is shown a short message naming what is wrong, the likely scenario and the command to run; the pointers go only to the agent, whose context tells it to diagnose the failure in its first reply | architect |
+| D12 | The check judges the environment, whatever configured it; setup never overwrites or duplicates the user's shell configuration, and adds a piece only when `--repair` (or the full setup's shell step) finds it missing | architect |
+| D13 | Homebrew is a requirement of the macOS development host: `build/macos-setup.sh` stops when it is absent, as today, and never installs it. The case in D12's first wording, setup adding Homebrew's line after installing Homebrew itself, therefore does not arise | architect |
+| D14 | AC8's budget: the session-start check finishes within the outstanding-state sweep's time on the same host. The two SessionStart entries run in parallel, so the check then never lengthens session start, and each host is judged against itself rather than against a figure measured on macOS (decided 2026-10-23 from the stage 1 measurement: check 0.29 s, sweep 3.40 s, medians of five) | architect |
+| D15 | Condition 7 also judges where NumPy and SciPy load from: each module's file must resolve into the setup's install (on macOS its own formula's Cellar), so a `pip` install shadowing the setup's fails it. Decided 2026-10-23 from a second macOS host, where a `python3` link to Homebrew's Python passed condition 7 while it loaded a pip-installed SciPy 1.17.1 over Homebrew's unlinked 1.18.1 (§ Step 5). Linux and Windows name their place in their stages. Directed by the architect the same day, so the class is detected on every host now rather than when a stage finds it: on every host a module loaded from the user's `site-packages` (where `pip --user` installs), or a module Python sees installed more than once on `sys.path`, fails condition 7 | architect |
+| D16 | Condition 3 (and 4, the profiler) also judges where each module loads from, on every host: a module whose file lies outside the Perl's built-in `@INC` (the one it was built with, without what `PERL5LIB` or `PERLLIB` add) and the setup's own directory (on Linux `~/perl5`, D3) fails, as does one with two copies on `@INC` outside the core directories. A dual-life module upgraded over its core copy counts once. Decided by the architect 2026-10-23, extending D15 to Perl | architect |
+| D17 | Windows setup sets `BASH_ENV` to `~/.bashrc` as a user environment variable, so the plain Git Bash shell Claude Code runs its hooks in reads the managed block that puts Strawberry Perl first; and the check's session-start message has a Windows story of its own for every failure, rather than falling to the branches written for macOS and Linux. Decided by the architect 2026-10-24, from § Stage 3, the check on this host as found | architect |
+| D18 | Condition 8 reports each tool's fault at the severity of the condition that owns it: 2 for perl, 6 for bash, 7 for python3. A Python fault in a login shell is therefore a note on Windows, as condition 7 is there, and a failure on macOS and Linux, as before. Decided by the architect 2026-10-24, from stage 3's AC10b run, where the full setup exited 1 on condition 8 over a stray NumPy that condition 7 reported as a note | architect |
+| D19 | On Windows the check may leave the `~/.bash_profile` that Git for Windows' `/etc/profile.d/bash_profile.sh` writes from a login shell, when `~/.bashrc` exists and none of `~/.bash_profile`, `~/.bash_login` and `~/.profile` does; AC5 records it as the one exception to the check writing nothing. Condition 8 keeps judging a real login shell, which the developer's first Git Bash terminal would make write the same file. Decided by the architect 2026-10-24, from stage 3's AC5 run | architect |
+| D20 | tmux is required on macOS and Linux: condition 9 fails when it is missing there, as the full harness suite, which the completion gate runs, needs it for the terminal-interface navigation tests; `build/macos-setup.sh` installs it, as `build/linux-setup.sh` already did. Decided by the architect 2026-10-24, at the start of stage 4, on a macOS host whose check had reported a missing tmux only as a note | architect |
 
 ## Acceptance criteria
 
@@ -488,9 +678,20 @@ scripts, put first on `PATH` to change what one name resolves to.
 **The check (R1, R2)**
 
 - [ ] **AC1. A set-up host passes.** Run `<setup> --validate`.
-      Pass when: all twelve conditions are reported by number, each one
+      Pass when: every condition is reported by number (eleven until D3 as
+      settled in stage 2 retired condition 5, ten since), each one
       applicable to the host passes or is a note, those not applicable are
       reported as such, and the exit status is 0. M L W.
+      - M, 2026-10-23, pass, on the architect's home after `--repair` (stage
+        1 step 5): eleven conditions reported, 9 pass and 2 `n/a` (5, Linux's
+        `PERL5LIB`; 11, Windows' line endings), exit 0.
+      - M, 2026-10-23, pass, on a second macOS development host, after the
+        developer removed a `pip` SciPy and ran the full setup from a
+        terminal: 8 pass, 1 note (no `tmux`), 2 `n/a`. That run's condition 8
+        context showed a new terminal tab resolving nothing; see § Step 1,
+        run from a terminal.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: after `./build/linux-setup.sh --dev-deps --package`, `--validate` reported 1 to 4 and 6 to 11, 8 pass and 2 `n/a` (10, the screenshot tools; 11, Windows' line endings), exit 0.
+      - W, 2026-10-24, Windows 11 ARM64, pass: `build\windows-setup.ps1 --validate` reported 1 to 4 and 6 to 11, 8 pass and 2 `n/a` (9, `tmux`; 10, the screenshot tools), exit 0.
 - [ ] **AC2. The wrong Perl first on `PATH` is reported, and the check still
       runs under it.** macOS: `PATH="/usr/bin:/bin:$PATH" /usr/bin/perl
       process/check-environment.pl`. Windows: `PATH="/usr/bin:$PATH"
@@ -499,24 +700,110 @@ scripts, put first on `PATH` to change what one name resolves to.
       naming the Perl found and the one expected; the report gives the Perl it
       ran under and the `PATH` it saw; and condition 2 carries the pointer to
       its troubleshooting entry. The exit status is non-zero. M W.
+      - M, 2026-10-23, pass: ran under `/usr/bin/perl` (v5.34.1); condition 2
+        expected Homebrew's Perl and found `/usr/bin/perl (v5.34.1)`; the
+        header gave the Perl and the `PATH`; pointer on every failure; exit 1.
+      - W, 2026-10-24, pass: `PATH="/usr/bin:$PATH" /usr/bin/perl process/check-environment.pl` completed under Git's own Perl; condition 2 expected "Strawberry Perl's, not Git's own /usr/bin/perl" and found `/usr/bin/perl (v5.42.2)`; the header gave the Perl and the `PATH`; a pointer on every failure; exit 1.
 - [ ] **AC3. A Perl without the project's modules is reported by the module.**
-      The run of AC2 on macOS and Windows; on Linux, `env -u PERL5LIB perl
+      The run of AC2 on macOS and Windows; on Linux, where the distribution's
+      Perl is the development Perl (D3), the modules are hidden from it: a
+      stand-in directory holding `Hide.pm`, an `@INC` hook that refuses
+      `Devel/Size.pm` and `YAML/PP.pm`, and `PERL5OPT="-I$D -MHide" perl
       process/check-environment.pl`.
       Pass when: condition 3 fails, naming the first module of the host's
-      cpanfile that did not load, with its pointer; on Linux condition 5 also
-      fails. M L W.
-- [ ] **AC4. Old bash and the system Python are reported.** macOS:
+      cpanfile that did not load, with its pointer. M L W.
+      - M, 2026-10-23, pass (the AC2 run): condition 3 found "Devel::Size does
+        not load; 3 of 20 do not: Devel::Size, Text::CSV, Text::CSV_PP", with
+        its pointer.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: with `Devel/Size.pm` and `YAML/PP.pm` hidden by the `@INC` hook, condition 3 found "Devel::Size does not load; 2 of 20 do not: Devel::Size, YAML::PP", with its pointer; exit 1.
+      - W, 2026-10-24, pass: the run of AC2: condition 3 "Devel::Size does not load; 8 of 21 do not: Devel::Size, Text::CSV, Text::CSV_PP, Win32::API, YAML::PP, …", with its pointer.
+- [x] **AC3a. A Perl module from outside the setup's install is reported**
+      (D16). A copy of a runtime module from the Perl's own `site_perl`, and
+      one of a core module, in a stand-in directory put first with
+      `PERL5LIB`. Linux: the same, the runtime module's copy taken from the
+      distribution's package directory, and a module installed both by the
+      distribution and by `cpanm` into a directory on `PERL5LIB`.
+      Pass when: condition 3 fails naming each module loading from the
+      stand-in, the site copy also as installed twice, the core copy not;
+      with no `PERL5LIB`, condition 3 passes. M L W.
+      - M, 2026-10-23, pass, on a second macOS development host: Text::CSV
+        and Getopt::Long each "loads from <D>/…, outside this Perl's install
+        and the setup's"; "Text::CSV is installed 2 times", with both paths;
+        Getopt::Long not counted twice; without `PERL5LIB` both conditions 3
+        and 4 pass. The system Perl run (AC2) reads as before D16: Apple's
+        `/System/Library/Perl/Extras` is on that Perl's built-in `@INC`.
+        The full check took 0.35 s before and after (medians of five).
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: copies of Text::CSV (from `/usr/share/perl5`) and Getopt::Long (core, from `perl-base`) in a stand-in directory on `PERL5LIB`: each "loads from <D>/…, outside this Perl's own install"; "Text::CSV is installed 2 times: <D>/Text/CSV.pm, /usr/share/perl5/Text/CSV.pm"; Getopt::Long not counted twice. Without `PERL5LIB` conditions 3 and 4 pass. The copy stands in for a `cpanm` install, as `cpanm` is not on this host; Debian's `perl-base` counted as core, as D16 read it.
+      - W, 2026-10-24, pass: `Text/CSV.pm` from Strawberry Perl's `vendor/lib` and `Getopt/Long.pm` from its core `lib`, copied into a stand-in on `PERL5LIB`: condition 3 named each "loads from <D>/…, outside this Perl's own install" and "Text::CSV is installed 2 times" with both paths; Getopt::Long not counted twice; without `PERL5LIB` conditions 3 and 4 pass.
+- [x] **AC4. Old bash and the system Python are reported.** macOS:
       `ln -s /bin/bash "$D/bash"; PATH="$D:$PATH" perl
       process/check-environment.pl`, then the same with
       `ln -s /usr/bin/python3 "$D/python3"` in a fresh stand-in directory.
       Pass when: the first run fails condition 6 naming `/bin/bash` and 3.2,
       the second fails condition 7 naming `/usr/bin/python3`, each with its
       pointer, and every other condition reads as in AC1. M.
-- [ ] **AC5. The check writes nothing.** `touch "$T/.mark"`, then
-      `HOME="$T" ZDOTDIR="$T" perl process/check-environment.pl`, then
-      `find "$T" -newer "$T/.mark"` and `git status --porcelain`.
+      - M, 2026-10-23, pass, run twice. On the architect's home, condition 8
+        fails in AC1 as well (Homebrew's lines only in `~/.zshrc`), so the
+        cases were repeated in a throwaway home whose `.zprofile` holds only
+        Homebrew's `eval "$(/opt/homebrew/bin/brew shellenv)"`. There AC1's run
+        passes every macOS condition; with the stand-in `bash` only condition 6
+        fails, found `<D>/bash -> /bin/bash (3.2)`; with the stand-in
+        `python3` only condition 7 fails, found `<D>/python3 ->
+        /usr/bin/python3`. Condition 8 passes in both: it judges the login
+        shell's tools against what conditions 2, 6 and 7 expect, not against
+        the check's own `PATH`.
+- [x] **AC4a. NumPy or SciPy from outside the setup's install is reported**
+      (D15). macOS, on a host whose Homebrew Python has a module installed
+      with `pip` in its `site-packages`: `ln -s <Homebrew python3.x>
+      "$D/python3"; PATH="$D:$PATH" perl process/check-environment.pl
+      --condition 7`, then the same with `PYTHONPATH` set to the formula's
+      own `site-packages` in its Cellar. Linux and Windows: the same, with
+      the module installed by `pip install --user` over the setup's, then
+      with it removed. Each host also runs the table's other Python forms
+      (§ Phase 4: investigation stages, the scenarios). Pass when: the first
+      run fails condition 7 naming the file the module loads from, with its
+      pointer; the second passes. M L W.
+      - M, 2026-10-23, pass, on a second macOS development host (§ Step 5,
+        the second host): the first run failed, found `<D>/python3 ->
+        …/Cellar/python@3.14/…/python3.14; SciPy loads from
+        /opt/homebrew/lib/python3.14/site-packages/scipy/__init__.py`; with
+        `PYTHONPATH=/opt/homebrew/Cellar/scipy/1.18.1_1/lib/python3.14/site-packages`
+        it passed. The code before D15 passed the first run. The host as it
+        stands reads as before, condition 7 naming `/usr/bin/python3`; the
+        full check took 0.16 s before and after (medians of five).
+      - M, 2026-10-23, pass, the tests every host runs, on the same host with
+        stand-ins: a copy of Homebrew's NumPy in a scratch user
+        `site-packages` (`PYTHONUSERBASE`) failed, "NumPy loads from the
+        user's site-packages, …" and "NumPy is installed 2 times"; a
+        `python3` link to Homebrew's 3.14 failed with "NumPy is installed 2
+        times: 2.4.6 in …/numpy-2.4.6.dist-info, 2.5.4 in
+        …/numpy-2.5.4.dist-info" and SciPy outside its Cellar; Python 3.15
+        with Homebrew's SciPy on `PYTHONPATH` passed. The full check took
+        0.35 s against 0.29 s before (medians of five, this host now
+        starting Homebrew's Python 3.15), inside D14's budget.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: a copy of the distribution's NumPy in a scratch user `site-packages` (`PYTHONUSERBASE`) failed condition 7, "NumPy loads from the user's site-packages, …" and "NumPy is installed 2 times: 2.3.5 in <user>/numpy-2.3.5.dist-info, 2.3.5 in /usr/lib/python3/dist-packages/numpy-2.3.5.dist-info"; without it, pass. The other forms: a venv's `python3` first, without the modules, failed "NumPy or SciPy does not import"; a venv with `--system-site-packages` first passed, as it loads the distribution's modules from their place (the place test judges where the modules load from; the interpreter's path resolves to `/usr/bin/python3.14`).
+      - W, 2026-10-24, pass, with a stand-in for `pip install --user`: NumPy, its `.dist-info` and `numpy.libs` copied into a scratch user `site-packages` (`PYTHONUSERBASE`): condition 7 (a note on Windows) "NumPy loads from the user's site-packages, …" and "NumPy is installed 2 times", naming the WinGet Python the wrapper starts; without it, pass. A first copy without `numpy.libs` did not import, and the check said so.
+- [ ] **AC5. The check writes nothing.** `T=$(mktemp -d)`, then, a second
+      later, `M=$(mktemp)`; then `HOME="$T" ZDOTDIR="$T" perl
+      process/check-environment.pl`, then `find "$T" -newer "$M"` and
+      `git status --porcelain`. Then `find . -maxdepth 1 -newer "$M"` in the directory the check ran
+      from, which `git status` does not see for an ignored file. The mark is made outside the throwaway home
+      and after it: made inside it, it leaves the home's directory a few
+      microseconds newer than itself, and `find` lists the home on every run
+      (measured on macOS, three runs without the check, 2026-10-23).
       Pass when: `find` lists nothing and `git status` is as it was before
       the run. M L W.
+      - M, 2026-10-23, on a second macOS development host: the check left
+        `nytprof.out` in the directory it ran from whenever the profiler is
+        installed; see § Step 1, the profiler started by condition 4. After the
+        fix, the full check with Homebrew's Perl first: both `find` runs
+        listed nothing.
+      - M, 2026-10-23, pass: `find` listed nothing, `git status` unchanged.
+      - M, 2026-10-23, pass, on a second macOS development host after D15 and
+        D16 (Python and Perl started to judge where each module loads from):
+        `find` listed nothing, `git status` unchanged.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: `find` in the throwaway home and in the checkout listed nothing; `git status` unchanged by the run.
+      - W, 2026-10-24, pass: `HOME` a fresh temporary directory, the mark made after it; the check exited 1 (condition 8, an empty home); both `find` runs listed nothing and `git status` was unchanged. Partial: with a home holding `.bashrc` alone, condition 8's login shells leave a `.bash_profile` there ("# generated by Git for Windows", reading `~/.profile` and `~/.bashrc`): Git for Windows' `/etc/profile.d/bash_profile.sh` writes it on any login shell when `~/.bashrc` exists and none of `~/.bash_profile`, `~/.bash_login` and `~/.profile` does, as a first Git Bash terminal would. Accepted as the one exception (D19); with that, pass.
 
 **The session-start check (R3)**
 
@@ -526,19 +813,92 @@ scripts, put first on `PATH` to change what one name resolves to.
       Pass when: it prints that no Perl was found, the `PATH` it saw and the
       pointer to condition 1's entry, and exits so that the session proceeds.
       M L W.
+      - M, 2026-10-23, pass: with only `sh` (macOS's, which is `/bin/bash`)
+        linked into the stand-in directory, the command read from
+        `.claude/settings.json` printed valid SessionStart JSON: a
+        `systemMessage` naming condition 1 with its pointer, and an
+        `additionalContext` saying no `perl` was on `PATH`, the `PATH` it saw
+        and the pointer; exit 0, nothing on stderr.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: with only `sh` linked into the stand-in directory, the command from `.claude/settings.json` printed the SessionStart JSON naming condition 1 with its pointer and the `PATH` it saw; exit 0.
+      - W, 2026-10-24, pass: on Windows the launcher runs the check with Git's own `/usr/bin/perl`, so a `PATH` with no `perl` reaches the check rather than the launcher's own message. `env -i PATH="$D" /usr/bin/sh -c '<command>'`, `$D` holding only a stand-in `uname` reporting `MINGW64_NT`: valid SessionStart JSON, exit 0, nothing on stderr; the user's message "this session finds no perl on PATH; no bash on PATH", the cause (Strawberry Perl not installed, or no Git Bash) and the full setup; condition 1 with its pointer. The first run read "finds perl no perl on PATH; perl no perl on PATH" and blamed CRLF line endings with `git` absent; both fixed (§ Step 6).
 - [ ] **AC7. A session started on a wrong environment.** From the checkout,
       start Claude Code as `PATH="/usr/bin:/bin:$PATH" claude` (on Windows,
       Git's `/usr/bin` first from Git Bash).
-      Pass when: the user sees the failed conditions, each with its pointer;
-      asked what the environment check reported, the agent answers from its
-      context; and, asked to find the cause, it reads the entries the pointers
-      name and identifies the `PATH` order as the cause. M L W.
+      Pass when: the user sees what is wrong, the likely scenario (Claude
+      Code started with a `PATH` that differs from a new terminal's) and the
+      step that fixes it; and the agent's first reply, to whatever the user
+      sends, reads the entries the pointers name and reports the `PATH` order
+      as the cause. M L W.
+      - M, 2026-10-23, on a second macOS development host, the session
+        started by the architect on a broken `PATH` (Homebrew's `bin` after
+        `/usr/bin` and `/bin`, no Perl keg): the hook's report reached the
+        agent's context, 3 pass, 4 FAIL (2 `/usr/bin/perl` 5.34.1; 3 the
+        three modules that Perl lacks; 6 `/bin/bash` 3.2; 7 `/usr/bin/python3`),
+        each with its pointer. From entries 2, 6 and 7 and the entry's first
+        note (the check sees the environment of whatever started it), the
+        agent named the cause: the `PATH` Claude Code inherited puts the
+        system directories ahead of Homebrew's, while condition 8 shows a
+        clean login shell resolving Homebrew's three tools, so the shell
+        files are right and the fault lies in how the session was started.
+        What the user saw is the architect's to confirm.
+      - M, 2026-10-23, fail, rerun by the architect from a new session on the
+        broken `PATH`, after D11's amendment: the user saw the message naming
+        the three system tools, the scenario (Claude Code started with a
+        `PATH` that differs from a new terminal's) and the fix; the agent's
+        first reply, to "hi", found the cause (`/usr/bin:/bin` put in front in
+        the terminal tab before `claude` ran, condition 8 passing) and the
+        fix, but opened by saying the failure was not caused by this issue's
+        work, framing a host's environment against an issue. The pointers led
+        into this issue's document, and `CLAUDE.md` asks every reply to say
+        whether a problem was caused by the work in progress. The entries
+        moved to `docs/development-environment.md`; the agent's instruction
+        and the `CLAUDE.md` session-start item now say a failed check is the
+        host's, never related to an issue or branch; the check's output
+        carries no issue reference. To be rerun.
+      - M, 2026-10-23, pass, rerun by the architect from a new session on the
+        broken `PATH`: the user saw the message; the agent's first reply
+        opened with the verdict that the failures come from the machine's
+        setup, not the repository, named no issue or branch, tabled what the
+        session and a clean login shell resolve for conditions 2, 3, 6 and 7,
+        named the cause (the tab's `PATH` changed by hand, `/usr/bin:/bin` in
+        front, condition 8 passing) and the fix (a new terminal tab, nothing to
+        install, no `--repair`).
+      - L, 2026-10-23, Ubuntu 26.04.1, pass, the session started by the
+        architect as `PATH="/tmp/ltl-ac7/bin:$PATH" claude`, the stand-in
+        directory holding a copy of `/usr/bin/perl`: the user saw "this
+        session finds perl /tmp/ltl-ac7/bin/perl (v5.40.1)", the scenario
+        (Claude Code started with a `PATH` that differs from a new
+        terminal's) and the fix; the check reported condition 2 failing, the
+        other seven applicable passing. The agent's first reply, to "hi",
+        read condition 2's entry, named the cause (the directory put in front
+        of `PATH` by hand in the shell that started `claude`, no shell file
+        adding it, condition 8 resolving `/usr/bin/perl` in every mode) and
+        the fix (a new terminal), and named no issue or branch.
+      - W, 2026-10-24, Windows 11 ARM64, pass, started by the architect from a `cmd` tab as `set BASH_ENV= ` (a trailing space) then `claude`: the user saw "this session finds perl /usr/bin/perl (v5.42.2)", the cause (`BASH_ENV` not putting Strawberry Perl first in the plain Git Bash shell Claude Code runs its hooks in) and the fix (`--repair`, then quit Claude Code and every terminal window). The agent's first reply, to "hi", found the user variable right and Claude Code's own `BASH_ENV` a single space set in the `cmd` tab, named the cause and the fix (a new terminal), and named no issue or branch. The message read "BASH_ENV is  , which…": a `BASH_ENV` of blanks, which bash reads no file for, now reads as not set. The `nytprof.out` that reply found in the checkout was written two minutes into that session, not by the check (three runs of the check, one per Perl and `PATH`, left it untouched); it was removed.
 - [ ] **AC8. The hook is fast enough to run at every session start.** On a
       set-up host, `time sh -c '<command>'`, five runs.
-      Pass when: the median is within the budget the architect sets from the
-      stage 1 measurement. M L W; unknown until measured.
+      Pass when: the median is within the median of five timed runs of the
+      outstanding-state sweep (`process/claude-hooks/session-start.sh`) on the
+      same host (D14). M L W.
+      - M, 2026-10-23, pass: the hook's command, five runs, 0.28 to
+        0.30 s, median 0.29 s. Each condition alone (`--condition N`, five
+        runs, medians): startup and condition 1 0.02 s; condition 3, the
+        twenty runtime modules, 0.07 s; condition 7, the NumPy and SciPy
+        import, 0.11 s; condition 8, three clean zsh starts, the `-lic` one
+        reading the architect's `~/.zshrc`, 0.10 s; the others 0.02 to
+        0.03 s. The outstanding-state sweep of
+        `process/claude-hooks/session-start.sh`, the other SessionStart
+        entry, five runs: 3.27 to 4.06 s, median 3.40 s. The two run in
+        parallel (§ How Claude Code runs a hook), so the check adds nothing to
+        how long a session takes to start on this host.
+      - M, 2026-10-23, pass, on a second macOS development host after D15 and
+        D16, `CLAUDE_PROJECT_DIR` set to the checkout: the hook's command,
+        five runs, 0.35 to 0.37 s, median 0.36 s; the outstanding-state
+        sweep, five runs, median 4.28 s.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: the hook's command, five runs, 0.40 to 0.41 s, median 0.40 s; the outstanding-state sweep, five runs, 2.05 to 2.43 s, median 2.23 s.
 
 **Setup (R4, R5)**
+      - W, 2026-10-24, pass: the hook's command, five runs, 3.62 to 3.71 s, median 3.66 s; the outstanding-state sweep, five runs, 7.45 to 9.73 s, median 8.11 s.
 
 - [ ] **AC9. `--repair` and `--validate` install nothing.** In a stand-in
       directory, put a script for each of `brew`, `cpanm`, `apt-get` and
@@ -548,59 +908,163 @@ scripts, put first on `PATH` to change what one name resolves to.
       same with `--repair`.
       Pass when: `$D/calls` holds no line other than `brew --prefix` and
       `brew shellenv`. M L W.
-- [ ] **AC10. `--repair` leaves the rest of a file alone and is idempotent.**
-      Seed the throwaway home's shell files (`.zshenv` and `.zprofile` on
-      macOS; the files stage 2 establishes on Linux; `.bashrc` on Windows) with
-      the line `export KEEP=1`. Run `HOME="$T" ZDOTDIR="$T" <setup> --repair`,
-      copy the files aside, run it again, `cmp` each file with its copy.
-      Pass when: after the first run each file holds `export KEEP=1` and one
-      managed block; after the second, `cmp` reports no difference. M L W.
-- [ ] **AC11. Every shell mode resolves the same tools.** After AC10's first
-      run, for each mode `-c`, `-lc`, `-ic`, `-lic`:
+      - M, 2026-10-23, pass, in an empty throwaway home: after `--validate`
+        `$D/calls` was empty (exit 1, condition 8 failing in the empty home);
+        after `--repair` it held `brew --prefix` alone (exit 0).
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: stand-ins for `apt-get`, `apt`, `sudo`, `cpanm`, `brew`, `winget`, `pip` and `pip3`; after `--validate` and `--repair` (both exit 0) `$D/calls` was empty.
+      - W, 2026-10-24, pass: `winget.cmd` and `cpanm.cmd` stand-ins first on `PATH`, `HOME` an empty stand-in: `--validate` exit 1 (condition 8, the empty home), `--repair` exit 0; neither stand-in was called.
+- [ ] **AC10. `--repair` adds nothing to a configuration that already works.**
+      Seed the throwaway home's shell files with the line `export KEEP=1` and
+      the host's own configuration of its tools, as a developer who already
+      uses them carries it (macOS: Homebrew's `eval "$(<prefix>/bin/brew
+      shellenv)"` in `.zprofile`; Linux: nothing, since the distribution's
+      tools are on its default `PATH` (D3), so `.profile`, `.bash_profile`
+      and `.bashrc` hold `export KEEP=1` alone; Windows: what stage 3
+      establishes), copy the files aside, run `HOME="$T" ZDOTDIR="$T" <setup>
+      --repair`, `cmp` each file with its copy.
+      Pass when: the check passes and `cmp` reports no difference. M L W.
+      - M, 2026-10-23, pass: `.zshenv`, `.zprofile` and `.zshrc` each seeded
+        with `export KEEP=1`, `.zprofile` also with Homebrew's line; the shell
+        step reported "Nothing to add", the check passed (exit 0), `cmp`
+        reported no difference in any of the three.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: `.profile`, `.bash_profile` and `.bashrc` each `export KEEP=1`; `--repair` reported "Yes. Nothing to add.", the check passed (exit 0), `cmp` found no difference.
+      - W, 2026-10-24, pass: the stand-in home held the developer's own configuration: `.bashrc` with `export KEEP=1` and a line of its own putting Strawberry Perl first, `.bash_profile` with `export KEEP=1` and a line reading `~/.bashrc`, and `bin/python3`; `--repair` reported `~/bin/python3` present and "Nothing to add", the check passed (exit 0), and every file was byte for byte unchanged.
+- [ ] **AC10a. `--repair` adds exactly the missing piece, once.** Seed the
+      throwaway home's shell files with `export KEEP=1` only. Run `HOME="$T"
+      ZDOTDIR="$T" <setup> --repair`, copy the files aside, run it again, `cmp`
+      each file with its copy.
+      Pass when: after the first run each file still holds `export KEEP=1`
+      unchanged, the check passes, and the only addition is one delimited
+      piece for what the check reported missing (on Linux none: nothing is
+      missing, D3); after the second run `cmp` reports no difference. M L W.
+      - M, 2026-10-23, pass: the first run left `.zshenv` and `.zshrc` as
+        `export KEEP=1` alone and appended to `.zprofile` one block, `# >>>
+        ltl homebrew >>>`, `eval "$(/opt/homebrew/bin/brew shellenv)"`,
+        `# <<< ltl homebrew <<<`; the check passed (exit 0). The second run
+        reported "Nothing to add" and `cmp` found no difference.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass, the same run (D3: nothing is missing on Linux): nothing added; a second `--repair` exit 0, `cmp` found no difference in any of the three files.
+      - W, 2026-10-24, pass: `.bashrc` and `.bash_profile` with `export KEEP=1` only. The first `--repair` wrote `~/bin/python3`, found condition 8 failing, and appended one block to each file (`# >>> ltl perl >>>` with the Strawberry Perl line to `.bashrc`, `# >>> ltl bashrc >>>` reading `~/.bashrc` to `.bash_profile`), `export KEEP=1` kept; the check passed (exit 0). The second run: "Nothing to add", every file unchanged.
+- [x] **AC10b. Setup links what it installs, and leaves files it did not put
+      there.** macOS, on a host with a formula installed but not linked
+      because a `pip` install holds its paths: `./build/macos-setup.sh`.
+      Linux and Windows: each host's full setup with a `pip install --user`
+      copy of NumPy or SciPy in place, and with Python's or Perl's modules
+      left on an earlier minor version (the scenarios' table). Pass when: it
+      exits 1 naming each colliding directory with its file count and the
+      pointer, every formula already linked is left as it is, and `find`
+      lists nothing newer than a mark made before the run in the Python
+      `site-packages` directories; on Linux and Windows, setup either brings
+      the setup's copy into effect without removing the developer's files,
+      or stops naming them, and the check passes only in the first case.
+      M L W.
+      - M, 2026-10-23, pass, on a second macOS development host (§ Step 5,
+        the second host): exit 1, "scipy is installed but cannot link",
+        `1289 /opt/homebrew/lib/python3.14/site-packages/scipy` (the count
+        `brew link --overwrite --dry-run` gives); perl, bash, python, numpy
+        and cpanminus already linked, untouched; `find` listed nothing. The
+        developer then removed pip's SciPy (`pip uninstall`) and ran the full
+        setup: "[link] Linking scipy", Homebrew reporting 2854 symlinks
+        created, and the check passing condition 7 on Python 3.15.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass, the stop case: the full setup with a copy of NumPy in a scratch user `site-packages` exited 1, condition 7 naming the user copy's file; the shell step added nothing; `find` listed nothing newer than the mark in either `site-packages`. Its message first read "a line in the shell configuration puts other tools first", wrong for this cause; it now says the report and its troubleshooting entry show where the cause lies.
+      - W, 2026-10-24, pass (the stray-copy case), with a stand-in for `pip install --user`: NumPy copied into a scratch user `site-packages` (`PYTHONUSERBASE`), then the full setup: exit 1, neither `site-packages` directory touched (nothing newer than the mark); the check named "NumPy loads from the user's site-packages" under condition 7 (a note on Windows) and under condition 8 (a failure). The earlier-minor-version case was not run: it needs Strawberry Perl or the WinGet Python reinstalled.
+- [ ] **AC11. Every login shell resolves the same tools.** After AC10a's first
+      run, for each login mode `-lc` and `-lic`:
       `env -i HOME="$T" ZDOTDIR="$T" zsh <mode> 'command -v perl bash python3'`
       (bash on Linux; on Windows the Git Bash modes stage 3 establishes).
-      Pass when: every mode prints the paths conditions 2, 6 and 7 expect.
-      M L W.
-- [ ] **AC12. The Linux setup works without root for Perl modules.** On a
-      Linux host carrying only the distribution's packages, run the Linux
-      setup, then `--validate`.
-      Pass when: `--validate` exits 0, the project's modules are under
-      `~/perl5`, and the setup's output shows no `cpanm` run through `sudo`.
-      L.
+      Pass when: each login mode prints the paths conditions 2, 6 and 7
+      expect, and AC10a added nothing to `.zshenv`. M L W.
+      - M, 2026-10-23, pass: `-lc` and `-lic` each printed
+        `/opt/homebrew/bin/perl`, `/opt/homebrew/bin/bash`,
+        `/opt/homebrew/bin/python3`, links into Homebrew's Cellar; `.zshenv`
+        still `export KEEP=1` alone.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: after AC10a's run, `env -i HOME="$T" bash -lc` and `-lic` each printed `/usr/bin/perl /usr/bin/bash /usr/bin/python3`.
+      - W, 2026-10-24, pass: after AC10a's first run, `env -i HOME="$T" bash -lc` and `-lic`, Git Bash's `/usr/bin/bash`: both printed `/c/Strawberry/perl/bin/perl`, `/usr/bin/bash` and `$T/bin/python3`; nothing added beyond the two blocks.
+- [ ] **AC12. The Linux setup installs every module from the
+      distribution's packages** (D3, settled in stage 2; first written for
+      `local::lib`, modules under `~/perl5`). On a Debian or Ubuntu host, run
+      `./build/linux-setup.sh --dev-deps`, then `--validate`, then load each
+      cpanfile module and print the file it loads from.
+      Pass when: `--validate` exits 0; every module loads from the Perl's
+      built-in `@INC`, none from `~/perl5`; `PERL5LIB` is unset; no `cpanm`
+      ran. L.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: after `--dev-deps`, `--validate` exit 0; `PERL5LIB` unset; no `~/perl5`; no `cpanm` on the host. Every module loads from the Perl's built-in `@INC`: the cpanfile's from `/usr/share/perl5` and `/usr/lib/x86_64-linux-gnu/perl5/5.40`, the core ones from `perl-base`, `/usr/share/perl/5.40` and `/usr/lib/x86_64-linux-gnu/perl/5.40`.
 
 **The rule (R6, R7, R9)**
 
-- [ ] **AC13. No interpreter named by location.** `git grep -nE 'brew
-      --prefix|/opt/homebrew|^#!/usr/bin/perl|(^|[;[:space:]])(export
+- [x] **AC13. No interpreter named by location.** `git grep -nE 'brew
+      --prefix|/opt/homebrew|^#!/usr/bin/perl|^#!/bin/bash|(^|[;[:space:]])(export
       +)?PATH=' -- ltl '*.sh' '*.pl' '*.py' build process prototype tests`.
       Pass when: every line it prints is in one of the exceptions or the
       historical records named in § Phase 4: the one rule every script
       follows. M.
+      - M, 2026-10-23, pass, at stage 1 step 4: 26 lines, every one in the
+        setup scripts (`build/macos-setup.sh`, `build/windows-setup.ps1`), the
+        container builds (`build/ubuntu-package.sh`, `build/windows-package.sh`,
+        `prototype/720-packed-generated-loop/pack-windows.sh`), the screenshot
+        test's own fixture (`tests/validate-screenshot-capture.sh`), or the
+        historical records (`build/packaging-notes`, three prototype reports,
+        `tests/profile/results/`).
 - [ ] **AC14. No message about Homebrew where there is none.** On Linux, run
       `prototype/412-notice-surfaces/check-tmux.sh`,
-      `prototype/412-notice-surfaces/capture/specimens.sh` and the full harness
-      suite of AC16, capturing stderr; `grep -i brew` the captures.
+      `prototype/412-notice-surfaces/capture/specimens.sh` and every harness
+      as AC16 starts it on Linux, capturing stderr; `grep -i brew` the
+      captures.
       Pass when: `grep` finds nothing. L.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: `prototype/412-notice-surfaces/check-tmux.sh` (scenario `modal-quit`, exit 0) and `capture/specimens.sh` (every case its expected result, against the two known-bad trees taken with `git archive`) each printed nothing matching `brew`; nor did the 53 harnesses started with `--list` (AC16's Linux run).
 - [ ] **AC15. `ltl` starts through `env perl`.** `./ltl --version`, and on
       Windows `ls /opt/homebrew/bin/perl`.
       Pass when: `ltl` prints its version on every host, and on Windows `ls`
       reports no such file. M L W.
-- [ ] **AC16. The harness suite passes.** The completion gate's full suite
-      (`docs/process/workflow.md` § 3). Pass when: every harness passes. M L.
+      - M, 2026-10-23, pass: first line `#!/usr/bin/env perl`; `./ltl
+        --disable-progress --version` printed `0.20.0-750`.
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: `./ltl --disable-progress --version` printed `0.20.0-750`, first line `#!/usr/bin/env perl`.
+      - W, 2026-10-24, Windows 11 ARM64, pass: after the full setup removed the wrapper, a Git Bash login shell ran `./ltl --disable-progress --version` (`Version: 0.20.0-750`, exit 0) through `perl` = `/c/Strawberry/perl/bin/perl`; `ls /opt/homebrew/bin/perl`: "No such file or directory".
+- [ ] **AC16. The harness suite passes, and every harness starts on each
+      host it runs on.** macOS: the completion gate's full suite
+      (`docs/process/workflow.md` § 3), run once, after stage 4; pass when
+      every harness passes. Linux: what this work changes there is how a
+      harness finds bash, Perl and Python, so each `tests/validate-*.sh` is
+      started with `--list` under the Linux setup; pass when each starts
+      (lists its scenarios, or stops at its own check for a corpus file, past
+      the interpreter guard) and none prints anything matching `brew`. No
+      stage runs the full suite; on the Linux host the `logs/` corpus is not
+      available. M L. (First written as the full suite on both hosts, which
+      contradicts `CLAUDE.md`'s rule that the full suite runs once, as the
+      completion gate; corrected by the architect in stage 2.)
+      - M, 2026-10-24, pass, at the completion gate, at `6fc8e800`: all 53
+        harnesses exit 0, `validate-csv-output` then `validate-statistics`
+        first, after a few scenarios from 11 of them (§ Completion gate).
+      - L, 2026-10-23, Ubuntu 26.04.1, pass: 53 harnesses started; 41 listed
+        their scenarios, 12 stopped at their own "not found" check for a
+        corpus file; `grep -i brew` found nothing.
 
 **Profiling and packaging (R8)**
 
 - [ ] **AC17. `--dev-deps` installs the profiler on Windows.**
       `build/windows-setup.ps1 --dev-deps`, then from Git Bash
       `perl -MDevel::NYTProf -e 1`. Pass when: exit 0. W.
+      - W, 2026-10-24, Windows 11 ARM64, pass: `--dev-deps` ran cpanm with `--with-develop` over `build/cpanfile.windows`, now carrying the develop block, and the check reported condition 4 pass (8 pass, 0 FAIL); `perl -MDevel::NYTProf -e 1` exit 0. The profiler, Devel::NYTProf 6.15, ships with Strawberry Perl (`perl/vendor/lib`), so cpanm found it installed and added nothing.
 - [ ] **AC18. Profiling runs on Windows.** `tests/profile/run-profile.sh`
       from Git Bash. Pass when: it writes its report. W; unknown: whether the
       profiling scripts meet the Windows traps that stop the harnesses there
       is stage 3's to find.
+      - W, 2026-10-24, Windows 11 ARM64, pass, after the preflight change of § Step 3: `tests/profile/run-profile.sh --no-samples` on a 677-line web access log carrying microsecond durations, given by its absolute path, wrote `nytprof.out`, `nytprof/index.html` and `summary.txt` under Strawberry Perl 5.42.3; exit 0. The first run stopped at the preflight: "The HTML report tool nytprofhtml is missing". A relative log path fails on every host under `--no-samples`, which runs `ltl` from the output directory and passes file arguments unchanged.
 - [ ] **AC19. No binary carries the profiler.** With the develop block in the
       cpanfile and the profiler installed, build each binary and list its
       archive (`unzip -l <binary>`). Pass when: no entry names
       `Devel/NYTProf`. M C.
+      - M, 2026-10-23, pass, on a second macOS development host: with the
+        cpanfile's develop block requiring `Devel::NYTProf` and the profiler
+        loading in Homebrew Perl 5.44.0 (condition 4 passing),
+        `build/macos-package.sh arm64` from a clean login shell; `unzip -l`
+        lists 148 entries, none naming `Devel/NYTProf`. C (the CI builds)
+        is stage 4's.
+      - C, 2026-10-24, pass, at stage 4, from Rancher Desktop on a macOS
+        development host: with `build/cpanfile.windows` carrying the develop
+        block, `build/ubuntu-package.sh arm64` and `amd64` and
+        `build/windows-package.sh` each built; `unzip -l` lists 147, 147 and
+        533 entries, none naming `Devel/NYTProf`, though Strawberry Perl ships
+        it.
 
 **The records (R10)**
 
@@ -609,41 +1073,821 @@ scripts, put first on `PATH` to change what one name resolves to.
       docs/toolchain-guidance.md`, then read each host's setup instructions.
       Pass when: `git grep` finds nothing, and each host's instructions name
       its setup with `--repair` and `--validate`. M.
+      - M, 2026-10-23, partial, at stage 1 step 4: the search finds nothing in
+        `README.md` or `CLAUDE.md`, and the macOS instructions name
+        `build/macos-setup.sh` with `--validate` and `--repair`. It still finds
+        `docs/toolchain-guidance.md` § Windows development host, trap 3 (the
+        shim), which stage 3 rewrites; the Linux and Windows instructions are
+        stages 2 and 3's.
+      - W, 2026-10-24, pass, at stage 3 step 5: the search finds nothing in
+        `README.md`, `CLAUDE.md` or `docs/toolchain-guidance.md`. `README.md`
+        § Install Dependencies names `build/windows-setup.ps1` with
+        `--validate` and `--repair` beside the macOS and Linux setups;
+        `docs/toolchain-guidance.md` § Windows development host names the same
+        three forms, and its traps 3, 4 and 6 describe `env perl`, `BASH_ENV`
+        and the `python3` wrapper.
+
+## Stage 1 implementation plan (macOS development host)
+
+Written 2026-10-23 from the requirements, decisions and conditions above. One
+commit per step, pushed to `750-interpreter-resolution`; each test case's
+result is recorded under it, with host and date, as it is run. Stages 2 to 4
+(Linux, Windows, the container builds) are planned on their hosts.
+
+### Step 0: the `before` benchmark
+
+The diff will touch `tests/validate-*.sh` and `tests/lib/`, so the completion
+gate requires a before/after benchmark (`docs/process/workflow.md` § 3).
+`./tests/baseline/run-benchmark.sh single-day-access-log-standard --label
+750-before`, run in the background from the `release/0.20.0` worktree at
+`7d0b57f8`, the issue's base, a worktree beside the issue's own, so both sides
+run from the same kind of checkout.
+
+Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
+`release/0.20.0` worktree at `7d0b57f8`.
+
+### Step 1: `process/check-environment.pl`
+
+- `#!/usr/bin/env perl`, `use strict; use warnings;`, core modules only
+  (`Config`, `Cwd`, `File::Spec`, `JSON::PP`), no syntax newer than the
+  oldest Perl it must run under (Ubuntu 20.04's 5.30), so the macOS system
+  Perl, Git for Windows' Perl and a distribution's Perl all run it (R2).
+- **Host** from `$^O`: `darwin` macOS, `linux` Linux, `msys`, `cygwin` and
+  `MSWin32` Windows.
+- **One list of conditions** (D1): an array of entries, each with its number,
+  title, severity, and one test per host or `n/a`. A test returns the result,
+  what it expected and what it found.
+- **Three helpers, used by every test:** `find_on_path(name)` (splits `PATH`
+  on `$Config{path_sep}`), `real(path)` (`Cwd::abs_path`, so a Homebrew link
+  resolves into its Cellar), and `run_capture(cmd...)`, the one place a tool
+  is started, so stage 3 adapts one sub for Strawberry Perl.
+- **The tests, macOS column** (Linux and Windows columns written from the
+  conditions table, validated in their stages):
+
+  | # | Test |
+  |---|---|
+  | 1 | `find_on_path('perl')` |
+  | 2 | `real()` of it contains `/Cellar/perl/` (Homebrew, whatever the prefix) |
+  | 3 | `build/cpanfile`'s `requires` lines outside the `on 'develop'` block; the Perl found on `PATH` requires each and prints those that fail; found names the first and the count |
+  | 4 | the same for the develop block; note |
+  | 5 | n/a (Linux: `PERL5LIB` carries `$HOME/perl5`) |
+  | 6 | `bash -c 'echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}'` is 4 or later, and `real()` of it is in a Cellar |
+  | 7 | `python3 -B -c 'import numpy, scipy'` succeeds (`-B` writes no bytecode), and `real()` of it is in a Cellar |
+  | 8 | `env -i HOME USER LOGNAME TERM` (and `ZDOTDIR` when set) `/bin/zsh -lc` printing `command -v` of `perl`, `bash`, `python3`; each tool it resolves passes the test of condition 2, 6 or 7, whatever the check's own `PATH` holds (AC4, AC11). Also run, shown and not judged: `-lic` (a new tab) and `-c` (a plain shell) |
+  | 9 | `tmux` on `PATH`; note |
+  | 10 | `swiftc` on `PATH`; note |
+  | 11 | n/a (Windows: `git config core.autocrlf` is `false`) |
+
+- **Report** (R1, D11): a header with the host, the Perl it ran under (`$^X`,
+  version) and the `PATH` it saw; then per condition its number, `pass`,
+  `FAIL`, `note` or `n/a`, the title, and for every condition not passing the
+  expected and found lines and `see: docs/development-environment.md
+  § Troubleshooting a failed condition, <n>`; a last line counting each
+  result. Exit 0 with no `FAIL`, 1 with any, 2 on a usage error.
+- **Options:** `--hook` prints the SessionStart JSON
+  (`hookSpecificOutput.additionalContext` carries the whole report, preceded,
+  when a condition fails, by an instruction to the agent to diagnose it in its
+  first reply; a `systemMessage`, shown to the user, names what is wrong, the
+  likely scenario and the command to run (D11 as amended), and is absent
+  when nothing fails) and exits 0; `--condition N[,N...]` runs only those
+  conditions, for the profiling preflight (step 4); `-h`, `--help`. An unknown
+  option prints usage to stderr and exits 2 having tested nothing.
+- **Proven by** AC2 (the wrong Perl first), AC3 (a Perl without the modules),
+  AC4 (old bash; the system Python), AC5 (writes nothing). AC1 waits for
+  step 3's `--validate`.
+- **Run from a terminal** (found on a second macOS host, 2026-10-23): the
+  developer's full setup, run in a terminal, reported condition 8's new
+  terminal tab (`zsh -lic`) resolving no `perl`, `bash` or `python3`, where
+  every run from the agent's shell had resolved them. Reproduced under a
+  pseudo-terminal (`script -q`): the full check took 20.31 s against 0.32 s
+  without one. Each tool was started in a process group of its own, still
+  attached to the terminal; the interactive zsh, touching the terminal from
+  a background group, was stopped until the 20-second timeout killed it.
+  `run_capture` now starts each tool in a session of its own (`setsid`),
+  which has no controlling terminal and still lets a timeout kill the whole
+  group. After the change, under the pseudo-terminal: 0.37 to 0.38 s, the tab
+  line resolving all three tools, 8 pass; without one, 0.37 s and the same
+  result; the hook's output unchanged. Only `-lic` touches the terminal, so
+  only that context line, never a condition's result, was affected.
+- **The profiler started by condition 4** (found on a second macOS host,
+  2026-10-23): the session-start sweep reported a `nytprof.out` in the
+  repository root, 487 bytes, its header naming `-e` under Perl 5.44.0.
+  Loading `Devel::NYTProf` starts the profiler, which writes `nytprof.out`
+  into the current directory: from a scratch directory, with Homebrew's Perl
+  first, `--condition 3` left nothing and `--condition 4` left the file. The
+  session-start hook runs from the repository root, so every session on a
+  host with the profiler installed left one there. AC5 had not caught it:
+  `nytprof.out` is ignored by git, and its `find` looked only in the
+  throwaway home. The module test now runs with `NYTPROF=start=no`, which
+  loads the profiler without starting it; the full check then left the
+  directory empty. AC5 now also looks in the directory the check ran from.
+
+### Step 2: the session-start hook
+
+- A second entry under `SessionStart` in `.claude/settings.json` (D8), with
+  the same matcher as the outstanding-state sweep (`startup|resume|clear|compact`,
+  so the report survives a cleared context) and a 60 s timeout. Its command,
+  in shell form (D2):
+  `command -v perl >/dev/null 2>&1 && exec perl
+  "$CLAUDE_PROJECT_DIR/process/check-environment.pl" --hook`, else a `printf`
+  of the SessionStart JSON saying no Perl was found, with the `PATH` it saw
+  and condition 1's pointer. A `PATH` holding a double quote or a backslash
+  makes that JSON invalid, and Claude Code then takes it as plain text into
+  the context; accepted, as no development host's `PATH` carries either.
+- **Proven by** AC6 (no Perl on `PATH`), and AC8: five timed runs, the
+  median brought to the architect to set the budget.
+
+### Step 3: `build/macos-setup.sh`
+
+- Stays `#!/bin/bash` and bash 3.2 compatible: it runs before Homebrew bash
+  exists. As a setup script it is one of the rule's exceptions.
+- **Options** (D9): `--dev-deps`, `--package`, `--repair`, `--validate`,
+  `-h`/`--help`. `--repair` and `--validate` take no other option; an unknown
+  option or a forbidden pair prints usage and exits 2 having done nothing.
+- **`--validate`:** runs `perl process/check-environment.pl` with the
+  caller's `PATH`, and exits with its status. No `brew` call.
+- **Homebrew is required** (D13): the full setup and `--repair` stop when
+  `brew` is not on `PATH`, as today.
+- **Full setup:** `brew install perl bash python numpy scipy cpanminus`;
+  PAR::Packer only under `--package`; `./generate-cpanfile.sh`; `cpanm
+  --notest --installdeps .`, with `--with-develop` under `--dev-deps`; the
+  `PATH` exports and `GITHUB_PATH` lines for its own run and CI as today; then
+  the shell step, then the check, exiting with its status.
+- **The link step** (full setup, after the installs): `brew install` leaves
+  a formula that is installed but not linked as it is ("already installed,
+  it's just not linked"), so each formula setup installs is linked. A formula
+  whose files collide with files put there another way (a `pip` install)
+  is not linked: setup names the colliding directories with their file
+  counts, leaves them (D12), points at troubleshooting entry 7 and exits 1.
+  The collisions are found from the formula's Cellar files and
+  `brew info --json=v2` (`linked_keg`), never by asking `brew link`.
+  Measured on a second macOS host, 2026-10-23, Homebrew 7.0.10: a `brew link`
+  that fails on a collision removes its links but leaves the directories it
+  made, and `brew link --overwrite --dry-run` makes them too; the empty
+  `python3.15/site-packages/scipy` then imports in Python 3.15 as an empty
+  namespace package with no `__version__`. The 148 empty directories these
+  runs left were removed, by birth time and `rmdir`.
+- **The shell step** (`--repair`, and the full setup's; D12, D6): run the
+  check; when condition 8 passes, add nothing. When it fails, ask a clean
+  login shell (`env -i … /bin/zsh -lc`) for `HOMEBREW_PREFIX`, which
+  Homebrew's own line (`brew shellenv`) exports: when it is unset, Homebrew's
+  line is the missing piece, and it is appended once to
+  `${ZDOTDIR:-$HOME}/.zprofile` between the markers the Windows setup already
+  uses (`# >>> ltl homebrew >>>`, `# <<< ltl homebrew <<<`), as
+  `eval "$(<prefix>/bin/brew shellenv)"` with the prefix written out. If the
+  markers are already there, or a login shell already has `HOMEBREW_PREFIX`,
+  nothing is added: the cause lies in a line the user owns, and the check's
+  report shows it. Then run the check again.
+- **Why `HOMEBREW_PREFIX`, measured on macOS, 2026-10-23:** the rule first
+  written here took Homebrew's line as missing when `$(brew --prefix)/bin` was
+  absent from a clean login shell's `PATH`. On this host that rule adds
+  nothing: `/etc/paths.d/homebrew` holds `/opt/homebrew/bin`, so `path_helper`
+  puts it on every clean login shell's `PATH`, behind `/usr/bin`, while
+  condition 8 fails. A clean login shell here has no `HOMEBREW_PREFIX`;
+  `brew shellenv` (Homebrew 7.0.10) exports it along with `PATH`. The
+  variable tells whether Homebrew's own line ran, whoever wrote it, where
+  `PATH` cannot.
+- **Paths no criterion reaches, run on macOS, 2026-10-23:** `.zprofile`
+  holding the block followed by `export PATH=/usr/bin:/bin:$PATH`, and
+  holding Homebrew's line followed by the same: nothing added, the file
+  unchanged, the check's report showing the cause, exit 1. A `.zprofile`
+  without a final newline: the block added on lines of its own.
+- **The Perl keg line:** with PAR::Packer installed for Homebrew Perl (this
+  host has none for 5.44; asked of the architect before installing), build the
+  binary from a clean login shell carrying only Homebrew's line
+  (`build/macos-package.sh arm64`, which runs `perl -S pp`), and see which
+  `pp` it starts and whether the binary runs. The keg line becomes a second
+  piece of the shell step only if this shows it is needed.
+  Attempted 2026-10-23, with the architect's go-ahead: `perl -S cpanm
+  --notest PAR::Packer` under Homebrew Perl 5.44 installed nothing. The
+  network's web proxy answered the `Archive-Zip-1.68.tar.gz` download with an
+  HTML block page ("Not allowed to upload/download encrypted or
+  password-protected archive files"), so `Archive::Zip`, then `PAR`, then
+  PAR::Packer bailed out. Read, not measured: `/usr/bin/pp`, which `perl -S`
+  finds without the keg line, is the four lines `use strict; use warnings;
+  use pp; pp->go();`, so under Homebrew Perl it would load Homebrew Perl's own
+  `pp.pm`. **Parked by the architect (2026-10-23), to be done from another
+  host**, not behind this network's proxy: this measurement, and with it
+  AC19's macOS build, which needs PAR::Packer on the host as well.
+  **Measured on a second macOS development host, 2026-10-23: the keg line is
+  not needed.** That host has Homebrew Perl 5.44.0 with PAR::Packer 1.064
+  installed, and a `~/.zprofile` holding Homebrew's own line only. From
+  `env -i HOME=… USER=… TERM=… /bin/zsh -lc`: `HOMEBREW_PREFIX=/opt/homebrew`,
+  `perl` resolves `/opt/homebrew/bin/perl` (5.44.0); the keg's `bin`, which
+  holds Homebrew Perl's own `pp`, is not on `PATH`, so `perl -S pp` finds
+  macOS's `/usr/bin/pp`, whose `use pp;` under Homebrew Perl loads
+  `/opt/homebrew/opt/perl/lib/perl5/site_perl/5.44/pp.pm` and PAR::Packer from
+  the same `site_perl`. `build/macos-package.sh arm64` built the binary
+  (Mach-O arm64, linked against `libSystem` alone, its archive's modules from
+  `5.44.0/darwin-thread-multi-2level`), which ran `--version` with exit 0 and
+  passed the read-path check. The shell step stays Homebrew's line only.
+- **CI:** `.github/workflows/release-build.yml` runs
+  `./build/macos-setup.sh --package`. Verified by a manual run of that
+  workflow on the issue branch (its release job runs on tags only), asked of
+  the architect first.
+  Run 2026-10-23 (run 40015452666, at `de4d789c`): success; build-macos,
+  build-ubuntu amd64 and arm64 and build-windows passed, release skipped. On
+  GitHub's macOS runner the shell step found condition 8 failing (a clean
+  login shell resolved `/usr/bin/perl` 5.34.1, `/bin/bash` 3.2 and the
+  python.org `python3` in `/Library/Frameworks`), added Homebrew's line to
+  the runner's `~/.zprofile`, and the final check read 7 pass, 0 FAIL, notes
+  for the profiler and `tmux`; condition 7 passed under D15's tests on
+  every host, with the python.org Python also present. The link step
+  printed nothing: every formula was already linked.
+- **Proven by** AC9 (`--validate` and `--repair` install nothing), AC10 (a
+  working configuration gains nothing), AC10a (the missing piece added once),
+  AC11 (both login modes resolve the tools), each in a throwaway home.
+
+### Step 4: the one rule, applied
+
+- `ltl` line 1 `#!/usr/bin/env perl`.
+- The 15 harnesses: `PERL="${PERL:-perl}"`, and the fallback line after it
+  removed; the comment in `tests/validate-section-layout.sh` that names
+  Homebrew Perl rewritten to the rule.
+- `prototype/`: the seven `#!/usr/bin/perl` first lines to `env perl`; bare
+  `perl` in `prototype/426-asbuilt-run.sh`; the `PATH` lines removed from the
+  two notice-surface scripts. `tests/profile/checks/README.md`: bare `perl`.
+- `tests/lib/require-bash.sh`: the remedy line points at the environment
+  check, `perl process/check-environment.pl`, the same on every host; its
+  header comment rewritten the same way. First planned as the host's setup
+  chosen by `uname -s`; changed while building it, because `--validate` runs
+  exactly that check, the line is right on every host now and after stages
+  2 and 3 without another edit, and the check's report already points at the
+  troubleshooting entries that name the setup's modes. The Python hints
+  (§ Phase 4: the one rule every script follows) carry the same line, and a
+  second one naming `README.md` § Test-harness dependencies for the install
+  steps per host.
+- `tests/validate-section-layout.sh` tested that every input exists with
+  `[[ -e "$f" ]]`, `$PERL` among them, which a bare `perl` fails: `$PERL` left
+  that list for a `command -v` test of its own.
+- `tests/profile/profiling-preflight.sh`: its check 1, a second test for
+  "not the system Perl" that names `/usr/bin` and so would fail on Linux,
+  where `/usr/bin/perl` is the expected Perl, becomes a call of
+  `process/check-environment.pl --condition 1,2`, keeping its exit code 1; on
+  a failure it prints that report, whose pointers name the troubleshooting
+  entries. With no `perl` at all, where the check cannot run, it prints
+  condition 1's pointer itself. Its remedy for a missing `cpanm` names
+  `./build/macos-setup.sh --dev-deps` on macOS and nothing elsewhere, until
+  stages 2 and 3 give those hosts a setup. Its one consumer,
+  `tests/profile/run-profile.sh`, reads only the exit code.
+- Records (R10): `README.md` § Install Dependencies (macOS requires Homebrew;
+  the setup, `--repair`, `--validate`), § Test-harness dependencies (the
+  `export PATH` block gives way to `--validate`), the profiling subsection
+  (`--dev-deps` for `LTL_INSTALL_DEV_DEPS=1`); `CLAUDE.md` § Build and § Test
+  and benchmark; `tests/HARNESS-DESIGN.md`'s note on Homebrew bash; 544 D1 and
+  D7 restated against the requirement. `docs/toolchain-guidance.md` §
+  Windows development host waits for stage 3, which changes what it describes.
+- **Proven by** AC13 (the search for interpreters named by location), AC15
+  (`./ltl --version`), AC20 on `README.md` and `CLAUDE.md` (the Windows
+  section's line waits for stage 3); `perl -c` and `bash -n` on each changed
+  script; one scenario of a changed harness run before and after, with the
+  `perl` each one starts read from its output.
+- **Run on macOS, 2026-10-23:** `perl -c`, `bash -n` and `py_compile` clean on
+  every changed script. `tests/validate-value-display.sh --scenario
+  zero-duration` and `tests/validate-section-layout.sh --scenario
+  layout-baseline` under `bash -x`, before and after: both pass both times;
+  before, `PERL=/opt/homebrew/bin/perl`; after, `PERL=perl`, each check script
+  started as `perl <script>`. Each rewritten message made to fire: a harness
+  under `/bin/bash` (exit 2, pointing at the check); a `python3` that cannot
+  import NumPy first on `PATH` (`tests/validate-statistics.sh`,
+  `tests/validate-distribution-shape.sh`), no `python3` on `PATH`
+  (`tests/validate-profile.sh`), and the anchor generator under a Python
+  without NumPy, each exit 1 with the two lines; the profiling preflight on
+  this host (exit 0) and with the system Perl first (exit 1, the check's
+  report for conditions 1 and 2). `tests/baseline/compare-results.sh summary`
+  on two released TSVs under `/bin/bash` and under the new first line: the
+  same 347 lines. `build/generate-cpanfile.sh` under both: the same output,
+  the tracked cpanfiles unchanged. The benchmark records `ltl`'s own timings
+  (`-V benchmark-data`), so the runner's bash does not enter the before and
+  after comparison.
+- Found on the way, fixed in step 1's script: started by the bare name
+  `perl`, macOS's system Perl gives `$^X` as `perl`, and the header read "ran
+  under perl"; the header now finds the name on `PATH`, as the shell did.
+
+### Step 5: this host
+
+- `build/macos-setup.sh --validate` on the architect's own home: condition 8
+  is expected to fail (§ Phase 4: what Homebrew's own configuration already
+  provides on macOS). Moving the `~/.zshrc` lines, or running `--repair`, is
+  the architect's choice; then AC1.
+- AC7, a session started on a wrong `PATH`, is run by the architect.
+- **Run on the architect's home, 2026-10-23.** `--validate` before: 8 pass,
+  condition 8 failing as expected (a clean login shell resolved
+  `/usr/bin/perl`, `/bin/bash` 3.2 and `/usr/bin/python3`; a new tab resolved
+  Homebrew's), with Homebrew's lines in `~/.zshrc` alone and no `~/.zprofile`.
+  The architect chose `--repair`, over moving the `~/.zshrc` lines by hand,
+  knowing a new tab then runs `brew shellenv` twice. `--repair` created
+  `~/.zprofile` holding the one marked block and left `~/.zshrc` and
+  `~/.zshenv` byte for byte as they were; condition 8 then passed. A second
+  `--repair` reported "Nothing to add" and left `~/.zprofile` unchanged. A
+  clean `zsh -lc` resolved `/opt/homebrew/bin/perl`, `bash` and `python3`, a
+  clean `zsh -lic` the same with the keg's `perl`. The session-start hook's
+  command printed no `systemMessage`.
+- Found there: the block was written after a blank line even into a new,
+  empty `~/.zprofile`. The separator is now written only when the file
+  already holds something; checked in throwaway homes with `.zprofile`
+  absent, ending in a newline, and ending without one.
+- **Run on a second macOS development host, 2026-10-23**, whose Python was
+  set up by hand rather than by `build/macos-setup.sh`. `--validate`: exit 1,
+  6 pass, conditions 7 and 8 failing; conditions 1 to 6 pass. What the host
+  holds, read from Homebrew and the site-packages directories:
+  - Homebrew's Python is `python@3.14` alone, installed as another formula's
+    dependency. It links only versioned names (`python3.14`); there is no
+    unversioned `python3` link, so `/usr/bin/python3` (no NumPy) comes first.
+    Homebrew's `python` alias, which the full setup installs, now names
+    `python@3.15`, which is not installed.
+  - NumPy 2.4.6 and SciPy 1.17.1 were installed with `pip` into Homebrew
+    Python 3.14's `site-packages`; Homebrew's NumPy 2.5.4 and SciPy 1.18.1
+    were installed later. NumPy 2.5.4 is linked over pip's files, while pip
+    still lists 2.4.6. Homebrew's SciPy 1.18.1 is not linked
+    (`brew link --dry-run scipy` would link it), so Python 3.14 imports pip's
+    SciPy 1.17.1. Homebrew's NumPy is also linked into
+    `lib/python3.15/site-packages`, for a Python that is not installed.
+  - What the check reports: condition 7 names `/usr/bin/python3`, and
+    condition 8 shows every shell mode resolving it; the shell files are not
+    the cause here, while troubleshooting entry 8 points at them. With a
+    `python3` link to Homebrew's 3.14 put first on `PATH` (a scratch
+    directory, the host unchanged), condition 7 passes: it tests that
+    `import numpy, scipy` succeeds, not which install each comes from.
+    Resolving each module's file tells the installs apart: NumPy's
+    `__init__.py` resolves into `Cellar/numpy/2.5.4`, SciPy's stays in
+    `lib/python3.14/site-packages`.
+
+### Not in stage 1
+
+The full harness suite runs once, at the completion gate after stage 4, on
+this host; AC16's macOS result is recorded there. Linux setup, the Windows
+setup's options and modes, the shim's removal, and the container builds
+belong to stages 2 to 4.
+
+## Stage 2: the Linux development host
+
+### The check on this host, as found (2026-10-23)
+
+Ubuntu 26.04.1 LTS, the distribution's Perl 5.40.1 at `/usr/bin/perl`, bash
+at `/usr/bin/bash`, Python 3.14 at `/usr/bin/python3`; `PATH` the
+distribution's default with `~/.local/bin` first. `perl
+process/check-environment.pl` took 0.46 s and exited 1: 4 pass, 4 FAIL, 1
+note, 2 n/a.
+
+| # | Result | Found |
+|---|---|---|
+| 1, 2, 6, 9 | pass | `perl`, `bash` (4 or later) and `tmux` on `PATH`, the distribution's |
+| 3 | FAIL | 7 of 20 runtime modules do not load: Devel::Size, Text::CSV, Text::CSV_PP, YAML::PP and its three schema modules |
+| 4 | note | Devel::NYTProf does not load |
+| 5 | FAIL | `PERL5LIB` not set; no `~/perl5` |
+| 7 | FAIL | `/usr/bin/python3` imports neither NumPy nor SciPy |
+| 8 | FAIL | every shell mode (`-lc`, `-lic`, `-c`) resolves the same three tools as the check's own `PATH`; fails on condition 7's Python only |
+| 10 | n/a | not expected on Linux: the screenshot tool draws its PNG with WebKit on macOS (`features/598-screenshot-capture.md` D23) |
+| 11 | n/a | Windows only, by the conditions table |
+
+Nothing of ltl's is installed on this host: no `~/perl5`, no `local::lib`, no
+`cpanm`, no `lib*-perl` package for the cpanfile's modules, no NumPy or SciPy,
+and no `logs/` corpus in the checkout. `perl -c ltl` fails at its first
+non-core `use` (Devel::Size). The report matches the host: each FAIL names a
+piece that is absent, and the three tools resolve the same in every shell
+mode. The host is a clean start for the Linux setup script that stage 2
+writes.
+
+### `build/linux-setup.sh` (D3: the distribution's packages)
+
+Debian and Ubuntu; stops without `apt-get`. The option set of D9 (`--dev-deps`,
+`--package`, `--repair`, `--validate`, `-h`/`--help`), parsed as
+`build/macos-setup.sh` parses it. The full setup generates the cpanfile, then
+installs with `sudo apt-get` the distribution's `perl`, `bash`, `tmux`,
+`python3`, `python3-numpy`, `python3-scipy`, and the package of each cpanfile
+module named in the script's module-to-package table (with `--dev-deps` the
+develop block's, with `--package` `libpar-packer-perl`). A cpanfile module not
+in the table must load from Perl's own install; the setup stops naming it
+otherwise, so a new module gets its package named before the setup passes.
+The shell step runs condition 8 and adds nothing: the distribution's tools are
+on its default `PATH`, so a login shell resolving others means a line the
+developer owns. `--repair` is that step and the check.
+
+Changes to `process/check-environment.pl` under D3: condition 5 removed; the
+module probe judges a module's place against the Perl's built-in `@INC` only
+(no setup directory on any host); condition 7's Linux place requires NumPy and
+SciPy under `/usr/lib/python3/dist-packages`; the session-start message names
+`./build/linux-setup.sh` and `--repair` on Linux. Records rewritten:
+`docs/development-environment.md` (the Debian/Ubuntu row, conditions 3 and 5),
+`README.md` § Install Dependencies and § Test-harness dependencies (the
+manual `cpanm` and `pip`/venv steps replaced), `CLAUDE.md` § Build.
+
+Runs on this host (Ubuntu 26.04.1), captured in the session's scratchpad:
+
+| Run | Result |
+|---|---|
+| `--validate` before setup | exit 1: 3 FAIL (conditions 3, 7, 8), 1 note (4); no condition 5 |
+| session-start message before setup | "Devel::Size does not load (2 more in the full report …) / Likely cause: modules were added or upgraded since the setup last ran / Fix: run ./build/linux-setup.sh." |
+| `--dev-deps --package` | exit 0; 12 cpanfile modules load from Perl's own install; check 8 pass, 2 n/a; `perl -c ltl` OK; `pp` at `/usr/bin/pp` |
+| full setup again | exit 0; apt: 0 newly installed; 8 pass |
+| `--repair` | exit 0; "Nothing to add."; 8 pass |
+| an unknown option | usage on stderr, exit 2 |
+
+The session-start message for missing modules read "Likely cause: modules
+were added or upgraded since the setup last ran", wrong on a host where setup
+never ran; it now reads "the setup has not run on this host, or modules were
+added or upgraded since it last ran" (shown with two modules hidden by an
+`@INC` hook). Condition 10 is not expected on Linux: the screenshot tool
+draws its PNG with WebKit on macOS (`features/598-screenshot-capture.md` D23).
+Each Linux test case's result is recorded under it.
+
+AC7 (a session started on a wrong `PATH`) passed, run by the architect.
+AC16's Linux part (every harness starts) and AC14 passed.
+
+Stage 2 complete, 2026-10-23: every Linux test case passes.
+
+## Stage 3: the Windows development host
+
+### The check on this host, as found (2026-10-24)
+
+Windows 11 on ARM64, Git for Windows (`/clangarm64`), Strawberry Perl 5.42.3
+at `C:\Strawberry\perl\bin`, Git's own Perl 5.42.2 at `/usr/bin/perl`. Setup's
+managed block in `~/.bashrc` prepends Strawberry Perl, and `~/.bash_profile`
+sources `~/.bashrc`. Claude Code was started from a `cmd.exe` window.
+
+The session-start hook reported 5 pass, 3 FAIL, 0 note, 2 n/a:
+
+| # | Result | Found |
+|---|---|---|
+| 1, 6, 7, 11 | pass | |
+| 2 | FAIL | `/usr/bin/perl` (5.42.2), Git's own |
+| 3 | FAIL | 8 of 21 runtime modules do not load under Git's Perl |
+| 4 | FAIL | "build/cpanfile.windows lists no modules, or cannot be read": the file has no develop block, and the empty develop list is reported as a FAIL, where the conditions table makes condition 4 a note |
+| 8 | pass | login (`-lc`) and new tab (`-lic`) resolve Strawberry Perl; plain (`-c`) resolves `/usr/bin/perl` |
+
+The message shown to the developer read "Likely cause: Claude Code was
+started with a PATH that differs from a new terminal's … Fix: quit Claude
+Code, open a new terminal, and start it there." On Windows that fix cannot
+work. Measured by starting Git's `bin\bash.exe -c 'command -v perl'` from
+PowerShell:
+
+| Environment | `perl` resolved |
+|---|---|
+| Claude Code's own `PATH` | `/usr/bin/perl` |
+| Strawberry Perl first in the inherited Windows `PATH` | `/usr/bin/perl`: the launcher puts `/clangarm64/bin:/usr/bin:~/bin` in front of whatever `PATH` it inherits |
+| `BASH_ENV` set to `~/.bashrc` | `/c/Strawberry/perl/bin/perl`, Git's `/usr/bin` second |
+
+Claude Code runs its hooks in that plain shell, which reads no startup file,
+so the managed block never applies to them, whatever terminal Claude Code was
+started from. `user_message` in the check has no Windows case: with
+condition 8 passing it falls to the branch written for macOS and Linux.
+`BASH_ENV` was set as a Windows user variable on this host (`setx`), with the
+architect's approval; Windows setup does not set it.
+
+With `BASH_ENV` in effect, the check runs under Strawberry Perl and cannot
+start any tool: `run_capture`'s `open( $fh, '-|' )` is not supported there,
+and `cmd.exe` reports "'-' is not recognized as an internal or external
+command" once per tool. The report then reads 2 pass, 5 FAIL (3, 4, 6, 8, 11),
+each from a tool that was never started. This is the adaptation of
+`run_capture` that § Resuming hands to this stage.
+
+The gap behind the wrong message (architect, 2026-10-24): `user_message` has
+no story for Windows. Every branch names a cause and a fix written for macOS
+and Linux (a new terminal, `--repair`), so on Windows the message can name
+neither the cause nor a fix that works. D17 gives Windows a story of its own.
+
+### The Windows story (agreed by the architect, 2026-10-24, to be tried on this host)
+
+What the session-start message tells the developer on Windows, per failure:
+
+| What the check finds | Cause on Windows | Fix the message names |
+|---|---|---|
+| no `perl` on `PATH` (1) | Strawberry Perl not installed, or no Git Bash, so Claude Code fell back to PowerShell | run the Windows setup |
+| `perl` is Git's own `/usr/bin/perl`, a login shell finds Strawberry Perl (2) | `BASH_ENV` not set, so the plain shell the hooks run in never reads `~/.bashrc` | run the Windows setup, then quit Claude Code and every terminal window and start again: a new user variable reaches only processes started after it |
+| `perl` is Git's own, and so is a login shell's (2 and 8) | the `~/.bashrc` block missing, or a later line putting Git's directories back in front | run the Windows setup |
+| Strawberry Perl first, modules missing (3) | setup not run, Strawberry Perl reinstalled, or `build/cpanfile.windows` behind `build/cpanfile` | run the Windows setup |
+| a module from outside Strawberry Perl, or two copies (3) | a `PERL5LIB` entry, or a `cpanm` copy beside Strawberry Perl's own | remove that copy, then start again |
+| `python3` does not import NumPy or SciPy (7, a note) | the `~/bin/python3` wrapper missing, so the Microsoft Store stub answers, or the modules installed for another Python | run the Windows setup |
+| CRLF checkout (11) | as before | clone again with `core.autocrlf=false` |
+
+"Run the Windows setup" is the full setup until this stage writes its
+`--repair`. The story needs three changes to the check: tools started under
+Strawberry Perl; condition 8 on Windows judging the plain `bash -c` the hooks
+run in as well as the login shell, with `BASH_ENV` kept in its clean
+environment; and an empty develop block reported as condition 4's note.
+
+### The check under any Perl, and the Windows story in place (2026-10-24)
+
+Direction (architect, 2026-10-24): the check needs only a Perl to run, any
+Perl, and judges the tools on `PATH` by starting them; Git's own Perl first
+in the hook shell is the signal the check exists to catch, not a reason to
+port the hook. So:
+
+- **The hook's launcher** (`.claude/settings.json`) runs the check with Git's
+  own `/usr/bin/perl` when `uname -s` reports `MINGW`, `MSYS` or `CYGWIN`, and
+  with the `perl` on `PATH` elsewhere. `docs/development-environment.md`
+  records it as the one interpreter named by its place.
+- **The check under a native Windows Perl** (Strawberry Perl, run by hand):
+  `run_capture_windows` starts each tool without `fork`, quoting each argument
+  for the command line Perl builds (an argument holding a quote is passed
+  unescaped otherwise, and Git Bash's tools expand an unquoted wildcard); a
+  script without an executable's extension (setup's `python3` wrapper) is
+  found on `PATH` by its `#!` and started by Git Bash's `bash`; condition 8's
+  clean shell is the `bash` on `PATH`, given `HOME` in Git Bash's form, and
+  reports Windows paths.
+- **Condition 8 on Windows** passes `BASH_ENV` into its clean environment, as
+  every new Windows process receives a user variable.
+- **Condition 4** reports an empty develop list at its own severity, a note.
+- **The message** names the Windows cause and fix for conditions 1, 2 (and
+  6), 3 and 8 (`windows_path_scenario` and the Windows branches of
+  `user_message`).
+- **`build/windows-setup.ps1`** sets `BASH_ENV` to `~/.bashrc` as a user
+  variable when it is unset, reports it when it already is, and leaves a
+  different value as it is with a warning (D12).
+
+Runs on this host, the hook's own command started by Git's `bin\bash.exe` as
+Claude Code starts it, captured in the session's scratchpad:
+
+| Environment | Message shown |
+|---|---|
+| this session's, no `BASH_ENV` | "this session finds perl /usr/bin/perl (v5.42.2)" / "BASH_ENV is not set, so the plain Git Bash shell Claude Code runs its hooks in never reads ~/.bashrc, and Git's own Perl comes first" / run the Windows setup, then quit Claude Code and every terminal window |
+| `BASH_ENV` set | none: 7 pass, condition 4 a note |
+| no `BASH_ENV`, `HOME` without shell files | the shell configuration does not put the development tools first (condition 8: the login shell resolves Git's Perl, no `python3`) |
+| `BASH_ENV` set, a copy of YAML::PP on `PERL5LIB` | "YAML::PP loads from … outside this Perl's own install" / a copy installed outside the setup |
+| Strawberry Perl first, Devel::Size hidden by an `@INC` hook | "Devel::Size does not load" / setup not run, Strawberry Perl reinstalled, or `build/cpanfile.windows` behind `build/cpanfile` |
+
+`perl process/check-environment.pl` by hand under Git's Perl and under
+Strawberry Perl, Strawberry Perl first: the same results, 7 pass, 1 note, 2
+n/a. `windows-setup.ps1`'s `BASH_ENV` step run on a scratch variable: set when
+unset, reported when the same, left with a warning when different.
+
+Observation, not changed: `process/claude-hooks/guard-write.sh` refuses a write
+under `logs/` given as `C:/…/logs/x.txt` and lets the same path through as
+`C:\…\logs\x.txt`, under Git's Perl and Strawberry Perl alike; the Write tool
+passes backslash paths on Windows.
+
+### Stage 3 plan (agreed by the architect, 2026-10-24)
+
+| Step | What | Test cases |
+|---|---|---|
+| 1 | Windows setup takes D9's option set, read from `$args`; `--repair` adds only what is missing (`BASH_ENV`, `~/bin/python3`, the `~/.bashrc` and `~/.bash_profile` blocks); the message names `--repair` | AC1, AC9, AC10, AC10a |
+| 2 | the `/opt/homebrew/bin/perl` shim goes: `./ltl` starts through `env perl`, and a full setup removes a leftover shim | AC15 |
+| 3 | the develop block in `build/cpanfile.windows`, so `--dev-deps` installs the profiler | AC17, AC18 |
+| 4 | condition 7 on Windows judges the Python the `python3` wrapper starts, not the wrapper's path | the Windows gap under AC4a |
+| 5 | the Windows instructions in `README.md` and `docs/toolchain-guidance.md` rewritten | AC20 |
+| 6 | every Windows test case run and recorded | AC2, AC3, AC5, AC6, AC7, AC8, AC10b, AC11 |
+| 7 | the write guard recognises Windows backslash paths | none; the hooks are in this stage's scope |
+
+### Step 1: `build/windows-setup.ps1`'s options, `--repair` and `--validate` (2026-10-24)
+
+The options are read from `$args` (D9 as settled above); `-Phase Machine`
+stays internal. `--validate` runs the check as the session-start hook does: in
+a plain shell started by Git's `bin\bash.exe`, by Git's own Perl, so it judges
+what the hooks will find. `--repair` and the full setup share one shell step,
+each piece added only when missing (D12), none rewritten (the earlier step
+removed and re-appended its blocks on every run): `BASH_ENV` when the user
+variable is unset; `~/bin/python3` when absent; the `~/.bashrc` block when a
+login shell fails condition 8 and the block is absent; the `~/.bash_profile`
+block when that file does not read `~/.bashrc`. The files are Git Bash's
+home: `HOME` when set, the user's profile otherwise. The full setup ends with
+the check, as on macOS and Linux, in place of its own table of versions. The
+session-start message names `--repair` for every cause but a missing
+Strawberry Perl.
+
+Condition 8 now gives `BASH_ENV` to the plain shell only. Given to the login
+shell, it made that shell read `~/.bashrc` through `BASH_ENV` rather than
+through its own startup files, and a stand-in home with no Strawberry Perl
+line passed.
+
+Runs on this host, captured in the session's scratchpad:
+
+| Run | Result |
+|---|---|
+| `--help` | usage, exit 0 |
+| `--bogus`; `--validate --dev-deps`; `--repair --validate`; `-Phase Bogus` (by `-File` and by `&`) | usage on stderr, exit 2 |
+| `--validate` | 7 pass, 1 note (4), 2 n/a, exit 0 |
+| `--repair` on this host | "BASH_ENV is …\.bashrc", "~/bin/python3 is present", condition 8 pass, "Nothing to add"; `~/.bashrc`, `~/.bash_profile` and `~/bin/python3` byte for byte unchanged; exit 0 |
+| `--repair` twice, `HOME` a stand-in holding only `.bashrc` with `export KEEP=1`, `BASH_ENV` naming it | first: wrapper written, condition 8 FAIL (login shell resolves `/usr/bin/perl`), the Strawberry Perl block appended after `export KEEP=1`, then 7 pass; the stand-in's `.bash_profile` was written by Git for Windows' own `/etc/profile` and reads `~/.bashrc`, so nothing was added there. Second: nothing added, files unchanged |
+| the session-start hook, the four environments of the previous section | the same messages, with `--repair` as the fix for the configuration causes |
+
+### Step 2: no wrapper at Git's `/opt/homebrew/bin/perl` (2026-10-24)
+
+`build/windows-setup.ps1` no longer writes the wrapper; its elevated step
+installs Strawberry Perl and removes a wrapper it finds there, with the
+directories left holding nothing else (`Remove-Shim`). The full setup elevates
+when Strawberry Perl is missing or a wrapper is present. Tried on a scratch
+Git root: the wrapper alone, with `opt` and `homebrew` removed; beside another
+file in `opt`, which stays; none, nothing touched.
+
+The full setup on this host (the elevation approved by the architect): every
+WinGet package already installed; the wrapper and the `opt` directory removed;
+the shell step added nothing and left `~/.bashrc`, `~/.bash_profile` and
+`~/bin/python3` byte for byte; the check 7 pass, 1 note (4), exit 0. AC15 on
+Windows passes (recorded under it).
+
+The line-endings step warned "1 tracked files have CR LF endings but the tree
+has changes": a file committed with CRLF endings (`i/crlf w/crlf`), which a
+fresh checkout gives back with CRLF, so the warning could never clear. The step
+now takes only files committed with LF and checked out with CRLF (`i/lf
+w/crlf`): none on this host.
+
+### Step 3: the profiler on Windows (2026-10-24)
+
+- `generate_windows_cpanfile` in `build/generate-cpanfile.sh` appends the
+  develop block (`Devel::NYTProf`), as the Unix cpanfile has it (D5);
+  `build/cpanfile.windows` regenerated; `build/cpanfile` regenerated unchanged.
+  `build/windows-package.sh` installs without `--with-develop`, so its binary
+  is unaffected (AC19, stage 4).
+- `tests/profile/profiling-preflight.sh` looked for `nytprofhtml` only in the
+  Perl's `installsitescript`; Strawberry Perl ships it in `installscript`
+  (`perl\bin`). It now asks the Perl for its site, vendor and core script
+  directories, in that order. Its install runs over the host's cpanfile
+  (`cpanfile.windows` on Windows; the default `cpanfile` elsewhere, as
+  before), and it names each host's setup with `--dev-deps` when `cpanm` is
+  missing (Linux and Windows added).
+
+Not run on macOS or Linux since the preflight change: there the site script
+directory is searched first, as before.
+
+### Step 4: condition 7 judges the Python the wrapper starts (2026-10-24)
+
+On Windows `python3` is setup's `~/bin/python3`, a wrapper, so a test of its
+path could not tell which Python answers. The probe condition 7 already
+starts now prints the resolved `sys.executable` first, and the Windows place
+has an interpreter test: the WinGet Python, under the user's
+`AppData\Local\Programs\Python\Python3*`. Another Python fails it ("not the
+setup's Python"), a note on Windows. macOS and Linux have no interpreter test;
+their place tests are unchanged. Git's own Perl keeps the `\r` of a Windows
+Python's line ends, which made the setup's own Python fail the test on the
+first run; the probe's output is read with `\r\n` turned to `\n`.
+
+| Run (`--condition 7`) | Git's Perl | Strawberry Perl |
+|---|---|---|
+| as set up | pass | pass |
+| a wrapper first on `PATH` starting a venv's Python (`--system-site-packages`, so NumPy and SciPy import) | note: "…which starts …/venv/Scripts/python.exe; not the setup's Python" | the same |
+
+The whole check under Git's Perl: 8 pass, 0 FAIL, 0 note, 2 n/a.
+
+### Step 5: the Windows instructions (2026-10-24)
+
+`README.md`: the Windows setup's three forms (full, `--validate`,
+`--repair`); `./ltl` runs from Git Bash with Strawberry Perl in a terminal and
+in Claude Code's hooks alike (the harnesses were said to run there, which
+`docs/toolchain-guidance.md` states they do not); the check by any Perl; the
+`python3` wrapper; `--dev-deps` per host for the profiler.
+`docs/toolchain-guidance.md` § Windows development host: the option forms,
+elevation only when needed, trap 2 with the check run by Git's own Perl,
+trap 3 rewritten (`env perl`, a wrapper in the Git install's `opt` removed),
+trap 4 with `BASH_ENV`, trap 6 with the wrapper. `build/windows-setup.ps1`'s
+own description no longer says the harnesses run. AC20 passes on Windows
+(recorded under it).
+
+### Step 6: the Windows test cases (2026-10-24)
+
+Each result is recorded under its test case: AC1, AC2, AC3, AC3a, AC4a,
+AC6, AC8, AC9, AC10, AC10a, AC10b and AC11 pass on Windows; AC5 passes on an
+empty home and is partial on a home holding `.bashrc` alone; AC7 needs a
+session started by the architect. Captured in the session's scratchpad.
+
+Changes to `process/check-environment.pl` the runs brought out:
+
+- On Windows the launcher runs the check whatever `PATH` holds, so the
+  message now meets a missing `perl`: it names a missing tool as the check
+  found it ("no perl on PATH"), and leaves out condition 2 beside condition
+  1, which read "finds perl no perl on PATH; perl no perl on PATH".
+- Condition 11 reports "no git on PATH" when `git` is absent, rather than
+  "core.autocrlf is not set", and the message names CRLF endings only when
+  `git` ran.
+- An empty `BASH_ENV`, which bash treats as unset, is reported as not set; it
+  read "BASH_ENV is , which does not put Strawberry Perl first".
+
+Observations, not changed:
+
+- **The same stray Python module was a note under condition 7 and a failure
+  under condition 8 on Windows.** Condition 7 is a note there (the conditions
+  table: "fail where the harnesses run, note on Windows"); condition 8 judged
+  the login shell's `python3` with condition 7's place and reported at its own
+  severity, a failure. AC10b's run: the full setup exited 1 on condition 8.
+  Settled by D18: each tool's severity is stated once (`%tool_severity`) and
+  conditions 2, 6, 7 and 8 read it. Rerun under Git's Perl and Strawberry
+  Perl: a stray NumPy is a note under 7 and 8, exit 0; a login shell finding
+  Git's Perl still fails condition 8; the host as set up, 8 pass.
+- **Git for Windows writes `~/.bash_profile` from a login shell** when only
+  `~/.bashrc` exists (AC5, partial). Setup's own `.bash_profile` step then
+  finds a file reading `~/.bashrc` and adds nothing. Accepted under D19.
+
+### Step 7: the write guard on Windows paths (2026-10-24)
+
+`process/claude-hooks/guard-write.sh` compared paths with forward slashes
+only. On Windows Claude Code passes a written file's path with backslashes,
+and `CLAUDE_PROJECT_DIR` holds one too, so none of its rules applied to a
+write there: under `logs/`, to a released baseline TSV, to
+`.claude/settings.local.json`, nor the check that a feature doc cites only
+records the session has read (whose `Read` paths in the transcript are
+backslashed as well). The guard now compares every path in forward-slash
+form, and strips the project root without regard to case on Windows, where a
+drive letter arrives in either case. On macOS and Linux the paths it compares
+are unchanged.
+
+Run under Git's own Perl and Strawberry Perl, with the root given each way
+(captured in the session's scratchpad): writes under `logs/` (backslashed,
+forward-slashed, lower-case drive), a released baseline TSV and
+`settings.local.json` blocked; an ordinary file allowed; a feature doc citing
+`docs/test-logs.md` allowed after a backslashed `Read` of it in the
+transcript, blocked with none. 32 of 32 as expected; the committed guard let
+20 of them through.
+
+## Stage 4: the container builds
+
+### The check on this host, as found (2026-10-24)
+
+A second macOS development host (Homebrew Perl 5.44.0 with PAR::Packer, a
+`~/.zprofile` holding Homebrew's own line; not the host holding
+`750-before.tsv`). The first runs since stage 3 changed the files all hosts
+share: `./build/macos-setup.sh --validate`, 8 pass, 0 FAIL, 1 note (no
+`tmux`), 1 `n/a`, exit 0; `tests/profile/profiling-preflight.sh` found
+`/opt/homebrew/bin/perl`, Devel::NYTProf 6.15 and `nytprofhtml` in Homebrew
+Perl's own `bin`, exit 0. Docker is Rancher Desktop's, engine 29.1.3, aarch64.
+
+### tmux is required on macOS and Linux (D20)
+
+`build/macos-setup.sh` never installed tmux, while condition 9 expects it on
+macOS and `build/linux-setup.sh` installs it; a missing tmux was a note, so a
+host that cannot run the full suite passed its check. Now the full macOS
+setup installs and links the `tmux` formula with cpanminus (step 4), and
+`test_on_path` reports a missing tool as `FAIL`. The session-start message
+gains a story for condition 9: "Environment check: no tmux on PATH, so the
+terminal-interface navigation tests cannot run.", the setup not run or tmux
+removed as the likely cause, and the full setup as the fix.
+
+Run on this host, 2026-10-24, before installing tmux: `perl
+process/check-environment.pl --condition 9` reported `9  FAIL  tmux is on
+PATH`, found "no tmux on PATH", exit 1; `--hook` showed the three lines above
+with "Fix: run ./build/macos-setup.sh.". Then `./build/macos-setup.sh`
+installed tmux 3.8 with its dependencies libevent, utf8proc and jemalloc, the
+shell step added nothing, and the final check read 9 pass, 0 FAIL, 0 note,
+1 `n/a`, exit 0. Not run on Linux: there the full setup already installs
+tmux, and the condition's change is the severity alone. GitHub's macOS
+runner now installs tmux in `--package`'s full setup before the check that
+ends it.
+
+### The container builds (2026-10-24)
+
+Run on the second macOS development host (Apple silicon), Rancher Desktop's
+engine, at `a5e9226b`, as `.github/workflows/release-build.yml` runs them:
+
+- `cd build && ./generate-cpanfile.sh`, exit 0: `git status` shows
+  `build/cpanfile` and `build/cpanfile.windows` unchanged, the Windows one
+  with its develop block.
+- `./build/ubuntu-package.sh arm64` and `amd64` first stopped at `apt-get
+  install`, each within about 33 seconds: the container could not connect to
+  `ports.ubuntu.com:80` or `archive.ubuntu.com:80`, run straight after the
+  engine started. Environmental: an `apt-get update` in an `ubuntu:20.04`
+  container then succeeded, and both rebuilds passed: arm64 natively in 25
+  seconds, amd64 under emulation in 98; each printed `Version: 0.20.0-750` and
+  passed the build's read-path check. cpanm's `--installdeps .` found the
+  runtime modules only (Term::ReadKey, the YAML::PP modules, Devel::Size,
+  Text::CSV_PP, Text::CSV).
+- `./build/windows-package.sh` (amd64 under Wine, emulated), 161 seconds:
+  Strawberry Perl 5.42.3.1, PAR::Packer 1.064 already present in it;
+  `--cpanfile cpanfile.windows --installdeps .` installed two distributions
+  (Devel-Size 0.87, YAML-PP 0.43.0); the `.exe` printed `Version:
+  0.20.0-750` under Wine and passed the read-path check.
+- `unzip -l` of each binary: Ubuntu arm64 147 entries, Ubuntu amd64 147,
+  Windows 533; `grep -c NYTProf` 0 in each (AC19, C). Strawberry Perl ships
+  Devel::NYTProf in `perl/vendor/lib` (AC17), and `pp` still packs none of
+  it: `ltl` does not load it.
+
+Stage 4 has nothing open. Not run: the builds on GitHub's runners, which run
+these scripts unchanged; the next `v*` tag runs them.
+
+## Completion gate (2026-10-24)
+
+On the second macOS development host, at `347260c5` (`$version_number`
+restored to `0.20.0`). The diff from `7d0b57f8` changes `ltl`'s first line
+and 20 harnesses, so the benchmark and the harnesses are both in scope.
+
+**Benchmark.** `single-day-access-log-standard`, three pairs taken
+alternately from two worktrees side by side, `before` at `7d0b57f8` and
+`after` at `347260c5`, both under Homebrew Perl 5.44.0. Read from
+`compare-results.sh summary`: `total` −0.8%, −1.0%, −0.6%; `rss_peak` −0.6%,
+−0.2%, +0.7%. No metric is worse by more than 1% across the pairs.
+
+**Finding, fixed: `run-benchmark.sh` exited 1 after its first test case.**
+This work moved its shebang from `/bin/bash` (3.2) to `env bash` (5.3 on
+macOS). Under `set -e`, bash 4.1 and later exit on `((run_count++))` from 0;
+3.2 does not (`bash -c 'set -e; x=0; ((x++)); echo ok'` prints nothing under
+5.3.20). A one-test run kept its rows; a run of several tests stopped after
+the first. Its four increments now carry `|| true`, as
+`tests/profile/run-profile.sh`'s do. After the fix, one test and then a second
+under the same label each exited 0, the second merging the first's 76 rows.
+
+**Harnesses (AC16, macOS).** By the architect's direction, a few scenarios
+first from 11 harnesses whose changes differ (`statistics`, `section-layout`,
+`profile`, `value-display`, `notices` with its tmux scenarios, `regression`,
+`screenshot-capture`, `histogram-colours`, `message-mask`,
+`log-level-vocabulary`, `scenario-selector`), then the full suite at
+`6fc8e800`: all 53 harnesses exit 0 in 21 minutes, `validate-csv-output` then
+`validate-statistics` first. No capture mentions `brew` or carries a runtime
+warning; the one ` at … line ` match is `validate-read-path`'s own assertion
+of a deliberate `die`.
 
 ## Troubleshooting a failed condition
 
-The check points here (D11). It reports what it expected, what it found, the
-Perl it ran under and the `PATH` it saw; it does not say what to do. Work out
-the cause on the host from what the report shows and what each entry below
-says, then fix the cause, not the symptom: no script is edited to name an
-interpreter, and no `PATH` line is added by hand outside setup's managed
-block.
-
-Two things hold for every entry:
-
-- **The check sees the environment of whatever started it.** At session start
-  that is Claude Code's own process, inherited from the shell Claude Code was
-  started from, not the agent's Bash tool snapshot and not a fresh terminal
-  (§ How Claude Code runs a hook). A condition can fail in the session and
-  pass in a new terminal, or the reverse; compare the `PATH` the report gives
-  with the one in a new terminal before concluding anything.
-- **Which shell files are read depends on how the shell was started.**
-  § Phase 1 lists the contexts measured on macOS and how each gets its
-  `PATH`; § Phase 4: where macOS setup writes its shell configuration shows
-  which file each zsh mode reads. A context that reads none of setup's files
-  resolves the system's tools.
-
-| # | What a failure means | Where it has come from, and where to look |
-|---|---|---|
-| 1 | no `perl` on the `PATH` the check saw | the host is not set up, or the process that started the check did not inherit the setup's `PATH` (a Windows host without Git Bash, where Claude Code falls back to PowerShell, is treated as not set up) |
-| 2 | another Perl comes first | `PATH` order: the managed block missing from a file this context reads (conditions 8 and 9 say which), or a later line in a shell file, or `path_helper` on macOS, putting the system directories back in front; on Windows, Git's `/usr/bin` ahead of Strawberry Perl |
-| 3 | the right Perl lacks a runtime module | the Perl is right but its modules are not where it looks: on macOS, a Homebrew Perl upgrade across a minor version leaves the modules installed for the old one behind (`features/544-upgrade-safe-profiling-setup.md` § Machine state and mechanism); a cpanfile changed since setup ran; on Windows, `build/cpanfile.windows` differs from `build/cpanfile`. Installing is the full setup's job, not `--repair`'s |
-| 4 | note: the profiler is not installed | expected unless setup ran with `--dev-deps`; the same upgrade cause as 3 applies |
-| 5 | Linux: `PERL5LIB` does not carry `~/perl5` | the managed block missing from a file this context reads, as for 2 |
-| 6 | the first `bash` is older than 4 | the system's bash ahead of the setup's; macOS's `/bin/bash` is 3.2. Same `PATH` causes as 2 |
-| 7 | `python3` does not import NumPy or SciPy | another Python ahead of the setup's (macOS `/usr/bin/python3`; on Windows the Microsoft Store stub), or the modules installed for a different Python than the one on `PATH` |
-| 8 | the managed block is missing or altered | setup never wrote it, it was edited, or the file was replaced; `--repair` rewrites it |
-| 9 | a login shell from a clean environment resolves different tools | the block is in some of the files that context reads and not others, or another file read after it reorders `PATH`; compare the modes as § Phase 4: where macOS setup writes its shell configuration did |
-| 10 | note: no `tmux` | the terminal-interface navigation tests cannot run on this host |
-| 11 | note: no screenshot tools | screenshot capture cannot run on this host |
-| 12 | Windows: `core.autocrlf` is not `false` | the clone was made without `-c core.autocrlf=false`, or a global setting overrides the repository's; scripts check out with CRLF endings and fail in Git Bash |
+The entries live in `docs/development-environment.md` § Troubleshooting a
+failed condition, the standing document for setting up a development host
+and reading the environment check, where the check, the setup and the
+profiling preflight point. They name no issue: on AC7's run the session
+start's agent reply, reading pointers into this issue's document, framed a
+wrong `PATH` against the issue.

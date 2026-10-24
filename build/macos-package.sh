@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # macOS Static Binary Build Script
 # Builds macOS static binary using PAR::Packer

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # 426-generate-fixtures.sh — regenerate the #426 prototype fixture dataset.
 #

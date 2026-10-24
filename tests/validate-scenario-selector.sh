@@ -29,8 +29,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LIB="$SCRIPT_DIR/lib/scenario-select.sh"
-PERL="${PERL:-/opt/homebrew/bin/perl}"
-command -v "$PERL" >/dev/null 2>&1 || PERL=perl
+PERL="${PERL:-perl}"
 
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Driver for #426 N3 (second/third log surface for V1/V3/V5) + N6 (fan-out beyond
 # 10^5 keys) + N8 (RSS-vs-Devel::Size memory measure). Reuses the existing aspect
 # prototypes verbatim — 426-revalidate-v1.pl, -v3.pl, -v5.pl — over new inputs.

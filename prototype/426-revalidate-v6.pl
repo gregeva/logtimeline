@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # 426-revalidate-v6.pl — V6 aspect of the #426 revalidation: the
 # display-geometry-bound consumers (F2 heatmap, F3 histogram) under the

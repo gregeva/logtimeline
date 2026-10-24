@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # run-profile.sh — Profile ltl with Devel::NYTProf
 #

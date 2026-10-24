@@ -39,8 +39,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 LTL="${LTL:-$REPO_DIR/ltl}"
-PERL="${PERL:-/opt/homebrew/bin/perl}"
-command -v "$PERL" >/dev/null 2>&1 || PERL=perl
+PERL="${PERL:-perl}"
 
 # Invocation shape (HARNESS-DESIGN.md § Invocation coherence): the invariants
 # read the rendered messages table, the messages CSV and one -V section. None of

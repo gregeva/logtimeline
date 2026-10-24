@@ -43,8 +43,7 @@ ACCESS_LOG="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
 # microseconds, so -du us resolves to a microsecond source (6 decimals). Used to
 # cover a non-ms resolved unit.
 APACHE_LOG="$LOGS_DIR/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
-PERL="${PERL:-/opt/homebrew/bin/perl}"
-command -v "$PERL" >/dev/null 2>&1 || PERL=perl
+PERL="${PERL:-perl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"

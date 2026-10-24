@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # 426-run-matrix.sh — run 426-store-mini.pl over an arms × fixtures matrix,
 # one process per cell (fresh heap per arm), collect the TSV rows, and

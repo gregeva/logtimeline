@@ -84,8 +84,8 @@ if [[ ! -x "$LTL" ]]; then
 fi
 if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: this harness requires python3 (not found on PATH)." >&2
-    echo "       macOS:  brew install python" >&2
-    echo "       Ubuntu: sudo apt-get install python3" >&2
+    echo "       The environment check shows why: perl process/check-environment.pl" >&2
+    echo "       Install steps per host: README.md, 'Test-harness dependencies'." >&2
     exit 1
 fi
 

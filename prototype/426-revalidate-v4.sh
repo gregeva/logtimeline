@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # 426-revalidate-v4.sh — driver for aspect V4 (the -V histogram-bin-counters
 # section under the proposed representation). Run from the repo root.
 # Captures everything under prototype/426-results/revalidate-v4-*.txt.

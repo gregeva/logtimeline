@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Driver for V7 (bucket-stats surface). One process per (file,bpd,arm) so the
 # RSS delta in Part 4 is a single-store measurement, plus an --arm all pass per
 # (file,bpd) for parity and the cross-arm accuracy/clamp tables.

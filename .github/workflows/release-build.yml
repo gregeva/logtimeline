@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup build environment
-        run: ./build/macos-setup.sh
+        run: ./build/macos-setup.sh --package
 
       - name: Build static binary
         run: |

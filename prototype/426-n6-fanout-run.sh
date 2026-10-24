@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Driver for prototype/426-n6-fanout-percentile.pl — #426 N6/N8: one process per
 # arm per bpd over the fan-out fixture, so the RSS delta measures exactly one
 # store. Captures to prototype/426-results/n3n6n8/n6-pct-arm<A>-bpd<N>.txt.

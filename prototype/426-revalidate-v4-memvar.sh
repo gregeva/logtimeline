@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Three identical real-ltl runs: is counter_memory_bytes stable across processes?
 F=logs/AccessLogs/localhost_access_log.2025-03-21.txt
 for i in 1 2 3; do

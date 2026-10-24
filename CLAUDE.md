@@ -95,6 +95,11 @@ about anything else, these still hold.
 
 ### At session start, or whenever context begins mid-stream
 
+- [ ] A failed environment check in the session-start context is the first
+      reply's subject, whatever the architect sent: read the troubleshooting
+      entries its pointers name, find the cause on this host, and give the
+      cause and the step that fixes it. It describes the host, never the work
+      in progress: no issue or branch is named in that reply.
 - [ ] Reconstruct outstanding state before anything else: `gh pr list --state open`,
       `git branch -a --no-merged main`, `./process/issue-status.sh list`, uncommitted
       or unpushed work in every worktree. Everything found is potentially this
@@ -396,6 +401,7 @@ about anything else, these still hold.
 | How a surface behaves: components, keys, taking input, countdown, buttons, size, placement, padding, erasing, unattended runs and the test method per surface | `docs/terminal-interaction.md` |
 | Notices and choices: what a notice is, the surfaces, taking input, the data model, the `-V notices` section, the producer's contract | `docs/notice-surfaces.md` |
 | What any output to a terminal does per platform: encoding and code page, escape sequences, glyph width, terminal commands, checking output on Windows | `docs/terminal-output.md` |
+| Setting up a development host, or a failed environment check | `docs/development-environment.md` |
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
@@ -466,9 +472,9 @@ Hidden: `--disable-progress`, `--terminal-width N`, `--debug-layout`,
 ### Build
 
 ```bash
-./build/macos-setup.sh                      # macOS: Homebrew Perl, never system Perl
-sudo apt-get install build-essential perl perl-base perl-modules libperl-dev cpanminus \
-  && cpanm PAR::Packer && cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
+./build/macos-setup.sh                      # macOS (needs Homebrew): --dev-deps the profiler, --package PAR::Packer
+./build/macos-setup.sh --validate           # the environment check alone; --repair adds only what it finds missing
+./build/linux-setup.sh                      # Debian/Ubuntu: the distribution's packages; same options as macOS
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1   # Windows dev host, AMD64 or ARM64 (docs/toolchain-guidance.md)
 ./build/macos-package.sh arm64|x86_64       # static binaries
 ./build/ubuntu-package.sh amd64|arm64       # Docker
@@ -480,7 +486,7 @@ GitHub Actions builds all platforms on `v*` tags (`.github/workflows/release-bui
 ### Test and benchmark
 
 ```bash
-export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"  # harnesses need bash 4+ and Homebrew Perl
+perl process/check-environment.pl                   # the development Perl, bash 4+ and Python first on PATH, on any host
 perl -c ltl                                         # syntax check; the whole gate for a comment-only diff
 ./tests/validate-<name>.sh --list                   # its scenario names
 ./tests/validate-<name>.sh --scenario <a> --scenario <b>   # the scenarios the change needs, while iterating

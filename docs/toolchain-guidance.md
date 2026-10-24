@@ -52,10 +52,12 @@ The harnesses share one scratch directory, the `logs/` corpus and the `CI=1` cac
 `./build/windows-setup.ps1` sets up a Windows machine, AMD64 or ARM64, and is safe to re-run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1   # -DevDeps adds the profiler, -Package adds PAR::Packer
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1              # --dev-deps adds the profiler, --package PAR::Packer
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1 --validate   # the environment check alone
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1 --repair     # adds to the Git Bash configuration only what is missing
 ```
 
-It installs Git, GitHub CLI, jq, Python 3.13 (with NumPy and SciPy) and Strawberry Perl through WinGet, installs `build/cpanfile.windows`, and configures Git and Git Bash as below. It asks Windows for administrator approval once, for the two steps that write under Program Files. Afterwards run `gh auth login`. `ltl` runs from Git Bash.
+It installs Git, GitHub CLI, jq, Python 3.13 (with NumPy and SciPy) and Strawberry Perl through WinGet, installs `build/cpanfile.windows`, configures Git and Git Bash as below, and ends with the environment check. It asks Windows for administrator approval only when Strawberry Perl is missing, or a Perl wrapper is left in the Git install's `opt` directory (trap 3): the steps that write under Program Files. Afterwards run `gh auth login`, and quit Claude Code and every terminal window so the settings it added apply. `ltl` runs from Git Bash. The options are read as written, not as PowerShell parameters, so they are spelled as on the other hosts.
 
 **The test harnesses do not run on Windows.** They are written for macOS and Linux, and Windows breaks them at several layers: Perl writes CR LF, Git Bash rewrites any argument starting with `/` into a Windows path, the system code page alters non-ASCII text on every command line, and `ltl` draws its bars with a different character. The completion gate and every harness run happen on macOS or Linux; a Windows host is for running and developing `ltl` itself.
 
@@ -63,15 +65,15 @@ The traps the script removes:
 
 **1. Git for Windows checks files out with CR LF.** Its system config sets `core.autocrlf=true`, so `ltl`, the harnesses and the hook scripts arrive with CR LF endings and fail as `bad interpreter` or as syntax errors on a stray `\r`. The script sets `core.autocrlf=false` in the repository and re-checks the tracked files out. A fresh clone should be made with `git clone -c core.autocrlf=false`, then the script run.
 
-**2. Claude Code runs hook commands as `bash <file>`, ignoring the shebang.** A hook written in Perl but named `.sh` is then interpreted as shell and exits 2, which blocks every Bash, Write and Edit call. `.claude/settings.json` therefore starts the two Perl hooks with `perl` explicitly.
+**2. Claude Code runs hook commands as `bash <file>`, ignoring the shebang.** A hook written in Perl but named `.sh` is then interpreted as shell and exits 2, which blocks every Bash, Write and Edit call. `.claude/settings.json` therefore starts the two Perl hooks with `perl` explicitly. The environment check at session start is started with Git's own `/usr/bin/perl` on Windows: the check needs only a Perl to run, and judges the `perl` on `PATH` by starting it.
 
-**3. `./ltl` names `/opt/homebrew/bin/perl`.** Git Bash resolves `/opt` under the Git install, so the script writes a one-line wrapper at `C:\Program Files\Git\opt\homebrew\bin\perl` that runs Strawberry Perl.
+**3. `./ltl` starts through `env perl`.** It runs the first `perl` on `PATH`, Strawberry Perl once trap 4 is removed. Nothing is placed in the Git install's `opt` directory; the script removes a Perl wrapper it finds there, with the directories left empty.
 
-**4. Git Bash puts its own Perl first.** That MSYS Perl lacks the CPAN modules `ltl` needs. The script prepends Strawberry Perl to `PATH` in `~/.bashrc`, and makes `~/.bash_profile` read it.
+**4. Git Bash puts its own Perl first.** That MSYS Perl lacks the CPAN modules `ltl` needs. The script prepends Strawberry Perl to `PATH` in `~/.bashrc`, and makes `~/.bash_profile` read it when it does not already. Claude Code runs its hooks in a plain Git Bash shell, which puts Git's own directories first whatever `PATH` it inherits and reads no startup file unless `BASH_ENV` names one, so the script also sets `BASH_ENV` to `~/.bashrc` as a user environment variable. A user variable reaches only programs started after it is set.
 
 **5. ARM64 hosts.** WinGet installs native ARM64 builds of Git, GitHub CLI, jq and Python (NumPy and SciPy have ARM64 wheels). Strawberry Perl is x64 only and runs under emulation. Read the machine's architecture from the processor record, not `PROCESSOR_ARCHITECTURE`: a shell started from Git Bash is an emulated x64 process and reports AMD64 on an ARM64 host.
 
-**6. The `python` on a fresh Windows is a Microsoft Store stub.** It prints "Python was not found" and exits non-zero. Install Python through WinGet; the new `PATH` applies to shells opened afterwards.
+**6. The `python` on a fresh Windows is a Microsoft Store stub.** It prints "Python was not found" and exits non-zero. The script installs Python through WinGet, which has no `python3`, and writes `~/bin/python3`, a one-line wrapper Git Bash finds ahead of the Windows `PATH`, that starts the WinGet Python.
 
 **7. In the agent shell, backslashes are eaten.** Under `!` and Bash tool commands, write paths with forward slashes (`./build/windows-setup.ps1`).
 

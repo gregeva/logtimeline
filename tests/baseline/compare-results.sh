@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # compare-results.sh — Compare two benchmark TSV result files
 # Usage: ./compare-results.sh [summary|detailed|table|all] [--markdown] [--save] <baseline.tsv> <current.tsv>

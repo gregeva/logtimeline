@@ -84,11 +84,9 @@ The install command depends on which `python3` the harness will invoke. The
 top-level `README.md` § Test-harness dependencies documents the matrix in
 detail; the short version:
 
-- macOS, Homebrew Python (`/opt/homebrew/bin/python3` or `/usr/local/bin/python3`):
-  `brew install numpy scipy` (PEP 668 blocks `pip --user` against brew Python;
-  numpy and scipy ship as brew formulas).
-- macOS, Apple Command-Line-Tools Python (`/Library/Developer/CommandLineTools/...`):
-  `python3 -m pip install --user numpy scipy` (no PEP 668).
+- macOS: `./build/macos-setup.sh` installs Homebrew Python with NumPy and
+  SciPy; `./build/macos-setup.sh --validate` shows whether that is the
+  `python3` the harness finds.
 - Ubuntu/Linux, pre-PEP-668 distros:
   `python3 -m pip install --user numpy scipy`.
 - Ubuntu/Linux, PEP-668 distros (Ubuntu 24.04+, Debian 12+, Fedora 38+) or any

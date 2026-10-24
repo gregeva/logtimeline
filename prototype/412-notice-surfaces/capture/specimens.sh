@@ -12,7 +12,6 @@
 #   capture/specimens.sh OUTDIR ROUND6_TREE ROUND3_TREE
 set -u
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"
 OUT=${1:?OUTDIR}; R6=${2:?ROUND6_TREE}; R3=${3:?ROUND3_TREE}
 mkdir -p "$OUT"
 W=160; H=50
