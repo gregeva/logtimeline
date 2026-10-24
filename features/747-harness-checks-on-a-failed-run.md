@@ -23,7 +23,7 @@ recorded observations S1 to S7 fixed (§ Drop S2-1). D6 (the architect):
 the two observations drop S2-1 found are fixed in their harnesses' drops.
 Drop S2-2 done 2026-10-24 (8c9259a6): drop 2's seventeen harnesses read for the third
 question, four fixed, and D6's three in that group (§ Drop S2-2). Drop
-S2-3 done 2026-10-25: drop 3's eleven read, three fixed, and D6's two in
+S2-3 done 2026-10-25 (c2481bd3): drop 3's eleven read, three fixed, and D6's two in
 that group (§ Drop S2-3). Next: drop S2-4.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
@@ -1367,4 +1367,6 @@ value-display 60, its golden scan now marked, classification-percentages 43,
 histogram-ticks 21, statistics 25), and every run against the failing,
 silent and noise stubs reaches its summary, exits 1 and passes nothing. The
 twenty runs add nothing to `$TMPDIR`. The checker passes their scenarios,
-55 checks.
+55 checks. The same 20 runs from the scratchpad worktree at c2481bd3 report
+the same summary, exit status, passed and failed counts as the main
+checkout.
