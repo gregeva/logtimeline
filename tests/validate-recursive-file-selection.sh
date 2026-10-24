@@ -454,7 +454,7 @@ assert_command \
     contract    "$CONTRACT_GUIDANCE"
 
 assert_command \
-    command     "! grep -aqF -- '$GUIDANCE_ANCHOR' '$TMP_DIR/nomatch-without-r.stderr'" \
+    command     "grep -aqF -- 'unable to open any files' '$TMP_DIR/nomatch-without-r.stderr' && ! grep -aqF -- '$GUIDANCE_ANCHOR' '$TMP_DIR/nomatch-without-r.stderr'" \
     label       'the same failure without -r carries no quoting guidance' \
     asserts     'The guidance is specific to -r: without it, a pattern the shell expanded selects exactly what ltl would have selected itself, so quoting is not the explanation and the advice would misdirect' \
     produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl (the hint is conditional on -r)' \
@@ -462,9 +462,11 @@ assert_command \
 
 # Reuses the stderr of the preceding scenario's successful -r sweep rather than
 # running ltl again: the assertion is that a run which selected files says
-# nothing about quoting, and that run has already happened.
+# nothing about quoting, and that run has already happened. Its selection lines
+# (silent.sel) are the evidence that it selected files: the stderr of a run
+# that failed exists too, empty (tests/HARNESS-DESIGN.md Trap 13).
 assert_command \
-    command     "[ -f '$TMP_DIR/silent.sel.stderr' ] && ! grep -aqF -- '$GUIDANCE_ANCHOR' '$TMP_DIR/silent.sel.stderr'" \
+    command     "[ -s '$TMP_DIR/silent.sel' ] && ! grep -aqF -- '$GUIDANCE_ANCHOR' '$TMP_DIR/silent.sel.stderr'" \
     label       'a -r run that selected files carries no quoting guidance' \
     asserts     'The guidance is tied to selecting nothing, never to the use of -r: a sweep that found its files says nothing about quoting, so a correct invocation is never warned about a problem it does not have' \
     produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl (the hint is reached only on the failure path)' \

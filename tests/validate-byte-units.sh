@@ -397,7 +397,21 @@ PL
                        no-unit-keyed-decimals-table unit-slot-reads-ladder formatter-reads-ladder gc-reader-reads-ladder
                        no-prefix-letter-table gc-transform-reads-declared-notation
                        display-decimals-from-step csv-decimals-from-step help-has-no-unit-literal)
+    # An absence over a source that holds no ladder holds too (a stub's source
+    # holds none of it): the five absences need the ladder found first, whose
+    # own check, one-ladder, counts its absence (tests/HARNESS-DESIGN.md Trap 13).
+    local ladder_found=no
+    if [[ "$(awk -F'\t' '$1 == "CHECK" && $2 == "one-ladder" { print $3 }' "$report")" == ok ]]; then
+        ladder_found=yes
+    fi
     for name in "${expected[@]}"; do
+        case "$name" in
+            no-private-byte-table|byte-tokens-only-in-ladder|byte-multipliers-only-in-ladder|no-unit-keyed-decimals-table|no-prefix-letter-table)
+                if [[ "$ladder_found" != yes ]]; then
+                    echo "  SKIP  $current_scenario :: $name (no byte ladder in the source read)"
+                    continue
+                fi ;;
+        esac
         IFS=$'\t' read -r _ _ status detail < <(awk -F'\t' -v n="$name" '$1 == "CHECK" && $2 == n' "$report") || true
         if [[ "$status" == ok ]]; then
             pass_with "$name"
@@ -453,13 +467,15 @@ scenario_gc_heap_figures_iec() {
     local dir="$TMP_DIR/gc" rc
     run_ltl_in "$dir" gc --disable-progress -ni -bs 1440 -oe -o "$GC_FIXTURE"
     rc=$(cat "$dir/gc.rc")
-    if [[ "$rc" == 0 ]]; then
+    # A run that wrote nothing exits 0 too: the STATS CSV the run writes is
+    # the evidence it read the fixture.
+    if [[ "$rc" == 0 && -n "$(ls "$dir"/*STATS*.csv 2>/dev/null)" ]]; then
         pass_with "the run exits 0: the GC entry's self-validation rows pass"
     else
         fail_with "the run exits 0: the GC entry's self-validation rows pass" \
             'The GC entry sample 2433M->66M extracts 2481979392 bytes and 512M->128M 402653184; a self-validation mismatch ends the run' \
             'build_format_registry() self-validation in ltl, over the gc_heap_delta transform and gc_heap_size_bytes()' \
-            "$CONTRACT_GC_IEC" "exit: $rc" "stderr: $(head -3 "$dir/gc.err")"
+            "$CONTRACT_GC_IEC" "exit: $rc" "STATS CSV: $(ls "$dir"/*STATS*.csv 2>/dev/null || echo none)" "stderr: $(head -3 "$dir/gc.err")"
     fi
     expect_equal "STATS bytes total is 73175924736" "$(stats_cell "$dir" bytes)" "73175924736" \
         'The five heap transitions in M sum to 69,786 MiB: M is read as 1024 squared bytes' \

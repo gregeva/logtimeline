@@ -697,11 +697,12 @@ counts) is then checked for a call inside `$( )`.
 | 7 | A count compared to 0 over source read through `$LTL` | a stub's source holds none of what is counted | a presence check, first, of an anchor the source always carries (the sub the count is about) |
 | 8 | The runtime-warning check counted as a pass | an empty standard error holds no warning | count it only after the run's exit code and capture are checked |
 | 9 | A path derived from the location of `$LTL` | a stub's directory holds no checkout | derive it from `REPO_DIR` |
-| 10 | A lookup that finds nothing, under `set -e` (stops) | `grep` with no match, a pipeline fed by a failed `ltl` under `pipefail`, or a helper that exits non-zero, ends the harness | `\|\| var=""` on the assignment, then the empty value asserted on |
+| 10 | A lookup that finds nothing, under `set -e` (stops) | `grep` with no match, a pipeline fed by a failed `ltl` under `pipefail`, or a helper that exits non-zero, ends the harness | `\|\| var=""` on the assignment, or `\|\| true` inside each substitution of a value built from several (`v="$(a)\|$(b)"` takes the status of the last), then the empty value asserted on |
 | 11 | A bare `ltl` run, or a bare call of a helper or an inspector that returns non-zero, under `set -e` (stops) | the failed run ends the harness on that line, so an `rc=$?` on the next line is never reached when it matters | `\|\| rc=$?` on the same line; the exit code recorded and checked |
 | 12 | A counter advanced without a check (Trap 6) | `pass` advances where no check ran | the advance moves behind the check |
 | 13 | An `exit` on a failed run (stops) | a capture helper or a scenario ends the harness when its run exited non-zero, printed nothing or lacks an anchor | one counted FAIL, the checks that read the run skipped, and the harness goes on to its summary |
 | 14 | A success asserted by its exit code alone | a run that printed nothing exits 0 too | the exit code and a line the run always writes (a section heading, a summary row) |
+| 15 | A check's command evaluated in the harness's own shell (stops) | under `set -u` a lookup's sentinel read as a number (`[[ MISSING-SECTION -eq 1 ]]`) is an unbound-variable error, and an `exit` in the command ends the harness | evaluate it in a subshell: `( eval "$command" )` or `$(eval "$command")` |
 
 A check skipped this way prints a SKIP line and counts nothing: the failure it
 depends on was counted once, where the run was checked. The forms the fixes
@@ -730,11 +731,12 @@ grep -nE '(-ne|!=|-gt) *0\b|! +[^ ]?\$\{?LTL\b' "$H"              # 6
 grep -nE '(grep|perl|sed|awk)[^|]*"\$\{?LTL\}?"' "$H"             # 7
 grep -n 'assert_no_runtime_warnings' "$H"                         # 8
 grep -nE 'dirname +"?\$\{?LTL\b|\$\{?LTL\}?/\.\.' "$H"            # 9
-grep -nE '^\s*(local +)?\w+=\$\([^(]' "$H"                        # 10
+grep -nE '^\s*(local +)?\w+="?\$\([^(]' "$H"                      # 10
 grep -nE '\$\{?LTL\b' "$H" | grep -vE '^[0-9]+: *LTL='          # 11: every line naming ltl
 grep -nE '^\s*(local +)?\w+=\$\?' "$H"                          # 11: a status read on the next line
 grep -nE '^\s+exit [0-9]|; exit [0-9]|\{ *exit [0-9]' "$H"        # 13
 grep -nE 'assert_exit +0|exits 0|(rc|status)\S*\}? *(-eq|==|=) *0\b' "$H"  # 14
+grep -nE '^\s*(if !? *)?eval ' "$H"                                # 15
 ```
 
 Shape 12 has no grep: the confirmation run below counts it. Grep 13 also

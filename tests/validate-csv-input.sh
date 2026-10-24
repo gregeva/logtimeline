@@ -82,7 +82,10 @@ assert_command() {
             *) echo "assert_command: unknown field '$1'" >&2; exit 2 ;;
         esac
     done
-    if eval "$command" >/dev/null 2>&1; then
+    # In a subshell: under set -u a lookup's sentinel read as a number
+    # ([[ MISSING-SECTION -eq 1 ]]) is an unbound-variable error, which in the
+    # main shell ends the harness (tests/HARNESS-DESIGN.md Trap 13).
+    if ( eval "$command" ) >/dev/null 2>&1; then
         echo "  PASS  $current_scenario :: $label"
         pass=$((pass + 1))
     else
@@ -213,8 +216,10 @@ if scenario_wanted quoted-timestamp-csv; then
 
     mix_rc=0; run_ltl "$TMP_DIR/mix.out" -V format-detection "$TMP_DIR"/mix/* -udm bytes::sum || mix_rc=$?
     check_capture_warnings "$TMP_DIR/mix.out" "mixed-glob-quoted-timestamp-csv"
+    # A run that read nothing exits 0 too: the format-detection block naming the
+    # CSV is the evidence it was read (tests/HARNESS-DESIGN.md Trap 13).
     assert_command \
-        command     "[[ $mix_rc -eq 0 ]]" \
+        command     "[[ $mix_rc -eq 0 ]] && grep -aqE '^file: .*/stats\\.csv\$' '$TMP_DIR/mix.out'" \
         label       'mixed glob (log + quoted-timestamp CSV) exits 0 instead of dying in timegm()' \
         asserts     'A CSV row whose timestamp column is neither epoch nor ISO never reaches the fixed-offset substr/timegm parse' \
         produced_by 'the shape test of the block csv_block_src() generates, before a csv row counts as a match' \
@@ -226,7 +231,7 @@ if scenario_wanted quoted-timestamp-csv; then
         produced_by 'the shape test and trim of the block csv_block_src() generates' \
         contract    "$CONTRACT_611"
     assert_command \
-        command     "! grep -aq 'stats.csv' '$TMP_DIR/mix.out.stderr' && ! grep -aqi 'timestamp' '$TMP_DIR/mix.out.stderr'" \
+        command     "[[ $mix_rc -eq 0 ]] && grep -aqE '^file: .*/stats\\.csv\$' '$TMP_DIR/mix.out' && ! grep -aq 'stats.csv' '$TMP_DIR/mix.out.stderr' && ! grep -aqi 'timestamp' '$TMP_DIR/mix.out.stderr'" \
         label       'no per-row or per-file timestamp message, the file never named on stderr' \
         asserts     'A CSV row without a parsable timestamp is never reported per row or per file' \
         produced_by 'read_and_process_logs() in ltl (the csv row paths)' \
@@ -289,7 +294,7 @@ if scenario_wanted index-read-as-input; then
         produced_by 'write_index_file() in ltl' \
         contract    'features/179-index-read-back.md (index layout)'
 
-    index_lines=$(wc -l < "$TMP_DIR/idx/ltl-index.csv" | tr -d ' ')
+    index_lines=$(wc -l < "$TMP_DIR/idx/ltl-index.csv" | tr -d ' ') || index_lines=0
     idx_rc=0; run_ltl "$TMP_DIR/idx-in.out" -V format-detection,filter-summary \
         "$TMP_DIR/idx/app.log" "$TMP_DIR/idx/ltl-index.csv" -udm latency:ms:mean || idx_rc=$?
     check_capture_warnings "$TMP_DIR/idx-in.out" "index-read-as-input"
