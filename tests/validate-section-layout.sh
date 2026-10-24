@@ -770,15 +770,20 @@ if scenario_wanted hide-each-column; then
     # -ic: count is tracked only when asked. -hi stats on the users log: the
     # sessions and users headings print in full at this width without it.
     numeric_args=(-ic "$NUMERIC_LOG"); users_args=(-hi stats "$USERS_LOG")
-    run_ltl col-NUMERIC "${col_args[@]}" "${numeric_args[@]}" || true
-    run_ltl col-USERS "${col_args[@]}" "${users_args[@]}" || true
+    # The checks that read a log's plain render are skipped when its run failed,
+    # which run_ltl has counted.
+    col_baseline_ok=" "
+    run_ltl col-NUMERIC "${col_args[@]}" "${numeric_args[@]}" && col_baseline_ok+="NUMERIC " || true
+    run_ltl col-USERS "${col_args[@]}" "${users_args[@]}" && col_baseline_ok+="USERS " || true
     for case in "${column_cases[@]}"; do
         IFS=: read -r value alias old heading log <<< "$case"
         if [[ "$log" == NUMERIC ]]; then log_args=("${numeric_args[@]}"); else log_args=("${users_args[@]}"); fi
         run_ltl "col-$value" "${col_args[@]}" -hi "$value" "${log_args[@]}" || continue
         run_ltl "col-$alias" "${col_args[@]}" -hi "$alias" "${log_args[@]}" || continue
         run_ltl "col-old-$value" "${col_args[@]}" "$old" "${log_args[@]}" || continue
-        if [[ -n "$heading" ]]; then
+        if [[ "$col_baseline_ok" != *" $log "* ]]; then
+            echo "  SKIP  $current_scenario :: -hi $value against the plain render (the col-$log run failed)"
+        elif [[ -n "$heading" ]]; then
             assert_command \
                 command     "heading_present $(printf '%q' "$(capture "col-$log")") $heading && heading_absent $(printf '%q' "$(capture "col-$value")") $heading" \
                 label       "-hi $value removes the '$heading' heading from the header row" \

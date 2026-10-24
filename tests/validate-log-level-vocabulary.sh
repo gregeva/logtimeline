@@ -156,6 +156,22 @@ assert_command() {
     fi
 }
 
+# A scenario's run that exits non-zero, or renders nothing, is one counted FAIL;
+# the checks reading its capture are then skipped (HARNESS-DESIGN.md Trap 13).
+run_failed() {
+    {
+        echo "  FAIL  $current_scenario :: $1"
+        echo "        asserts:     the scenario's ltl run exits 0 and writes the capture its checks read"
+        echo "        produced_by: read_and_process_logs() and print_summary_table() in ltl; print_help_formats() for --help formats"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13 - a check made against a run that did not happen is skipped, its cause counted once"
+    } >&2
+    fail=$((fail + 1)); failures+=("$current_scenario :: $1")
+    scenario_ok=0
+}
+skip_checks() {
+    echo "  SKIP  $current_scenario :: the checks reading that run's capture (the run gave nothing to read)"
+}
+
 # A level appears as its own row in the category table, and that row carries a
 # count. Absence means the category gate discarded every line carrying the
 # level (HARNESS-DESIGN.md § Harnesses must fail on missing anchors: a
@@ -678,20 +694,19 @@ set +e
 render_status=("${PIPESTATUS[@]}")
 set -e
 
+scenario_ok=1
 if [[ "${render_status[0]}" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited ${render_status[0]} while rendering" >&2
+    run_failed "ltl exited ${render_status[0]} while rendering"
     sed 's/^/        /' "$STDERR" >&2
-    exit 1
-fi
-if [[ ! -s "$RENDER" ]]; then
-    echo "  FAIL  $current_scenario :: rendered output is empty" >&2
-    exit 1
+elif [[ ! -s "$RENDER" ]]; then
+    run_failed "rendered output is empty"
 fi
 
 if ! assert_no_runtime_warnings "$STDERR" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 for level in FATAL ERROR WARN INFO DEBUG TRACE; do
     assert_command \
         command     "check_level_present '$RENDER' '$level'" \
@@ -707,6 +722,9 @@ assert_command \
     asserts     'The fixture carries six lines, one per level the Windchill Method Server format emits, and all six match the format. LINES READ and LINES INCLUDED must both be 6; a shortfall is the count of lines the category gate discarded.' \
     produced_by '@log_levels / %log_level_set in ltl, gated per line in read_and_process_logs()' \
     contract    'features/447-message-control-character-normalisation.md § D6 — every level a supported format emits is in the vocabulary'
+else
+    skip_checks
+fi
 
 # FATAL is a failure level and must be counted toward the error rate, like ERROR
 # and the 4xx/5xx status classes. The fixture carries exactly one FATAL and one
@@ -738,20 +756,19 @@ set +e
 render_ext_status=("${PIPESTATUS[@]}")
 set -e
 
+scenario_ok=1
 if [[ "${render_ext_status[0]}" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited ${render_ext_status[0]} while rendering" >&2
+    run_failed "ltl exited ${render_ext_status[0]} while rendering"
     sed 's/^/        /' "$STDERR_EXT" >&2
-    exit 1
-fi
-if [[ ! -s "$RENDER_EXT" ]]; then
-    echo "  FAIL  $current_scenario :: rendered output is empty" >&2
-    exit 1
+elif [[ ! -s "$RENDER_EXT" ]]; then
+    run_failed "rendered output is empty"
 fi
 
 if ! assert_no_runtime_warnings "$STDERR_EXT" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 for level in CRITICAL SEVERE WARNING NOTICE ALERT EMERGENCY AUDIT; do
     assert_command \
         command     "check_level_present '$RENDER_EXT' '$level'" \
@@ -781,6 +798,9 @@ assert_command \
     asserts     'The shipped default failure rule names CRITICAL, so a CRITICAL line must reach the failure count and not merely appear as a category row. The fixture carries four lines the rule names — EMERGENCY, ALERT, CRITICAL and SEVERE — so FAILURE CLASSIFIED must read 4; being in the category table only proves the gate let the line through.' \
     produced_by '%classification_default in ltl, compiled into each entry through format_classification_src(); counted in read_and_process_logs() and rendered by print_summary_table()' \
     contract    'features/475-log-level-vocabulary-completion.md § D2 (CRITICAL is admitted with the others and gets its own criterion)'
+else
+    skip_checks
+fi
 
 assert_command \
     command     "check_failure_count_rises_with_added_severities '$FIXTURE_EXTENDED'" \
@@ -831,16 +851,17 @@ render_outside_status=("${PIPESTATUS[@]}")
 set -e
 notice_lines "$RENDER_OUT" > "$STDERR_OUT.notices"
 
+scenario_ok=1
 if [[ "${render_outside_status[0]}" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited ${render_outside_status[0]} while rendering" >&2
+    run_failed "ltl exited ${render_outside_status[0]} while rendering"
     sed 's/^/        /' "$STDERR_OUT" >&2
-    exit 1
 fi
 
 if ! assert_no_runtime_warnings "$STDERR_OUT" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 assert_command \
     command     "check_report_names '$STDERR_OUT.notices' 'windchill_method_server' 'NOTAREALLEVEL' 1" \
     label       'the report names the format, the token and the line count' \
@@ -868,6 +889,9 @@ assert_command \
     asserts     'Naming a token in the report is not admitting it to the vocabulary. The token must not appear as a row of the category table, or the report would have promoted an unrecognised token to a category the tool counts.' \
     produced_by '%log_level_set in ltl, gated per line in read_and_process_logs(); the category table rendered by print_summary_table()' \
     contract    'features/476-per-format-log-level-declarations.md § D1 (the gate keeps today behaviour exactly; the token, the format and the count are kept and reported, and nothing is retained)'
+else
+    skip_checks
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: the Edge C SDK tokens, the real-data case the report exists for.
@@ -915,16 +939,17 @@ render_edge_status=("${PIPESTATUS[@]}")
 set -e
 notice_lines "$RENDER_EDGE" > "$STDERR_EDGE.notices"
 
+scenario_ok=1
 if [[ "${render_edge_status[0]}" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited ${render_edge_status[0]} while rendering" >&2
+    run_failed "ltl exited ${render_edge_status[0]} while rendering"
     sed 's/^/        /' "$STDERR_EDGE" >&2
-    exit 1
 fi
 
 if ! assert_no_runtime_warnings "$STDERR_EDGE" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 for token in AUTH TRAFFIC_CONTROL; do
     assert_command \
         command     "check_report_names '$STDERR_EDGE.notices' 'tw_edge_c_sdk' '$token' 1" \
@@ -947,6 +972,9 @@ assert_command \
     asserts     'The four-line fixture carries START, AUTH, TRAFFIC_CONTROL and INFO. AUTH and TRAFFIC_CONTROL are outside the vocabulary and dropped; START and INFO are inside it and counted. LINES READ must be 4 and LINES INCLUDED 2, which is the measurement behind the report.' \
     produced_by '%log_level_set in ltl, gated per line in read_and_process_logs(); rendered by print_summary_table()' \
     contract    'features/476-per-format-log-level-declarations.md § D1 (an unregistered level is still rejected) and § D9 (START passes the gate, AUTH and TRAFFIC_CONTROL do not)'
+else
+    skip_checks
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: the levels a format declares are stated by the format listing.
@@ -972,16 +1000,17 @@ render_jk_status=("${PIPESTATUS[@]}")
 set -e
 notice_lines "$RENDER_JK" > "$STDERR_JK.notices"
 
+scenario_ok=1
 if [[ "${render_jk_status[0]}" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl exited ${render_jk_status[0]} while rendering" >&2
+    run_failed "ltl exited ${render_jk_status[0]} while rendering"
     sed 's/^/        /' "$STDERR_JK" >&2
-    exit 1
 fi
 
 if ! assert_no_runtime_warnings "$STDERR_JK" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 for level in TRACE DEBUG INFO WARN ERROR EMERGENCY; do
     assert_command \
         command     "check_level_present '$RENDER_JK' '$level'" \
@@ -1011,6 +1040,9 @@ assert_command \
     asserts     'The connector entries classify ERROR and EMERGENCY as failures and nothing as a success. Of the six included lines exactly two carry those levels, so FAILURE CLASSIFIED must read 2.' \
     produced_by 'the classification declared on the connector entries, compiled by format_classification_src(); counted in read_and_process_logs() and rendered by print_summary_table()' \
     contract    'features/655-apache-mod-jk-connector-format.md D3 (C5)'
+else
+    skip_checks
+fi
 
 VERBOSE_JK="$TMP_DIR/connector-format-detection.txt"
 set +e
@@ -1018,15 +1050,16 @@ set +e
     -V format-detection "$FIXTURE_CONNECTOR" ) > "$VERBOSE_JK" 2>"$VERBOSE_JK.stderr"
 verbose_jk_status=$?
 set -e
+scenario_ok=1
 if [[ "$verbose_jk_status" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl -V format-detection exited $verbose_jk_status" >&2
+    run_failed "ltl -V format-detection exited $verbose_jk_status"
     sed 's/^/        /' "$VERBOSE_JK.stderr" >&2
-    exit 1
 fi
 if ! assert_no_runtime_warnings "$VERBOSE_JK.stderr" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr-verbose")
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 assert_command \
     command     "grep -qE '^  unregistered_levels: notice=1\$' '$VERBOSE_JK'" \
     label       'the per-file unregistered_levels key names notice=1' \
@@ -1040,6 +1073,9 @@ assert_command \
     asserts     'The fixture is written in the base connector shape (millisecond stamp, request-id bracket), so the words above were read by that entry and its level map.' \
     produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
     contract    'features/655-apache-mod-jk-connector-format.md AC6 (C1)'
+else
+    skip_checks
+fi
 
 fi
 
@@ -1055,16 +1091,17 @@ set +e
 help_status=("${PIPESTATUS[@]}")
 set -e
 
+scenario_ok=1
 if [[ "${help_status[0]}" -ne 0 ]]; then
-    echo "  FAIL  $current_scenario :: ltl --help formats exited ${help_status[0]}" >&2
+    run_failed "ltl --help formats exited ${help_status[0]}"
     sed 's/^/        /' "$HELP_FORMATS_ERR" >&2
-    exit 1
 fi
 
 if ! assert_no_runtime_warnings "$HELP_FORMATS_ERR" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 
+if [[ "$scenario_ok" -eq 1 ]]; then
 assert_command \
     command     "check_help_states_levels '$HELP_FORMATS' 'tw_edge_c_sdk' 'TRACE, DEBUG, INFO, WARN, ERROR, FORCE, AUDIT'" \
     label       'the Edge C SDK entry states the levels it declares' \
@@ -1117,6 +1154,9 @@ for jk_slug in apache_mod_jk apache_mod_jk_microseconds apache_mod_jk_seconds ap
         produced_by 'print_help_formats() in ltl, reading the compiled registry specs' \
         contract    'features/655-apache-mod-jk-connector-format.md AC7 (C1, D3)'
 done
+else
+    skip_checks
+fi
 
 fi
 

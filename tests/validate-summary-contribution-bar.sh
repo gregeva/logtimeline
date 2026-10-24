@@ -143,8 +143,9 @@ assert_command() {
 }
 
 # Capture one ltl render into $1 with its escape sequences INTACT — they are
-# what this harness is about — and its stderr into $1.stderr. Fails hard on a
-# non-zero exit or an empty capture (HARNESS-DESIGN.md Trap 1).
+# what this harness is about — and its stderr into $1.stderr. A non-zero exit
+# or an empty capture is one counted FAIL and a return of 1, so the scenario
+# skips the checks that read it (HARNESS-DESIGN.md Trap 1, Trap 13).
 capture_render() {
     local outfile="$1"; shift
     local mode="$1"; shift
@@ -156,13 +157,21 @@ capture_render() {
     local status=$?
     set -e
     if [[ "$status" -ne 0 ]]; then
-        echo "  FAIL  $current_scenario :: ltl exited $status while rendering" >&2
-        sed 's/^/        /' "$stderrfile" >&2
-        exit 1
+        echo "  FAIL  $current_scenario :: ltl exited $status while rendering"
+        echo "        asserts:     the run exits 0 and writes the output its checks read"
+        echo "        produced_by: ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+        sed 's/^/        /' "$stderrfile"
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl exited $status")
+        return 1
     fi
     if [[ ! -s "$outfile" ]]; then
-        echo "  FAIL  $current_scenario :: rendered output is empty" >&2
-        exit 1
+        echo "  FAIL  $current_scenario :: rendered output is empty"
+        echo "        asserts:     the run exits 0 and writes the output its checks read"
+        echo "        produced_by: ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
+        fail=$((fail + 1)); failures+=("$current_scenario :: empty render")
+        return 1
     fi
     if ! assert_no_runtime_warnings "$stderrfile" "$current_scenario"; then
         fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
@@ -521,7 +530,7 @@ echo "[$current_scenario]"
 
 DEFAULT_RENDER="$TMP_DIR/default.txt"
 # shellcheck disable=SC2046
-capture_render "$DEFAULT_RENDER" ansi $(run_ltl_args)
+if capture_render "$DEFAULT_RENDER" ansi $(run_ltl_args); then
 
 while IFS='|' read -r label extent; do
     assert_command \
@@ -559,6 +568,7 @@ assert_command \
     asserts     "The fill is the category's own colour, so a row is recognisable by the same colour whether it is read as text or as a bar. A plain row takes the subdued shade of that colour — the same one the timeline bars use for their unhighlighted length — so that the vivid shade is left to mean something." \
     produced_by 'summary_category_row() in ltl, reading plain_bg from the bar-colour table' \
     contract    'features/448-category-summary-share-and-bar.md § D2 — the bar uses the same bar mechanism and colour table as the timeline columns'
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: every category can be filled.
@@ -593,7 +603,7 @@ echo "[$current_scenario]"
 
 OFF_RENDER="$TMP_DIR/off.txt"
 # shellcheck disable=SC2046
-capture_render "$OFF_RENDER" ansi $(run_ltl_args -sbo)
+if capture_render "$OFF_RENDER" ansi $(run_ltl_args -sbo); then
 
 for label in '2xx Success' '3xx Redirection' '5xx Server error'; do
     assert_command \
@@ -610,6 +620,7 @@ assert_command \
     asserts     'The bar and the share are separate: -sbo is about the bar, and the count with its share is still what the row says. The two are controlled independently because they answer the same question at different precisions.' \
     produced_by 'share_row_text() in ltl' \
     contract    'features/448-category-summary-share-and-bar.md § D1 — the share follows the count (pct%) convention; D5 scopes -sbo to the bar'
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: -sm renders the summary table without colour.
@@ -636,11 +647,9 @@ MONO_RENDER="$TMP_DIR/mono.txt"
 MONO_BAR_OFF_RENDER="$TMP_DIR/mono-bar-off.txt"
 MONO_BASE_RENDER="$TMP_DIR/mono-base.txt"
 # shellcheck disable=SC2046
-capture_render "$MONO_RENDER" ansi $(run_subchar_args -sm)
-# shellcheck disable=SC2046
-capture_render "$MONO_BAR_OFF_RENDER" ansi $(run_subchar_args -sm -sbo)
-# shellcheck disable=SC2046
-capture_render "$MONO_BASE_RENDER" ansi $(run_subchar_args)
+if capture_render "$MONO_RENDER" ansi $(run_subchar_args -sm) \
+   && capture_render "$MONO_BAR_OFF_RENDER" ansi $(run_subchar_args -sm -sbo) \
+   && capture_render "$MONO_BASE_RENDER" ansi $(run_subchar_args); then
 
 MONO_CONTRACT='features/448-category-summary-share-and-bar.md § D7 (amended) — monochrome is a property of the summary table, not of the bar; § Acceptance criteria A1–A4'
 
@@ -696,6 +705,7 @@ assert_command \
     asserts     'The summary table is the panel on the left. The file listing printed to its right shares the physical lines but is a different surface, and monochrome does not reach it: its escapes are compared one for one against the run without the option, and it must carry colour at all, so the comparison cannot pass by both sides being empty.' \
     produced_by 'print_summary_table() in ltl, which composes the table and the file-details column as separate surfaces' \
     contract    "$MONO_CONTRACT"
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: -sbr draws from the right edge.
@@ -709,7 +719,7 @@ echo "[$current_scenario]"
 
 REVERSE_RENDER="$TMP_DIR/reverse.txt"
 # shellcheck disable=SC2046
-capture_render "$REVERSE_RENDER" ansi $(run_ltl_args -sbr)
+if capture_render "$REVERSE_RENDER" ansi $(run_ltl_args -sbr); then
 
 assert_command \
     command     "check_row_field '$REVERSE_RENDER' '3xx Redirection' side right" \
@@ -724,6 +734,7 @@ assert_command \
     asserts     'The direction the bar is drawn in does not change how long it is: the same share occupies the same number of characters at either end of the row.' \
     produced_by "$BAR_PRODUCED" \
     contract    'features/448-category-summary-share-and-bar.md § D5 — -sbr changes the direction only'
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: -sba scales against every included line.
@@ -739,7 +750,7 @@ echo "[$current_scenario]"
 
 ABSOLUTE_RENDER="$TMP_DIR/absolute.txt"
 # shellcheck disable=SC2046
-capture_render "$ABSOLUTE_RENDER" ansi $(run_ltl_args -sba)
+if capture_render "$ABSOLUTE_RENDER" ansi $(run_ltl_args -sba); then
 
 while IFS='|' read -r label extent; do
     assert_command \
@@ -754,6 +765,7 @@ done <<'ROWS'
 4xx Client error|3
 5xx Server error|1
 ROWS
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: -sbl gives the tail a visible length.
@@ -772,7 +784,7 @@ echo "[$current_scenario]"
 
 LOG_RENDER="$TMP_DIR/log.txt"
 # shellcheck disable=SC2046
-capture_render "$LOG_RENDER" ansi $(run_ltl_args -sbl)
+if capture_render "$LOG_RENDER" ansi $(run_ltl_args -sbl); then
 
 # The comparison is against the linear render of the same data. This scenario
 # captures its own rather than reading the one the default-bar scenario
@@ -780,7 +792,7 @@ capture_render "$LOG_RENDER" ansi $(run_ltl_args -sbl)
 # selected on its own (tests/HARNESS-DESIGN.md section The scenario selector).
 LOG_LINEAR_RENDER="$TMP_DIR/log-linear.txt"
 # shellcheck disable=SC2046
-capture_render "$LOG_LINEAR_RENDER" ansi $(run_ltl_args)
+if capture_render "$LOG_LINEAR_RENDER" ansi $(run_ltl_args); then
 
 check_log_scale_spreads_the_tail() {
     local linear="$1" logscale="$2"
@@ -889,6 +901,8 @@ assert_command \
     asserts     'Logarithmic scaling exists for the case where one category holds almost everything and the rest are stubs: it gives the smallest category a length that can actually be seen. It must do that without lying about the ordering — a longer bar still means a larger category — and the reference still fills the row, so the two scales can be read against each other.' \
     produced_by 'summary_bar_extent() in ltl' \
     contract    'features/448-category-summary-share-and-bar.md § D5 — -sbl, logarithmic length scaling; D3 — log scaling applies on top of the same largest-is-full-width reference'
+fi
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: the bar renders under both colour modes.
@@ -906,7 +920,7 @@ echo "[$current_scenario]"
 
 ASCII_RENDER="$TMP_DIR/ascii.txt"
 # shellcheck disable=SC2046
-capture_render "$ASCII_RENDER" ascii $(run_ltl_args)
+if capture_render "$ASCII_RENDER" ascii $(run_ltl_args); then
 
 assert_command \
     command     "check_row_field '$ASCII_RENDER' '3xx Redirection' extent 8" \
@@ -914,6 +928,7 @@ assert_command \
     asserts     "The bar follows what the tool already does for its other bars: the escapes are emitted regardless of whether stdout is a terminal, so a redirected run carries the same rows an interactive one does. NO_COLOR gates the help renderer, not the analytical output, and this assertion is what stops that distinction being erased by accident." \
     produced_by "$BAR_PRODUCED" \
     contract    'features/448-category-summary-share-and-bar.md § D6 — non-terminal output follows what the tool does today; the ANSI escapes are emitted regardless of TTY'
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: a share too small to fill a character draws no bar.
@@ -939,7 +954,7 @@ echo "[$current_scenario]"
 
 SUBCHAR_RENDER="$TMP_DIR/subcharacter.txt"
 # shellcheck disable=SC2046
-capture_render "$SUBCHAR_RENDER" ansi $(run_subchar_args)
+if capture_render "$SUBCHAR_RENDER" ansi $(run_subchar_args); then
 
 while IFS='|' read -r label extent; do
     assert_command \
@@ -953,12 +968,13 @@ done <<'SUBROWS'
 3xx Redirection|1
 5xx Server error|0
 SUBROWS
+fi
 
 # The option that exists for exactly this case must still answer it: -sbl
 # compresses the scale so the row that draws nothing linearly gets a length.
 SUBCHAR_LOG_RENDER="$TMP_DIR/subcharacter-log.txt"
 # shellcheck disable=SC2046
-capture_render "$SUBCHAR_LOG_RENDER" ansi $(run_subchar_args -sbl)
+if capture_render "$SUBCHAR_LOG_RENDER" ansi $(run_subchar_args -sbl); then
 
 assert_command \
     command     "check_row_field '$SUBCHAR_LOG_RENDER' '5xx Server error' extent 12" \
@@ -966,6 +982,7 @@ assert_command \
     asserts     'Dropping the minimum does not leave the small categories invisible: -sbl is the option for seeing them, and it must give a length to the row the linear scale correctly draws as nothing. If it did not, removing the minimum would have taken away the only way to see a rare category.' \
     produced_by "$BAR_PRODUCED" \
     contract    'features/448-category-summary-share-and-bar.md § D5 — -sbl gives the tail rows a visible length'
+fi
 
 # ---------------------------------------------------------------------------
 # Scenario: a highlighted row and its plain twin are filled in different shades.
@@ -985,7 +1002,7 @@ echo "[$current_scenario]"
 
 HL_RENDER="$TMP_DIR/highlighted.txt"
 # shellcheck disable=SC2046
-capture_render "$HL_RENDER" ansi $(run_subchar_args -h /catalog)
+if capture_render "$HL_RENDER" ansi $(run_subchar_args -h /catalog); then
 
 assert_command \
     command     "check_row_field '$HL_RENDER' '2xx Success (HL)' fill 'ESC[48;5;46m'" \
@@ -1000,6 +1017,7 @@ assert_command \
     asserts     'The plain row takes the subdued shade of the same hue, so the pair reads as one category split in two rather than as two unrelated ones. Rendering both in the vivid shade makes the highlight invisible — the two rows come out identical and nothing says which is which.' \
     produced_by "$BAR_PRODUCED" \
     contract    'features/448-category-summary-share-and-bar.md § D2 — the bar uses the same bar mechanism and colour table as the timeline columns'
+fi
 fi
 
 echo
