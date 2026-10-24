@@ -384,11 +384,19 @@ if [[ -z "$cache_row" ]]; then
 fi
 IFS=$'\t' read -r _cs cache_logfile cache_options _rest <<<"$cache_row"
 
+# A failed capture is one failure, and the five checks that read the artifact
+# are skipped; the harness goes on to its summary (tests/HARNESS-DESIGN.md
+# Trap 13).
+cache_ok=1
 if ! csv_cache_produce "$CACHE_SCENARIO" "$cache_logfile" "$cache_options" \
         "$(csv_cache_logfile_shorthand "$cache_logfile")"; then
-    echo "ERROR: cache-validity could not obtain a cached artifact for $CACHE_SCENARIO" >&2
-    exit 1
+    cache_ok=0
+    cache_assert "a cached artifact is obtained for $CACHE_SCENARIO" 1 \
+        "csv_cache_produce failed; its diagnostic is above" \
+        "The cache checks read an artifact the helper captured; without one there is nothing to judge."
+    echo "SKIP  cache-validity :: the five staleness and refresh checks (no artifact to read)"
 fi
+if [[ $cache_ok -eq 1 ]]; then
 CACHE_MSG="$CSV_CACHE_MESSAGES"
 CACHE_SIG="$(csv_cache_signature_path "$CACHE_MSG")"
 
@@ -446,6 +454,7 @@ cache_assert 'a stale cache is refreshed, and says so' \
     "produce_rc=$rc artifact_age_seconds=$refresh_age stderr=$(sed 's/^/          /' "$cache_refresh_err")" \
     'The refresh is not silent. A cache that quietly serves stale artifacts is what kept this invisible for three days, so the run states that the artifacts were stale and are being produced again, and the artifact on disk is the new one.'
 rm -f "$cache_refresh_err"
+fi
 
 echo ""
 echo "=== CSV output integrity: $scenarios_run scenarios, $total_pass pass, $total_fail fail ==="

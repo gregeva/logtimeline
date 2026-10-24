@@ -304,7 +304,7 @@ assert_command \
     produced_by 'print_message_summary() and the key site in read_and_process_logs() in ltl, under the default position' \
     contract    "$DOC § 3.1 D2 (default right); AC1"
 assert_command \
-    command     "! grep -q \$'\\xe2\\x80\\xa6' '$TMP_DIR/right/render.txt' \"\$(messages_csv right)\" || { echo 'an ellipsis appears under -mt right'; exit 1; }" \
+    command     "[[ -n \"\$(messages_table right)\" ]] || { echo 'no messages table under -mt right'; exit 1; }; csv=\$(messages_csv right); [[ -s \"\$csv\" ]] || { echo 'no messages CSV under -mt right'; exit 1; }; ! grep -q \$'\\xe2\\x80\\xa6' '$TMP_DIR/right/render.txt' \"\$csv\" || { echo 'an ellipsis appears under -mt right'; exit 1; }" \
     label       'no ellipsis under the right cut' \
     asserts     'The right cut is unchanged and carries no marker, on the table and in the CSV.' \
     produced_by 'print_message_summary() and read_and_process_logs() in ltl' \

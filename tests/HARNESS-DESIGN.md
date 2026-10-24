@@ -689,20 +689,31 @@ counts) is then checked for a call inside `$( )`.
 | # | Shape | Why it holds, or stops, on a failed run | Fix |
 |---|---|---|---|
 | 1 | A failure counted inside `$( )` (Trap 12) | the count and the FAIL line stay in the subshell | call the helper directly; it hands its result back through a variable |
-| 2 | A comparison of two captures | two runs that fail alike print the same, usually nothing | each side's run exits 0 and its capture is non-empty first; a side that fails is a FAIL, and the comparison is skipped |
+| 2 | A comparison of two captures, or of two lookups in them, equal or unequal | two runs that fail alike print the same, usually nothing; two lookups that fail alike return the same sentinel, the same empty string or the same separators (`"/"`, `"\|\|"`); an inequality holds when one side is empty | each side's run exits 0 and its capture is non-empty first; a side that fails is a FAIL, and the comparison is skipped; a lookup's sentinel names the capture it looked in, or each side is required non-empty first |
 | 3 | An absence check | an empty capture, or an error message, holds none of the text | the run's exit 0 and a non-empty capture first; on an empty capture the check is a FAIL |
-| 4 | A width or shape check over every line | an empty capture has no line to break the rule | the capture is non-empty first; `assert_no_soft_wrap` fails an empty capture itself |
+| 4 | A width or shape check over every line or record | an empty capture, or one without the table, has no line or record to break the rule | the capture is non-empty first, and an inspector that walks records fails when it checked none; `assert_no_soft_wrap` fails an empty capture itself |
 | 5 | A presence check the seed satisfies | a fixture, or an earlier run, already holds a line of the right shape | look up the row or key this run writes (its date, its value), never any line of the shape |
 | 6 | A refusal asserted by its exit code alone | any failure exits non-zero | the exit code and the message both |
 | 7 | A count compared to 0 over source read through `$LTL` | a stub's source holds none of what is counted | a presence check, first, of an anchor the source always carries (the sub the count is about) |
 | 8 | The runtime-warning check counted as a pass | an empty standard error holds no warning | count it only after the run's exit code and capture are checked |
 | 9 | A path derived from the location of `$LTL` | a stub's directory holds no checkout | derive it from `REPO_DIR` |
 | 10 | A lookup that finds nothing, under `set -e` (stops) | `grep` with no match, a pipeline fed by a failed `ltl` under `pipefail`, or a helper that exits non-zero, ends the harness | `\|\| var=""` on the assignment, then the empty value asserted on |
-| 11 | A bare `ltl` run, or a bare call of a helper that returns non-zero, under `set -e` (stops) | the failed run ends the harness on that line | `\|\| rc=$?`; the exit code recorded and checked |
+| 11 | A bare `ltl` run, or a bare call of a helper or an inspector that returns non-zero, under `set -e` (stops) | the failed run ends the harness on that line, so an `rc=$?` on the next line is never reached when it matters | `\|\| rc=$?` on the same line; the exit code recorded and checked |
 | 12 | A counter advanced without a check (Trap 6) | `pass` advances where no check ran | the advance moves behind the check |
+| 13 | An `exit` on a failed run (stops) | a capture helper or a scenario ends the harness when its run exited non-zero, printed nothing or lacks an anchor | one counted FAIL, the checks that read the run skipped, and the harness goes on to its summary |
+| 14 | A success asserted by its exit code alone | a run that printed nothing exits 0 too | the exit code and a line the run always writes (a section heading, a summary row) |
 
 A check skipped this way prints a SKIP line and counts nothing: the failure it
-depends on was counted once, where the run was checked.
+depends on was counted once, where the run was checked. The forms the fixes
+take, each counting the run's failure once and skipping what reads it:
+
+- a capture helper records the run's exit status beside its capture
+  (`<capture>.rc`) and counts one FAIL on a non-zero exit or an empty capture;
+- a check names the captures it reads (a `reads` field on `assert_command`,
+  or a `produced <tag> <pattern> <label>` guard that also fails the check when
+  the run lacks the line it reads), and is skipped when one of them failed;
+- a scenario that needs an input the harness failed to obtain is skipped
+  whole (`needs <scenario> <input>`).
 
 **Review-gate greps.** Each lists the candidate lines of one harness for the
 shape of its number; reading each line decides whether it is a case.
@@ -721,9 +732,17 @@ grep -n 'assert_no_runtime_warnings' "$H"                         # 8
 grep -nE 'dirname +"?\$\{?LTL\b|\$\{?LTL\}?/\.\.' "$H"            # 9
 grep -nE '^\s*(local +)?\w+=\$\([^(]' "$H"                        # 10
 grep -nE '\$\{?LTL\b' "$H" | grep -vE '^[0-9]+: *LTL='          # 11: every line naming ltl
+grep -nE '^\s*(local +)?\w+=\$\?' "$H"                          # 11: a status read on the next line
+grep -nE '^\s+exit [0-9]|; exit [0-9]|\{ *exit [0-9]' "$H"        # 13
+grep -nE 'assert_exit +0|exits 0|(rc|status)\S*\}? *(-eq|==|=) *0\b' "$H"  # 14
 ```
 
-Shape 12 has no grep: the confirmation run below counts it.
+Shape 12 has no grep: the confirmation run below counts it. Grep 13 also
+lists the checks a harness makes before any run (an executable `ltl`, a
+fixture present), exits inside a Perl program or an `eval` subshell, and the
+summary's own; none is a case. The greps are run, not recalled: three lookups
+that stopped a harness on a failed run were passed over by reading and listed
+by grep 10.
 
 **Confirming a fix.** Once a harness is read and fixed, it is run against two
 stubs, each a two-line Perl script named by its absolute path: one that prints
@@ -731,7 +750,9 @@ nothing and exits 1, one that prints nothing and exits 0
 (`LTL=<stub> ./tests/validate-<name>.sh`, output captured to a file).
 `process/check-harness-capture.pl` reads the capture: the summary is reached,
 the exit status is non-zero, and every PASS line is a run-free check, with as
-many PASS lines as the summary counts.
+many PASS lines as the summary counts. A guard that a check's run wrote what
+the check reads is shown failing on a stub that exits 0 having printed one
+unrelated line, or on a doctored capture without the line.
 
 ## Invocation coherence: every `ltl` run is shaped to the test that invokes it
 

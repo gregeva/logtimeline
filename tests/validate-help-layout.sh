@@ -59,10 +59,11 @@ fi
 OPT_COL=$(perl -ne   'if (/^\s*my\s+\$help_opt_col\s*=\s*(\d+)\s*;/)   { print $1; exit }' "$LTL")
 DESC_COL=$(perl -ne  'if (/^\s*my\s+\$help_desc_col\s*=\s*(\d+)\s*;/)  { print $1; exit }' "$LTL")
 SHORT_COL=$(perl -ne 'if (/^\s*my\s+\$help_short_col\s*=\s*(\d+)\s*;/) { print $1; exit }' "$LTL")
-if [[ -z "$OPT_COL" || -z "$DESC_COL" || -z "$SHORT_COL" ]]; then
-    echo "ERROR: could not locate \$help_opt_col / \$help_desc_col / \$help_short_col at module scope in ltl"
-    exit 1
-fi
+# A missing constant is counted as one failure once the counters exist, and
+# the scenarios that need the constants are skipped (needs()); the harness
+# goes on to its summary (tests/HARNESS-DESIGN.md Trap 13).
+LAYOUT_OK=1
+[[ -n "$OPT_COL" && -n "$DESC_COL" && -n "$SHORT_COL" ]] || LAYOUT_OK=0
 # 1-indexed columns derived from the print_help layout invariants.
 EXPECTED_DESC_COL=$((DESC_COL + 1))                # description starts here
 EXPECTED_LONG_COL=$((OPT_COL + SHORT_COL + 1))     # long form starts here
@@ -72,7 +73,8 @@ EXPECTED_LONG_COL=$((OPT_COL + SHORT_COL + 1))     # long form starts here
 # meaningfully (at least 60 chars per description line) so wrap-continuation
 # alignment can be exercised.
 HELP_OUT=$(mktemp)
-"$LTL" --terminal-width 120 --help > "$HELP_OUT" 2>"$HELP_OUT.stderr" || true
+HELP_RC=0
+"$LTL" --terminal-width 120 --help > "$HELP_OUT" 2>"$HELP_OUT.stderr" || HELP_RC=$?
 
 # Strip terminal-rendering bytes: ANSI escape sequences and backspace
 # overstrike used for emphasis on terminals without color (see print_help in
@@ -126,6 +128,42 @@ emit_fail() {
     failures+=("$label")
 }
 
+# The two inputs every scenario reads: the layout constants from the source
+# and the --help capture. Each one missing is one failure, counted here; a
+# width or alignment check over an empty capture would hold, so the scenarios
+# that read a missing input are skipped rather than run against nothing.
+if [[ "$LAYOUT_OK" != 1 ]]; then
+    emit_fail \
+        label       "layout constants" \
+        asserts     'print_help() reads its column layout from the module-scope constants $help_opt_col, $help_short_col and $help_desc_col' \
+        produced_by 'the module-scope my-declarations in ltl' \
+        contract    'Issue #261 hoisted these constants to module scope' \
+        detail      "could not locate them in $LTL (opt='$OPT_COL' short='$SHORT_COL' desc='$DESC_COL')"
+fi
+HELP_OK=1
+if [[ "$HELP_RC" -ne 0 || ! -s "$HELP_OUT" ]]; then
+    HELP_OK=0
+    emit_fail \
+        label       "ltl --help capture" \
+        asserts     'ltl --help exits 0 and prints the option table the layout checks read' \
+        produced_by 'print_help() in ltl' \
+        contract    'tests/HARNESS-DESIGN.md Trap 13 - a check made against an empty capture is skipped, its cause counted once' \
+        detail      "exit $HELP_RC, $(wc -c < "$HELP_OUT" | tr -d ' ') bytes"
+fi
+
+# needs SCENARIO layout|help ...: what the scenario reads was obtained;
+# otherwise the scenario is skipped, its cause counted above.
+needs() {
+    local scenario="$1" what; shift
+    for what in "$@"; do
+        if [[ "$what" == layout && "$LAYOUT_OK" != 1 ]] || [[ "$what" == help && "$HELP_OK" != 1 ]]; then
+            echo "[$scenario]"
+            echo "  SKIP  $scenario (no $what to read)"
+            return 1
+        fi
+    done
+}
+
 # Runtime-warning cleanliness for the --help capture (HARNESS-DESIGN.md
 # section Runtime-warning cleanliness, issue #341). Silent when clean.
 if ! assert_no_runtime_warnings "$HELP_OUT.stderr" "ltl --help capture"; then
@@ -142,7 +180,7 @@ scenario_register sanity \
                   short-and-long-form-presence
 scenario_parse_args "$@"
 
-if scenario_wanted sanity; then
+if scenario_wanted sanity && needs sanity layout; then
 # ---------------------------------------------------------------------------
 # Sanity: $desc_col found and looks reasonable
 # ---------------------------------------------------------------------------
@@ -203,8 +241,9 @@ fi
 echo ""
 fi
 
-if scenario_wanted option-row-alignment; then
+if scenario_wanted option-row-alignment && needs option-row-alignment layout help; then
 echo "[option-row alignment]"
+rc=0
 perl -e '
     use strict; use warnings;
     my ($file, $expected_desc_col, $expected_long_col) = @ARGV;
@@ -312,12 +351,21 @@ perl -e '
         }
         exit 3;
     }
+    # "Every row is aligned" holds over no rows: a capture without the option
+    # table, or without a wrapped description, is a failure of its own.
+    exit 4 if $option_rows_checked == 0 || $continuation_rows_checked == 0;
     exit 0;
-' "$STRIPPED" "$EXPECTED_DESC_COL" "$EXPECTED_LONG_COL"
-rc=$?
+' "$STRIPPED" "$EXPECTED_DESC_COL" "$EXPECTED_LONG_COL" || rc=$?
 if [[ $rc -eq 0 ]]; then
     note_pass "every option row description starts at col $EXPECTED_DESC_COL"
     note_pass "every wrapped-description continuation row starts at col $EXPECTED_DESC_COL"
+elif [[ $rc -eq 4 ]]; then
+    emit_fail \
+        label       "option-row alignment (no rows)" \
+        asserts     'The --help capture holds option rows and wrapped-description continuation rows for the alignment checks to read' \
+        produced_by 'print_help() in ltl' \
+        contract    'tests/HARNESS-DESIGN.md Trap 13 - a check over every row holds over none, so finding no row is a failure' \
+        detail      "Perl inspector found no option row or no continuation row (counts printed above)"
 elif [[ $rc -eq 2 ]]; then
     emit_fail \
         label       "option-row alignment" \
@@ -353,8 +401,9 @@ fi
 echo ""
 fi
 
-if scenario_wanted long-form-column-alignment; then
+if scenario_wanted long-form-column-alignment && needs long-form-column-alignment layout help; then
 echo "[long-form column alignment]"
+rc=0
 perl -e '
     use strict; use warnings;
     my ($file, $expected_col) = @ARGV;
@@ -387,11 +436,18 @@ perl -e '
         }
         exit 2;
     }
+    exit 4 if $checked == 0;
     exit 0;
-' "$STRIPPED" "$EXPECTED_LONG_COL"
-rc=$?
+' "$STRIPPED" "$EXPECTED_LONG_COL" || rc=$?
 if [[ $rc -eq 0 ]]; then
     note_pass "every short+long row places its long form at col $EXPECTED_LONG_COL"
+elif [[ $rc -eq 4 ]]; then
+    emit_fail \
+        label       "long-form column alignment (no rows)" \
+        asserts     'The --help capture holds short+long option rows for the long-form column check to read' \
+        produced_by 'print_help() in ltl' \
+        contract    'tests/HARNESS-DESIGN.md Trap 13 - a check over every row holds over none, so finding no row is a failure' \
+        detail      "long-form-column Perl inspector found no short+long row"
 elif [[ $rc -eq 2 ]]; then
     emit_fail \
         label       "long-form column alignment" \
@@ -415,7 +471,7 @@ fi
 echo ""
 fi
 
-if scenario_wanted short-and-long-form-presence; then
+if scenario_wanted short-and-long-form-presence && needs short-and-long-form-presence help; then
 echo "[short+long form presence]"
 assert_pair() {
     local short="$1" long="$2"
