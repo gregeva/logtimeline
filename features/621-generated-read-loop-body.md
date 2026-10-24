@@ -204,6 +204,11 @@ Locked by the architect on 2026-10-13.
   `ltl` call in every harness running both paths (342 call sites moved to a
   shared runner, suite time doubled on every run) and the dedicated harness
   alone.
+  Amended by the architect 2026-10-24, under #747 (D1 of
+  `features/747-harness-checks-on-a-failed-run.md`): `tests/validate-read-path.sh`
+  takes `LTL` like every other harness, so it can be run against a stub, and
+  the second pass leaves it out, since it runs in the first pass and compares
+  both paths itself.
 - **D4** (locked by the architect 2026-10-13, under #721). When the generated
   body cannot be prepared for a file (the program's source cannot be read, a
   marker does not match the code under it, or the generated text does not
