@@ -33,8 +33,9 @@ selection defects), drop 8 (D3: the failed-run checker,
 `tests/validate-harness-failed-run.sh`), the completion gate (§ Completion
 gate), the PR (#755), the merge and the close-out are done. The next step is
 § Stage 2: the observations, planned 2026-10-24 at the architect's request and
-started on the architect's word: it reopens #747 and runs one drop and a gate,
-as its Delivery says. The scratchpad worktree
+started on the architect's word: it reopens #747 and runs eight drops and a
+gate, as its Delivery says (D5: every harness read again against a run that
+prints something unrelated). The scratchpad worktree
 and stubs do not survive the session: a new session makes them again as
 § Drop 2 describes (stubs: `failing` prints nothing and exits 1, `silent`
 prints nothing and exits 0, each a two-line Perl script).
@@ -249,6 +250,17 @@ decided by reading it.
   running a scenario other than the last alone, on the committed harness and
   the fixed one, with a failure (a stub run). Done in one commit of its own
   before drop 5 (§ D4: the selection defects).
+- **D5** (the architect, 2026-10-24, after the close-out). Stage 2 (§ Stage
+  2: the observations) also takes, across every harness, the condition two of
+  its observations point at: a run of `ltl` that exits 0 having printed one
+  line unrelated to what it was asked for. Every harness is read again for a
+  check that holds on such a run, and the failed-run checker runs each
+  harness against that stub (the **noise stub**) as it does against the
+  failing and silent ones. A check that reads a capture holds only on
+  evidence that the run wrote the section, table, row or file it reads:
+  exit 0 and a non-empty capture are not that evidence. Chosen over keeping
+  stage 2 to the recorded observations and filing the condition as an issue
+  of its own.
 
 ## Constraints
 
@@ -1072,8 +1084,11 @@ Asked by the architect on 2026-10-24, after the close-out: "fix the issues
 under this issue", planned here as a next stage because the context window is
 cleared first. Its scope is § Observations as it stands, the selection
 defects there being fixed already under D4, and the dead source read of
-§ What is in place (`validate-explain.sh` reading `"$LTL/../ltl"`). It
-starts on the architect's word.
+§ What is in place (`validate-explain.sh` reading `"$LTL/../ltl"`). By D5
+(the architect's choice once the plan was shown) it also reads every harness
+again for the condition two of those observations point at: a run that exits
+0 having printed one line unrelated to what it was asked for. It starts on
+the architect's word.
 
 ### Scope
 
@@ -1086,31 +1101,66 @@ starts on the architect's word.
 | S5 | Captures left behind | heatmap-palette `run_section` (`mktemp`, never removed); histogram-bin-counters `run_section` (removed per scenario, not on an interrupted run) | captures under the harness's own `TMP_DIR`, removed by its `EXIT` trap (Trap 9, Trap 10) | the files under `$TMPDIR` before and after a run: none added |
 | S6 | A source read that never resolves | explain's pager default read from `"$LTL/../ltl"` (a file followed by `/..`), so its fallback, the checkout's `ltl`, is always read; `strip_ansi`'s presence read from the checkout's `ltl` | both read `"$LTL"`, as 621 D3 has every source check do; they then fail under a stub like any source check, and lose their run-free marks | the checker's explain scenario passes with 59 marked passes on each stub, not 61; the real `ltl` keeps 728 |
 | S7 | Absences that hold when the section they read is missing | filter-summary (one notice absence), format-detection (six), duration-display (the no-duration latency absence) | `assert_absent` fails on a notices file holding `MISSING-SECTION`, the form drop 6 gave udm-specs; duration-display's absence carries its anchor in the same check | a copy of `ltl` that is the real tool with its notices section removed from standard output: the committed harnesses pass the seven, the fixed ones fail them; for duration-display, one whose no-duration render lacks the two tables |
+| S8 | Every check that holds on a run that exits 0 having printed something other than what it reads (D5) | all 52 harnesses that run `ltl`, read again whole in stage 1's drop groups | the check needs the section, table, row or file it reads, present, before it is made; a capture helper records a run that printed none of what was asked as failed, as `no-section` does in format-detection | each harness against the noise stub: the base commit's passes are listed per harness in drop S2-1, the fixed harness passes only checks marked run-free |
 
 ### Delivery
 
-One drop, then the completion gate, as drops 2 to 8 ran:
+Eight drops, then the completion gate, as stage 1 ran. A drop is the reading,
+the fixes, each shown failing before it is trusted, the runs, the record, a
+commit and a push on the branch, and a comment pointing here.
 
-1. #747 reopened (`gh issue reopen 747`), `./process/issue-status.sh set 747
-   "in progress"`, and a comment pointing here.
-2. Branch `747-stage-2-observations` off `release/0.20.0`, synced;
-   `$version_number` stamped `0.20.0-747`; the `747-before` benchmark
+1. **Start.** #747 reopened (`gh issue reopen 747`), `./process/issue-status.sh
+   set 747 "in progress"`, a comment pointing here. Branch
+   `747-stage-2-observations` off `release/0.20.0`, synced; `$version_number`
+   stamped `0.20.0-747`; the `747-before` benchmark
    (`single-day-access-log-standard`) on the base commit from the main
    checkout, the diff touching harnesses (`docs/process/workflow.md` § 3).
-3. The drop: S1 to S7, each shown failing as the Proof column says before it
-   is trusted. Each changed harness is then run on the real `ltl` with every
-   scenario named, and its passed count is unchanged. Each also passes its
-   scenario of `tests/validate-harness-failed-run.sh`. The same runs are made
-   once from a scratchpad worktree with the `logs` symlink. The result goes
-   into a § Stage 2 drop table and § Per-harness record, then the drop is
-   committed and pushed, and a comment points here.
-4. The gate (`docs/process/workflow.md` § 3) runs as at stage 1:
-   `$version_number` restored, the `after` benchmark, then the full suite.
-   The suite runs csv-output and statistics first under `CI=1`, then the
-   rest, the checker last. Then `./tests/cleanup-test-artifacts.sh`. After
-   the gate: the PR into `release/0.20.0`, the merge, and the close-out (#747
+2. **Drop S2-1, the method and the recorded observations.** The noise stub is
+   a two-line Perl script, `print "an unrelated line\n";`, exiting 0. Every
+   harness that runs `ltl` is run against it on the base commit, every
+   scenario named. That run is the candidate list, as drop 1's baseline was.
+   Its passed count and whether its summary was reached go into a new
+   noise-stub column of § Per-harness record. `tests/HARNESS-DESIGN.md`
+   § Reading a harness for a run that did not happen gains the third
+   question: had the run exited 0 having printed one line unrelated to what
+   it was asked for, would the check pass? Shapes 2, 3 and 4 then ask for the
+   section or row the check reads, not a non-empty capture. S1 to S7 are
+   fixed.
+3. **Drops S2-2 to S2-7, the noise reading.** Each takes the harnesses of
+   stage 1's drop of the same number (§ Delivery plan): S2-2 drop 2's
+   seventeen, S2-3 drop 3's eleven, S2-4 drop 4's eight, S2-5 drop 5's six,
+   S2-6 drop 6's four, S2-7 drop 7's six. Each harness is read whole for the
+   third question, with the review-gate greps of shapes 2, 3, 4 and 14 as
+   its candidate list beside the noise-stub baseline. Each case is fixed to
+   the section or row it reads.
+   - **Proof:** each fix is shown on the noise stub, the committed harness
+     beside the fixed one.
+   - **Runs:** each changed harness runs on the real `ltl` and against the
+     failing, silent and noise stubs, every scenario named. Its passed count
+     on the real `ltl` is unchanged.
+   - **Checker:** it passes its scenario of
+     `tests/validate-harness-failed-run.sh`.
+   - **Worktree:** the same runs once from a scratchpad worktree with the
+     `logs` symlink.
+4. **Drop S2-8, the checker.** `tests/validate-harness-failed-run.sh` runs
+   each harness against the noise stub as it does the other two, with the
+   same four conditions: fifteen checks per harness. § The failed-run
+   checker of `tests/HARNESS-DESIGN.md`, `.claude/rules/harnesses.md` and the
+   CLAUDE.md checkpoint name the third stub. The checker's whole run passes
+   from the worktree.
+5. **The gate** (`docs/process/workflow.md` § 3), as at stage 1:
+   - `$version_number` restored, then the `after` benchmark;
+   - the full suite: csv-output and statistics first under `CI=1`, then the
+     rest, the checker last;
+   - `./tests/cleanup-test-artifacts.sh`.
+
+   Then the PR into `release/0.20.0`, the merge, and the close-out: #747
    closed again with its completion comment; the branch, the TSVs and the
-   worktree deleted).
+   worktree deleted.
+
+Size: the 52 harnesses read again, about 39.6k lines, stage 1's drops 2 to 7.
+Each is read for one question rather than fifteen shapes, each having been
+read once already.
 
 Scenario names for a run are the one-word lines after `Scenarios:` in a
 harness's `--list` (§ Drop 8); the checker makes its own stubs.
@@ -1135,5 +1185,12 @@ harness's `--list` (§ Drop 8); the checker makes its own stubs.
 - [ ] **S2-AC7.** The seven notice absences and duration-display's latency
       absence fail on a run that lacks what they read. *Assertable*: S7's
       proof.
-- [ ] **S2-AC8.** The gate: every harness exits 0 at its passed count, and
+- [ ] **S2-AC8.** Against the noise stub every harness that runs `ltl`
+      reaches its summary, exits non-zero, prints as many PASS lines as it
+      counts, and passes only checks marked run-free (D5). *Assertable*: the
+      checker's run, its noise-stub checks.
+- [ ] **S2-AC9.** The method asks the third question, and the checker runs
+      the noise stub on every harness. *Assertable*: `tests/HARNESS-DESIGN.md`
+      read, and the checker's fifteen checks per harness.
+- [ ] **S2-AC10.** The gate: every harness exits 0 at its passed count, and
       the checker passes every scenario. *Assertable*: the gate's run.
