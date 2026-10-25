@@ -177,10 +177,15 @@ assert_absent() {
 # lost (HARNESS-DESIGN.md Trap 12), so each records its run's outcome beside
 # the capture as <capture>.rc: the exit code, "empty" when it exited 0 having
 # printed nothing, or "no-section" when the section its checks read is
-# missing. record_run CAPTURE RC writes it.
+# missing. record_run CAPTURE RC [ANCHOR] writes it; ANCHOR is a pattern for
+# a line its checks read, missing from a capture that printed something else.
 record_run() {
-    local capture="$1" rc="$2"
-    if [[ "$rc" == 0 && ! -s "$capture" ]]; then rc=empty; fi
+    local capture="$1" rc="$2" anchor="${3:-}"
+    if [[ "$rc" == 0 && ! -s "$capture" ]]; then
+        rc=empty
+    elif [[ "$rc" == 0 && -n "$anchor" ]] && ! grep -qE -- "$anchor" "$capture"; then
+        rc=no-section
+    fi
     echo "$rc" > "$capture.rc"
 }
 
@@ -1062,11 +1067,12 @@ run_gc_csv() {
 }
 
 # The one CSV product of a kind (STATS, MESSAGES) in a run directory; fails
-# when there is none, more than one, or it is empty.
+# when there is none, more than one, or it holds no row beneath its header,
+# since two header-only CSVs compare identical.
 gc_csv_product() {
     local dir="$1" kind="$2"
     local found=( "$dir"/*-LTL-"$kind"-*.csv )
-    if [[ "${#found[@]}" -ne 1 || ! -s "${found[0]}" ]]; then
+    if [[ "${#found[@]}" -ne 1 || ! -s "${found[0]}" || "$(wc -l < "${found[0]}")" -lt 2 ]]; then
         return 1
     fi
     echo "${found[0]}"
@@ -1095,7 +1101,7 @@ assert_gc_parity() {
     local kind pa pb
     for kind in STATS MESSAGES; do
         if ! pa=$(gc_csv_product "$a" "$kind") || ! pb=$(gc_csv_product "$b" "$kind"); then
-            echo "  FAIL  $current_scenario :: exactly one non-empty $kind CSV expected in $a and in $b"
+            echo "  FAIL  $current_scenario :: exactly one $kind CSV with a row beneath its header expected in $a and in $b"
             fail=$((fail + 1)); failures+=("$current_scenario :: $kind CSV missing for $fixture"); continue
         fi
         assert_command label "$kind CSV of $fixture identical to its tagged twin" \
@@ -2053,11 +2059,11 @@ scenario_classification_summary_rows() {
     local r_access="$dir/access.txt" r_diag="$dir/diag.txt" r_gc="$dir/gc.txt"
     local rc
     rc=0; "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$access" 2> "$r_access.stderr" > "$r_access" || rc=$?
-    record_run "$r_access" "$rc"; check_run "$r_access"
+    record_run "$r_access" "$rc" 'LINES READ'; check_run "$r_access"
     rc=0; "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$diag" 2> "$r_diag.stderr" > "$r_diag" || rc=$?
-    record_run "$r_diag" "$rc"; check_run "$r_diag"
+    record_run "$r_diag" "$rc" 'LINES READ'; check_run "$r_diag"
     rc=0; "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$gc" 2> "$r_gc.stderr" > "$r_gc" || rc=$?
-    record_run "$r_gc" "$rc"; check_run "$r_gc"
+    record_run "$r_gc" "$rc" 'LINES READ'; check_run "$r_gc"
 
     # The classified rows carry their outcome's colour. This scenario asserts
     # the rows' text and shape — the count, the share, the funnel order — so

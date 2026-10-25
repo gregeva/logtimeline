@@ -56,6 +56,12 @@ fail=0
 failures=()
 current_scenario=""
 
+# The title banner every rendered --help and --explain page opens with
+# (print_title()). A capture holding it holds a page; exit 0 and a non-empty
+# capture are not that evidence, since a run that printed one unrelated line
+# has both (HARNESS-DESIGN.md Trap 13).
+RENDERED_ANCHOR=',:: ltl ::'
+
 # Strip ANSI escape sequences and backspace-overstrike pairs from a file
 # so the assertions can match plain rendered text.
 strip_decoration() {
@@ -97,8 +103,9 @@ check_capture_warnings() {
 }
 
 # A capture that a comparison or an absence check reads must be a rendered
-# topic: ltl exited 0 and printed it. Without this, two runs that failed the
-# same way compare identical, and an error message carries no internals.
+# topic: ltl exited 0 and printed a page, its title banner present. Without
+# this, two runs that failed the same way compare identical, and an error
+# message carries no internals.
 # Takes one or more "<exit>:<path>" captures run_ltl echoes. Silent when
 # every topic rendered; otherwise counts a failure for each one that did not
 # and returns 1, so the caller skips the checks that would read it and the
@@ -107,12 +114,12 @@ check_capture_rendered() {
     local capture ec out rendered=0
     for capture in "$@"; do
         ec="${capture%%:*}" out="${capture#*:}"
-        if [[ "$ec" -ne 0 || ! -s "$out" ]]; then
+        if [[ "$ec" -ne 0 ]] || ! grep -qF -- "$RENDERED_ANCHOR" "$out"; then
             echo "  FAIL  $current_scenario"
-            echo "        asserts:     the run renders the topic the assertions read: ltl exits 0 and prints it"
+            echo "        asserts:     the run renders the topic the assertions read: ltl exits 0 and prints it, its title banner ($RENDERED_ANCHOR) present"
             echo "        produced_by: print_explain_topic() in ltl"
             echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors (a comparison or an absence check reads a rendered topic)"
-            echo "        exit: $ec; stdout lines: $(wc -l < "$out" | tr -d ' '); stderr: $(head -2 "${out%.txt}.stderr" | tr '\n' '|')"
+            echo "        exit: $ec; stdout lines: $(wc -l < "$out" | tr -d ' '); title banner: $(grep -qF -- "$RENDERED_ANCHOR" "$out" && echo present || echo absent); stderr: $(head -2 "${out%.txt}.stderr" | tr '\n' '|')"
             fail=$((fail + 1))
             failures+=("$current_scenario :: topic not rendered (exit $ec)")
             rendered=1
@@ -181,15 +188,16 @@ assert_no_line() {
     : "${produced_by:?assert_no_line requires produced_by}"
     : "${contract:?assert_no_line requires contract}"
 
-    # An empty capture holds no forbidden line because nothing was rendered.
-    if [[ ! -s "$outfile" ]]; then
+    # A capture that holds no rendered page holds no forbidden line because
+    # nothing was rendered; a run-free file is read once it is not empty.
+    if [[ ! -s "$outfile" ]] || { [[ -z "$run_free" ]] && ! grep -qF -- "$RENDERED_ANCHOR" "$outfile"; }; then
         echo "  FAIL  $current_scenario"
-        echo "        pattern:     !$pattern (capture is empty: nothing to check)"
+        echo "        pattern:     !$pattern (nothing to check: the capture is empty or holds no rendered page, no title banner)"
         echo "        asserts:     $asserts"
         echo "        produced_by: $produced_by"
         echo "        contract:    $contract"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: !$pattern (capture is empty)")
+        failures+=("$current_scenario :: !$pattern (no rendered page)")
     elif grep -qE "$pattern" "$outfile"; then
         echo "  FAIL  $current_scenario"
         echo "        pattern:     !$pattern (unexpectedly present)"
@@ -335,15 +343,16 @@ assert_max_line_width() {
     : "${produced_by:?assert_max_line_width requires produced_by}"
     : "${contract:?assert_max_line_width requires contract}"
 
-    # An empty capture has no overlong line because nothing was rendered.
-    if [[ ! -s "$outfile" ]]; then
+    # A capture that holds no rendered page has no overlong line because
+    # nothing was rendered.
+    if ! grep -qF -- "$RENDERED_ANCHOR" "$outfile"; then
         echo "  FAIL  $current_scenario"
-        echo "        width:       <= $max (capture is empty: nothing to check)"
+        echo "        width:       <= $max (nothing to check: the capture holds no rendered page, no title banner)"
         echo "        asserts:     $asserts"
         echo "        produced_by: $produced_by"
         echo "        contract:    $contract"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: max width $max (capture is empty)")
+        failures+=("$current_scenario :: max width $max (no rendered page)")
         return 0
     fi
 

@@ -170,6 +170,10 @@ fail=0
 failures=()
 current_scenario=""
 
+# Every capture and scenario directory lives under the harness's own temp
+# directory, removed on any exit (tests/HARNESS-DESIGN.md Traps 9 and 10).
+TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
+
 # ---------------------------------------------------------------------------
 # Orchestration helpers (6a)
 # ---------------------------------------------------------------------------
@@ -178,17 +182,21 @@ current_scenario=""
 # as <capture>.stderr), echo path. run_ltl runs inside $( ), where a failure
 # it counted would be lost (HARNESS-DESIGN.md Trap 12), so it records the
 # run's outcome beside the capture as <capture>.rc: the exit code, "empty"
-# when it exited 0 having printed nothing, or "no-section" when a run asked
-# for -V index-read-back printed no such section.
+# when it exited 0 having printed nothing, "no-section" when a run asked
+# for -V index-read-back printed no such section, or "no-index" when a run
+# given -idx left no ltl-index.csv in the cwd, so the steps that edit or read
+# the index it should have written are skipped rather than run on nothing.
 # Usage: out=$(run_ltl <ltl args...>)
 run_ltl() {
     local outfile rc=0
-    outfile=$(mktemp)
+    outfile=$(mktemp "$TMP_DIR/capture.XXXXXX")
     "$LTL" "$@" > "$outfile" 2>"$outfile.stderr" || rc=$?
     if [[ "$rc" == 0 && ! -s "$outfile" ]]; then
         rc=empty
     elif [[ "$rc" == 0 && " $* " == *" -V index-read-back "* ]] && ! grep -q '^=== index-read-back ===$' "$outfile"; then
         rc=no-section
+    elif [[ "$rc" == 0 && " $* " == *" -idx "* && ! -f ltl-index.csv ]]; then
+        rc=no-index
     fi
     echo "$rc" > "$outfile.rc"
     echo "$outfile"
@@ -536,7 +544,7 @@ in_scenario_dir() {
     local prev_dir
     prev_dir="$PWD"
     local dir
-    dir=$(mktemp -d)
+    dir=$(mktemp -d "$TMP_DIR/scenario.XXXXXX")
     cd "$dir"
     "$fn"
     cd "$prev_dir"
@@ -1299,13 +1307,14 @@ scenario_index_means_fixed_precision() {
             asserts     'The index writes its means at two decimals whatever -cp the run was given: the index is a durable file compared across runs, so a per-run precision must not change what it holds for the same file' \
             produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
     done
+    local present
     for row in file selection; do
-        v=$(read_index_column entry_type "entry_type=$row") || v=""
-        assert_command reads "$out" command "[ \"$v\" = $row ]" label "the index holds a $row row" \
+        present=$(read_index_column entry_type "entry_type=$row") || present=""
+        assert_command reads "$out" command "[ \"$present\" = $row ]" label "the index holds a $row row" \
             asserts 'The rows the cell reads below address exist, so an empty read is the cell and not a missing row' \
             produced_by 'write_index_file() in ltl' contract "$IDX616_CONTRACT"
         v=$(read_index_column count_mean "entry_type=$row") || v=""
-        assert_command reads "$out" command "[ -z \"$v\" ]" label "$row row: count_mean is empty for a file with no count lines ('$v')" \
+        assert_command reads "$out" command "[ \"$present\" = $row ] && [ -z \"$v\" ]" label "$row row: count_mean is empty for a file with no count lines ('$v')" \
             asserts 'A mean with no observation writes the empty cell every CSV surface writes for no data, not a placeholder' \
             produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
         v=$(read_index_column count_min "entry_type=$row") || v=""
@@ -1461,7 +1470,7 @@ scenario_no_index_is_noop() {
         contract    "$IDX708_CONTRACT"
     assert_command \
         reads       "$out_default $out_ni" \
-        command     "[[ \"\$(shasum ltl-index.csv | cut -d' ' -f1)\" == '$sum_before' && \"\$(index_mtime)\" == '$mtime_before' ]]" \
+        command     "grep -q 'command-line options:' '$out_default' && grep -q 'command-line options:' '$out_ni' && [[ \"\$(shasum ltl-index.csv | cut -d' ' -f1)\" == '$sum_before' && \"\$(index_mtime)\" == '$mtime_before' ]]" \
         label       'neither the default nor the -ni run touched the existing index' \
         asserts     'A run with -ni, like a default run, leaves an existing index byte-identical with its modification time unchanged' \
         produced_by 'the write_index_file() call in the MAIN section of ltl, gated on $index_enabled' \

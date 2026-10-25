@@ -66,6 +66,10 @@ fi
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 cd "$WORKDIR"
+# Every capture lives under the scratch workdir, removed with it on any exit
+# (tests/HARNESS-DESIGN.md Traps 9 and 10), apart from the CSVs -o writes.
+CAPTURE_DIR="$WORKDIR/captures"
+mkdir -p "$CAPTURE_DIR"
 
 CONTRACT='features/duration-statistics.md § -V statistics-demand section contract — stability-contracted; renames are breaking'
 
@@ -80,7 +84,7 @@ current_scenario=""
 run_section() {
     local sections="$1"; shift
     local outfile
-    outfile=$(mktemp)
+    outfile=$(mktemp "$CAPTURE_DIR/capture.XXXXXX")
     local rc=0
     "$LTL" --disable-progress -ni --terminal-width 200 -V "$sections" -V notices "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || rc=$?
     echo "$rc" > "$outfile.rc"
@@ -94,7 +98,7 @@ run_section() {
 run_section_on() {
     local sections="$1" input="$2"; shift 2
     local outfile
-    outfile=$(mktemp)
+    outfile=$(mktemp "$CAPTURE_DIR/capture.XXXXXX")
     local rc=0
     "$LTL" --disable-progress -ni --terminal-width 200 -bs 1440 -oe -V "$sections" -V notices "$@" "$input" > "$outfile" 2>"$outfile.stderr" || rc=$?
     echo "$rc" > "$outfile.rc"
@@ -338,7 +342,7 @@ if extract_section "$out"; then
         produced_by 'calculate_statistics() in ltl (group_calc counters in %stats_demand_telemetry)' \
         contract    "$CONTRACT"
     assert_command \
-        command     "! grep -qE '^  sort_(selection|calc):' '$sm'" \
+        command     "grep -qx 'store: message' '$sm' && ! grep -qE '^  sort_(selection|calc):' '$sm'" \
         label       'no sort_selection/sort_calc lines under the default occurrences sort' \
         asserts     'The #303 sort-path lines appear only when a calculated-statistic sort ran; an available-value sort (default occurrences) emits neither' \
         produced_by 'emit_statistics_demand_verbose() in ltl (sort_selection telemetry populated only on the two-pass sort path)' \
@@ -464,7 +468,7 @@ if extract_section "$out"; then
         produced_by 'sort_fallback_to_occurrences() in ltl (reached only from a detection point that fired)' \
         contract    "features/303-calculated-statistic-sort-path.md § sort contract point 4, as amended by features/418-unsatisfiable-sort-selection-cost.md § D6"
     assert_command \
-        command     "! grep -qE '^  sort_(selection|calc):' '$sb'" \
+        command     "grep -qx 'store: bucket' '$sb' && ! grep -qE '^  sort_(selection|calc):' '$sb'" \
         label       'no sort_selection/sort_calc lines on the bucket store' \
         asserts     'The sort-path lines are emitted only for the store where the two-pass selection ran (the message store); their absence elsewhere is contractual' \
         produced_by 'emit_statistics_demand_verbose() in ltl (sort_selection telemetry is message-store only)' \
@@ -898,7 +902,7 @@ if [[ ! -f "$DURATION_SPREAD_FIXTURE" ]]; then
     exit 1
 fi
 
-rep_out=$(mktemp)
+rep_out=$(mktemp "$CAPTURE_DIR/rep_out.XXXXXX")
 rc=0
 "$LTL" --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1 \
     "$DURATION_SPREAD_FIXTURE" > "$rep_out" 2>"$rep_out.stderr" || rc=$?
@@ -977,7 +981,7 @@ NUMERIC_RETENTION_ASSERTS='Every duration the raw statistics model retains is no
 NUMERIC_RETENTION_PRODUCED_BY='named_structure_sizes() in ltl, reached through measure_memory_structures(); the retained values come from the per-bucket durations push in read_and_process_logs()'
 NUMERIC_RETENTION_CONTRACT='features/561-retained-durations-as-numbers.md section The decisions carried over from the prototype section measured result, D1: the numeric normalisation happens at the copy, at each of the five retention sites'
 
-num_out=$(mktemp)
+num_out=$(mktemp "$CAPTURE_DIR/num_out.XXXXXX")
 rc=0
 "$LTL" --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1 \
     "$DURATION_SPREAD_FIXTURE" > "$num_out" 2>"$num_out.stderr" || rc=$?
@@ -1052,7 +1056,7 @@ if [[ -n "$stranger" ]]; then
     exit 1
 fi
 
-spell_out=$(mktemp)
+spell_out=$(mktemp "$CAPTURE_DIR/spell_out.XXXXXX")
 rc=0
 ( cd "$SPELLING_DIR" && "$LTL" --disable-progress -bs 1440 -oe -n 1 -o -cp full \
     "$FRACTIONAL_FIXTURE" > "$spell_out" 2>"$spell_out.stderr" ) || rc=$?
@@ -1249,7 +1253,7 @@ for pair in total:occurrences count_total:count_occurrences std_dev:stddev durat
     one=$(ranked "$old"); two=$(ranked "$new")
     check_capture "$one"; check_capture "$two"
     assert_command \
-        command     "diff <(after_demand '$one') <(after_demand '$two') >/dev/null && [ \"\$(notice_kind_count '$one' deprecated-spelling)|\$(notice_field '$one' deprecated-spelling focus)|\$(notice_field '$one' deprecated-spelling remedy)|\$(notice_kind_count '$two' deprecated-spelling)\" = \"1|$old|use $new|0\" ] && notice_field '$one' deprecated-spelling statement | grep -q '(given to -so/--sort-on)\$'" \
+        command     "diff <(after_demand '$one') <(after_demand '$two') >/dev/null && [ -n \"\$(after_demand '$one')\" ] && [ \"\$(notice_kind_count '$one' deprecated-spelling)|\$(notice_field '$one' deprecated-spelling focus)|\$(notice_field '$one' deprecated-spelling remedy)|\$(notice_kind_count '$two' deprecated-spelling)\" = \"1|$old|use $new|0\" ] && notice_field '$one' deprecated-spelling statement | grep -q '(given to -so/--sort-on)\$'" \
         label       "-so $old ranks as -so $new and prints one deprecation notice naming $new" \
         asserts     "A deprecated spelling keeps working for the release: the same message table as -so $new, and one stderr line naming -so/--sort-on and the replacement" \
         produced_by "$VOCAB_PRODUCED_BY; record_deprecation() and print_deprecation_notices() in ltl" \

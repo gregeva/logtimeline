@@ -27,7 +27,9 @@ S2-3 done 2026-10-25 (c2481bd3): drop 3's eleven read, three fixed, and D6's two
 that group (§ Drop S2-3). Drop S2-4 done 2026-10-25 (d22f7cf7): drop 4's eight read,
 three fixed (§ Drop S2-4). Drop S2-5 done 2026-10-25 (89ac5a19): drop 5's six read, two
 fixed (§ Drop S2-5). Drop S2-6 done 2026-10-25 (3e2f7221): drop 6's four read, two
-fixed, and D6's one in that group (§ Drop S2-6). Next: § Resuming stage 2.
+fixed, and D6's one in that group (§ Drop S2-6). Drop S2-7 done
+2026-10-25: drop 7's six read, four fixed, and D6's two in that group
+(§ Drop S2-7). Next: § Resuming stage 2.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -1288,7 +1290,8 @@ harness's `--list` (§ Drop 8); the checker makes its own stubs.
 - [ ] **S2-AC5.** No harness run leaves a file outside its own directory
       (D6 widened it from heatmap-palette and histogram-bin-counters).
       *Assertable*: S5's proof; for the seven harnesses of D6, the entries a
-      real run adds to `$TMPDIR`, counted in each one's drop: none; for the
+      real run adds to `$TMPDIR`, counted in each one's drop: none (the
+      last two in drop S2-7); for the
       rest, `$TMPDIR` listed before and after the gate's full suite: no entry
       added by a harness.
 - [x] **S2-AC6.** explain reads `ltl`'s source through `$LTL` only.
@@ -1510,44 +1513,131 @@ add nothing to `$TMPDIR`. The checker passes their scenarios, 22 checks.
 The same 8 runs from the scratchpad worktree at 3e2f7221 report the same
 summary, exit status, passed and failed counts as the main checkout.
 
+### Drop S2-7
+
+Stage 1's drop 7 harnesses, six, read whole for the third question with the
+review-gate greps of shapes 2, 3, 4 and 14 beside the noise-stub baseline,
+and for D6. Four have checks that hold on a run that printed something other
+than what they read, one of them also a stop; two have none:
+duration-display (every render check goes to a checker that fails when it
+extracts no duration cell, and the run before it needs the
+`duration_unit_resolved` row; drop S2-1 fixed its one absence) and
+filter-summary (every absence follows the refusal message, the run summary
+or the notices section it is read in). The proofs run the committed harness
+from the scratchpad worktree at 5e6c1f10, the fixed one from the main
+checkout.
+
+| Harness | Case | Change | Proof (as AC6) |
+|---|---|---|---|
+| explain | 200 checks: the comparisons of two topics and the NO_COLOR escape check sit behind `check_capture_rendered`, which took exit 0 and a non-empty capture as a rendered topic (shapes 2, 3); the absences of `assert_no_line` and the reflow widths of `assert_max_line_width` needed a non-empty capture only (shapes 3, 4) | the three need the title banner every rendered `--help` and `--explain` page opens with (`,:: ltl ::`, printed by `print_title()`); `assert_no_line` asks it of every capture not marked run-free, a run-free file needing only to be non-empty | noise stub: committed 200 unmarked passes, fixed 0; the 59 run-free stay |
+| format-detection | classification-summary-rows records its three runs on their exit and an empty capture only, so its two absences (no SUCCESS CLASSIFIED row, no CLASSIFIED row) held on a capture without a run summary (shape 3); the GC parity comparison of a tag-less fixture's CSV with its tagged twin's needed each CSV non-empty only, so two CSVs holding just their header compared identical (shape 2) | `record_run` takes an optional anchor and records `no-section` on a capture without it, the three runs passing `LINES READ`; `gc_csv_product` needs a row beneath the header | noise stub: committed 2 passed, fixed 0; a copy of the real tool that cuts its STATS and MESSAGES CSVs to their header rows: committed passes the 20 comparisons, fixed none, each kind failing "exactly one CSV with a row beneath its header" |
+| index-read-back | a run given `-idx` that wrote no index counted as a success, so the steps after it read and edited an index that did not exist: "count_mean is empty" held on a missing row, its row check being a separate check (shape 3), and `edit_index_row`, called bare, ended the harness at index-heatmap-bytes-preseed (shape 11), as it would in drift-runtime-precision; past that stop, "neither run touched the existing index" held on two runs that did nothing, reading only their exit codes (shape 2) | `run_ltl` records `no-index` for a run given `-idx` that leaves no `ltl-index.csv` in its directory, so what reads or edits that index is skipped; the empty-cell check needs its row in the same command; the untouched-index check needs both runs' options row | noise stub, every scenario: committed 2 unmarked passes and no summary, fixed none and the summary reached; drift-runtime-precision alone: committed stops, fixed reaches its summary; no-index-is-noop alone: committed passes the untouched-index check, fixed fails it |
+| statistics-demand | the two sort-path absences read a store sub-block that `extract_store` leaves empty when the store is missing (shape 3); one of the three comparisons of two spellings' rendered messages, the deprecated spellings', did not need them non-empty (shape 2). The noise stub reaches neither: its section is missing | the absences need their `store:` line; the comparison needs the rendered messages | a copy of the real tool whose statistics-demand section has no store blocks and whose output after it is the notices section alone: committed 8 passed, fixed 0; the seven both pass read standard error and the notices, which the copy leaves as they are |
+| index-read-back (D6) | `run_ltl` writes each capture by a bare `mktemp` and never removes it; the scenario directories, by a bare `mktemp -d`, are removed after each scenario but not on an interrupted run | both under a harness `TMP_DIR` its `EXIT` trap removes | a real run, every scenario named, from the worktree: committed adds 204 entries to `$TMPDIR` (68 captures with their `.rc` and `.stderr`), fixed none |
+| statistics-demand (D6) | `run_section`, `run_section_on`, `rep_out`, `num_out` and `spell_out` write by a bare `mktemp`, never removed | under the scratch workdir, whose `EXIT` trap removes it | a real run, every scenario named, from the worktree: committed adds 352 entries to `$TMPDIR`, fixed none |
+
+Read and left: format-detection's classification-consolidation-reconciles
+ends the harness (`exit 1`) when a run that printed its section wrote no
+MESSAGES CSV to sum; none of the three questions reaches it, the run being
+skipped when it printed no section.
+
+A finding of the drop: index-read-back regenerates its sample logs in the
+corpus, which a scratchpad worktree shares through its `logs` symlink, and
+its fixture in the checkout it runs from. Run from the worktree and the main
+checkout at once, one regeneration rewrote the sample logs while the other
+built its fixture from them: the worktree's fixture then held a row cut
+short (last timestamp 09:50:19 and a maximum of 1002 ms, where the slice
+runs to 09:51:56 and 1297 ms), and the committed harness failed four drift
+and pre-seed checks there (103 passed). Its generated fixture removed and
+the harness run alone, it passed all 107. The harness's runs are made one at
+a time.
+
+Runs, every scenario named, from the main checkout: the four changed
+harnesses keep their passed counts on the real `ltl` (explain 728,
+format-detection 472, index-read-back 107, statistics-demand 167), and
+every run against the failing, silent and noise stubs reaches its summary
+and exits 1, passing only its run-free checks (explain 59, format-detection
+3, index-read-back 6, statistics-demand 1). The sixteen runs add nothing to
+`$TMPDIR`, which closes S2-AC5's part for D6's seven harnesses. The checker
+passes their scenarios, 60 checks: fifteen a harness, the checker in the
+working tree already running the noise stub of drop S2-8.
+
 ### Resuming stage 2
 
-Where the work stands, 2026-10-25, after drop S2-6's worktree
-confirmation:
+Where the work stands, 2026-10-25, stopped by the architect during drop
+S2-7's runs:
 
-- **Done**: drops S2-1 to S2-6, each with its record above; S2-2 to S2-6
-  confirmed from a worktree.
+- **Done**: drops S2-1 to S2-6, each with its record above, each confirmed
+  from a worktree, each told on #747.
+- **In the working tree, not committed**: drop S2-7's changes to
+  `tests/validate-explain.sh`, `tests/validate-format-detection.sh`,
+  `tests/validate-index-read-back.sh` and
+  `tests/validate-statistics-demand.sh`, and its record, § Drop S2-7, whose
+  reading, fixes and proofs are done. duration-display and filter-summary
+  have no case and are unchanged.
 - **Next, in order**:
-  1. Drop S2-7, stage 1's drop 7 harnesses (statistics-demand,
-     duration-display, filter-summary, format-detection, explain,
-     index-read-back). Noise baseline: explain 200 unmarked passes,
-     format-detection 2, index-read-back 2 and a stop before its summary at
-     `index-heatmap-bytes-preseed`. D6: index-read-back's `run_ltl` and
-     statistics-demand's two capture helpers and its `rep_out`, `num_out` and
-     `spell_out`, all by a bare `mktemp`.
-  2. Drop S2-8 and the gate, as § Stage 2 Delivery says.
+  1. Drop S2-7's runs, from the main checkout, one after another: the four
+     changed harnesses on the real `ltl` and the failing, silent and noise
+     stubs, every scenario named, `$TMPDIR` listed before and after; then
+     their checker scenarios. The passed counts on the real `ltl` to keep:
+     explain 728, format-detection 472, index-read-back 107,
+     statistics-demand 167. Each stub run reaches its summary, exits 1 and
+     passes only run-free checks (explain 59, format-detection 3,
+     index-read-back 6, statistics-demand 1). Then the runs paragraph of
+     § Drop S2-7, S2-AC5's D6 part for index-read-back and
+     statistics-demand, the status line, a commit and a push; the same runs
+     from the worktree moved to that commit, compared; a second commit; a
+     comment on #747.
+  2. Drop S2-8, the checker: `tests/validate-harness-failed-run.sh` makes a
+     third stub, `noise` (a two-line Perl script printing
+     `an unrelated line`, exit 0), and runs each harness against it as
+     against the other two, `check_stub_run "$harness" noise`, its header
+     comment and its summary message naming the third stub: fifteen checks a
+     harness (the three source rules, four a stub). `tests/HARNESS-DESIGN.md`
+     names the third stub where it names two (§ Reading a harness, "against
+     both stubs" under Confirming a fix; § The failed-run checker, "The two
+     stubs are two-line Perl scripts"), and `.claude/rules/harnesses.md` in
+     its checker rule ("against an `ltl` that fails and one that prints
+     nothing"). The CLAUDE.md checkpoint names no stub, only the checker's
+     scenario, which then covers the third: it is left as it is, and the
+     record says so. The checker's whole run passes, from the main checkout
+     and from the worktree.
+  3. The gate, the PR, the merge and the close-out, as § Stage 2 Delivery
+     says.
 - **How each drop runs**: the harnesses read whole, with the review-gate
   greps of shapes 2, 3, 4 and 14 beside the noise baseline's unmarked list;
-  each fix shown on the noise stub, the committed harness from the
-  scratchpad worktree at the previous commit beside the fixed one from the
-  main checkout; the changed harnesses run on the real `ltl` and the three
-  stubs, every scenario named, with `$TMPDIR` listed before and after; their
-  checker scenarios; the record, a commit and a push; the same runs from the
-  worktree moved to the drop's commit, compared; a second commit recording
-  that; a comment on #747.
-- **The scratchpad** (the session's, lost with it): the three stubs
-  (`stubs/{failing,silent,noise}/ltl`, the noise one printing
-  `an unrelated line` and exiting 0); the doctored copies of the real tool
-  (`doctored/{warn,nonotices,sectionless}/ltl`, § Drop S2-1 and § Drop S2-6);
-  the worktree `wt747` with its `logs`
-  symlink to the main checkout's corpus; the noise baseline
-  (`s2/noise-base/`, `s2/noise-base-unmarked.txt`, one block of unmarked
-  PASS lines per harness); and per drop `s2/dN/` holding its scenario lists,
-  generated run commands, proofs and run tables. A new session makes the
-  stubs and the worktree again as § Resuming describes, and the baseline by
-  running every harness against the noise stub on cd4c3639, every scenario
-  named.
-- **The commands**: every harness run is written out with each scenario named,
-  since the Bash guard asks about a harness run without `--scenario`; the
-  long ones are generated into a scratchpad file and pasted, never run from
-  a script the guard cannot see.
+  each fix shown failing on the noise stub, or on a doctored copy of the
+  real tool where the noise stub cannot reach the check, the committed
+  harness from the scratchpad worktree at the previous commit beside the
+  fixed one from the main checkout; the changed harnesses run on the real
+  `ltl` and the three stubs, every scenario named, with `$TMPDIR` listed
+  before and after; their checker scenarios; the record, a commit and a
+  push; the same runs from the worktree moved to the drop's commit,
+  compared; a second commit recording that; a comment on #747.
+- **Runs one at a time.** index-read-back regenerates its sample logs in the
+  corpus the worktree shares and its fixture in its own checkout, so two of
+  its runs at once, from the worktree and the main checkout, corrupt a
+  fixture (§ Drop S2-7, the finding). Its generated fixture,
+  `tests/fixtures/ltl-index-readback.csv` (gitignored), is rebuilt when
+  removed. A `TMPDIR=` prefix on a harness run did not move its captures on
+  this host; the before and after listing of `$TMPDIR` is the measure.
+- **The scratchpad** is the one of the session that started stage 2, still
+  on this host: `git worktree list` names its `wt747`, and the scratchpad is
+  that worktree's parent directory. It holds the three stubs
+  (`stubs/{failing,silent,noise}/ltl`); the doctored copies of the real tool
+  (`doctored/{warn,nonotices,sectionless,headeronly,storeless}/ltl`,
+  § Drop S2-1, § Drop S2-6 and § Drop S2-7); the worktree `wt747`, with its
+  `logs` symlink to the main checkout's corpus, at 5e6c1f10; the noise
+  baseline (`s2/noise-base/`, `s2/noise-base-unmarked.txt`); and per drop
+  `s2/dN/` with its scenario lists, generated run commands, proofs and run
+  tables (`s2/d7/scenarios.txt` and `s2/d7/runs.cmd` for drop S2-7's runs).
+  On another host the stubs and the worktree are made again as § Resuming
+  describes, and the baseline by running every harness against the noise
+  stub on cd4c3639, every scenario named.
+- **The commands**: every harness run names each scenario, since the Bash
+  guard asks about a harness run without `--scenario`; a long list is pasted
+  into the command as a bash array (`FD=(--scenario a --scenario b ...)`,
+  then `"${FD[@]}"`), which the guard reads, never run from a script it
+  cannot see. A command whose text holds a path ending in `/ltl` followed by
+  an argument is read by the guard as an `ltl` run: the stub is named as
+  `LTL="$SD/noise/ltl"`.
