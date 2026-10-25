@@ -67,8 +67,11 @@ fail=0
 failures=()
 current_scenario=""
 
+# A check whose input does not depend on $LTL names it in `run_free`, and its
+# PASS line ends [run-free: <it>] (tests/HARNESS-DESIGN.md section The
+# failed-run checker).
 assert_command() {
-    local command label asserts produced_by contract
+    local command label asserts produced_by contract run_free=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             command)     command="$2";     shift 2 ;;
@@ -76,6 +79,7 @@ assert_command() {
             asserts)     asserts="$2";     shift 2 ;;
             produced_by) produced_by="$2"; shift 2 ;;
             contract)    contract="$2";    shift 2 ;;
+            run_free)    run_free="$2";    shift 2 ;;
             *) echo "assert_command: unknown field '$1'"; exit 2 ;;
         esac
     done
@@ -85,7 +89,7 @@ assert_command() {
     cmd_out=$(eval "$command" 2>&1); cmd_rc=$?
     set -e
     if [[ "$cmd_rc" -eq 0 ]]; then
-        echo "  PASS  $current_scenario :: $label"
+        echo "  PASS  $current_scenario :: $label${run_free:+ [run-free: $run_free]}"
         pass=$((pass + 1))
     else
         echo "  FAIL  $current_scenario :: $label"
@@ -100,8 +104,10 @@ assert_command() {
 }
 
 # Run ltl in TMP_DIR and keep its output: <name>.raw with ANSI (for the layout
-# reader), <name>.txt stripped. Fails the scenario on a non-zero exit, an empty
-# render or a Perl runtime warning.
+# reader), <name>.txt stripped. Fails the scenario on a non-zero exit, a render
+# that drew no timeline row, or a Perl runtime warning: every surface a check
+# scans (the timeline, the heatmap header, the histogram labels) is drawn with
+# the timeline, so its rows are the evidence an absence is read against.
 # Usage: render <name> <fixture> <ltl-args...>
 render() {
     local name="$1" fixture="$2"; shift 2
@@ -110,8 +116,8 @@ render() {
     ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" "$fixture" ) > "$raw" 2> "$err"
     local rc=$?
     set -e
-    if [[ "$rc" -ne 0 || ! -s "$raw" ]]; then
-        echo "  FAIL  $current_scenario :: ltl exited $rc or rendered nothing ($name)"
+    if [[ "$rc" -ne 0 ]] || ! sed -E 's/\x1b\[[0-9;]*m//g' "$raw" | grep -E '^ [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' > /dev/null; then
+        echo "  FAIL  $current_scenario :: ltl exited $rc or drew no timeline row ($name)"
         sed 's/^/        | /' "$err"
         fail=$((fail + 1)); failures+=("$current_scenario :: render $name"); return 1
     fi
@@ -375,7 +381,8 @@ scenario_no_trailing_zero() {
         label       'no value in a regression golden ends in a fractional zero' \
         asserts     'The frozen surfaces carry no trailing fractional zero' \
         produced_by 'strip_trailing_zeros() in ltl, called by every arm of value_text()' \
-        contract    "$CONTRACT D3"
+        contract    "$CONTRACT D3" \
+        run_free    'the regression goldens under tests/reference-output'
 }
 
 # ---------------------------------------------------------------------------

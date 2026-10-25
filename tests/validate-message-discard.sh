@@ -391,6 +391,16 @@ check_column_header() {
     return 1
 }
 
+# The run's standard output carries the -V section whole, both delimiters, so
+# an absence read in it is read in a section the run wrote.
+has_section() {
+    local name="$1" file="$2"
+    if ! grep -qx "=== $name ===" "$file" || ! grep -qx "=== END $name ===" "$file"; then
+        echo "anchor not found: no -V $name section in $file"
+        return 1
+    fi
+}
+
 # Write an expectation file, one message key per argument.
 write_expected() {
     local path="$1"; shift
@@ -650,7 +660,7 @@ scenario_thread() {
         produced_by "$PRODUCED_FIELD" \
         contract    "$CONTRACT_DOC section Decisions D8 and D13"
     assert_command \
-        command     "! grep -qE 'THREAD POOLS' '$RUN_OUT'" \
+        command     "check_column_header '$RUN_OUT' timestamp present && ! grep -qE 'THREAD POOLS' '$RUN_OUT'" \
         label       'the thread-pool activity table is gone' \
         asserts     'Discard is never partial: with no thread captured, the thread-pool accumulators are empty and -tpas renders no thread-pool rows.' \
         produced_by "$PRODUCED_FIELD" \
@@ -858,7 +868,7 @@ scenario_udm_switched_off() {
         produced_by "$PRECEDENCE" \
         contract    "$CONTRACT_DOC section Decisions D12"
     assert_command \
-        command     "! grep -qE '^metric: sign ' '$RUN_OUT'" \
+        command     "has_section udm-counting '$RUN_OUT' && ! grep -qE '^metric: sign ' '$RUN_OUT'" \
         label       'no udm-counting line names the metric' \
         asserts     'The switched-off metric leaves no trace in the verbose surface.' \
         produced_by "$PRECEDENCE" \
@@ -952,7 +962,7 @@ scenario_selection_unchanged() {
     local disc_lines
     disc_lines=$(grep -cE '^[^,]' "$MSG_CSV" || true)
     assert_command \
-        command     "test '$base_lines' -eq '$disc_lines'" \
+        command     "test '$base_lines' -gt 1 && test '$base_lines' -eq '$disc_lines'" \
         label       'the same lines are selected with the named key discarded' \
         asserts     'An include pattern naming the text of a discarded key still selects the same lines: selection matches the raw line, before any removal.' \
         produced_by 'read_and_process_logs() in ltl (the include filter, matched against the raw line before the discard block)' \
@@ -1019,7 +1029,7 @@ scenario_name_vocabulary() {
     # without one.
     run_messages d-elapsed -udm 'lat::max:elapsed' -xqs -d elapsed -V udm-specs "$VOCABULARY_FIXTURE" || return 0
     assert_command \
-        command     "! grep -q '^udm: name=lat ' '$RUN_OUT' && check_one_notice '$RUN_ERR' '^Note: -d/--discard removes the key elapsed, which the -udm metric lat reads: the metric is switched off$'" \
+        command     "has_section udm-specs '$RUN_OUT' && ! grep -q '^udm: name=lat ' '$RUN_OUT' && check_one_notice '$RUN_ERR' '^Note: -d/--discard removes the key elapsed, which the -udm metric lat reads: the metric is switched off$'" \
         label       '-d elapsed switches lat off with one notice' \
         asserts     'Discarding the key a user-defined metric reads leaves the metric nothing to read: it is switched off, and the run says so.' \
         produced_by "$PRODUCED_RESOLVE" \
@@ -1032,7 +1042,7 @@ scenario_name_vocabulary() {
         contract    "$CONTRACT_613 D12 and D13; criterion 12"
     run_messages d-lat -udm 'lat::max:elapsed' -xqs -d lat -V udm-specs "$VOCABULARY_FIXTURE" || return 0
     assert_command \
-        command     "! grep -q '^udm: name=lat ' '$RUN_OUT' && ! grep -qx MISSING-SECTION '$RUN_DIR/run.notices' && ! grep -q 'switched off' '$RUN_DIR/run.notices'" \
+        command     "has_section udm-specs '$RUN_OUT' && ! grep -q '^udm: name=lat ' '$RUN_OUT' && ! grep -qx MISSING-SECTION '$RUN_DIR/run.notices' && ! grep -q 'switched off' '$RUN_DIR/run.notices'" \
         label       '-d lat switches lat off without a notice' \
         asserts     'A user-defined metric named by its name on -d is switched off as a built-in metric named on -d is, without a notice.' \
         produced_by "$PRODUCED_RESOLVE" \

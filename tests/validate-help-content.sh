@@ -29,9 +29,10 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="${LTL:-$REPO_DIR/ltl}"
 USAGE_MD="$REPO_DIR/docs/usage.md"
-# Test log: tiny clean access log (~83 KB). Per repo memory
-# (feedback_test_logs.md) avoid the corrupt 2025-03-21 file; Codebeamer's
-# log is the smallest clean fixture available.
+# Test log: tiny clean access log (~83 KB). docs/test-logs.md marks
+# logs/AccessLogs/localhost_access_log.2025-03-21.txt corrupt (concatenated
+# records), so it is not used; Codebeamer's log is the smallest clean fixture
+# available.
 TEST_LOG="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
 
 # shellcheck source=lib/runtime-warnings.sh
@@ -248,13 +249,14 @@ needs() {
 }
 
 # The count of lines matching a pattern in a --help capture, or a sentinel
-# naming the capture when its run failed or printed nothing, so a count of 0 is
-# read only from a help text that was written. Usage: help_count FILE RC ARGS...
+# naming the capture when its run failed or printed no line matching ANCHOR, a
+# line every such help text carries, so a count of 0 is read only from a help
+# text that was written. Usage: help_count FILE RC ANCHOR ARGS...
 help_count() {
-    local file="$1" rc="$2"
-    shift 2
-    if [[ "$rc" -ne 0 || ! -s "$file" ]]; then
-        echo "no help text in $file (exit $rc)"
+    local file="$1" rc="$2" anchor="$3"
+    shift 3
+    if [[ "$rc" -ne 0 ]] || ! grep -qE -- "$anchor" "$file"; then
+        echo "no help text in $file (exit $rc, no line matching $anchor)"
         return
     fi
     grep -c "$@" "$file" || true
@@ -654,7 +656,7 @@ scenario_H_mask_option_rows() {
         asserts     'The option is documented once, not once per name it accepts' \
         produced_by 'print_help() in ltl' \
         contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 13'
-    assert_equal "$(help_count "$help_out" "$help_rc" -E -- '(^|\s)-uuid[, ]')" "0" \
+    assert_equal "$(help_count "$help_out" "$help_rc" '^OPTIONS$' -E -- '(^|\s)-uuid[, ]')" "0" \
         label       'no -uuid row in --help' \
         asserts     '-uuid is deprecated: --help carries no row for it; the notice printed on use names its replacement' \
         produced_by 'print_help() in ltl (the -uuid row is dropped; the GetOptions entry is annotated hidden)' \
@@ -1234,7 +1236,7 @@ scenario_M_units_topic() {
         asserts     'The units topic lists the count units the rejection prints' \
         produced_by 'print_help_units() in ltl ($number_unit_list)' \
         contract    "$CONTRACT_UNITS_TOPIC"
-    assert_equal "$(help_count "$units_out" "$rc" -ciE 'kilobyte|megabyte|gigabyte|terabyte|kibibyte|mebibyte|gibibyte|tebibyte')" "0" \
+    assert_equal "$(help_count "$units_out" "$rc" '^Units: ' -ciE 'kilobyte|megabyte|gigabyte|terabyte|kibibyte|mebibyte|gibibyte|tebibyte')" "0" \
         label       'no long byte word in --help units' \
         asserts     'The long byte words are accepted on input but listed in docs/usage.md only, not in --help' \
         produced_by 'print_help_units() in ltl' \

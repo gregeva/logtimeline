@@ -554,6 +554,11 @@ set -e
 echo "$lk_rc" > "$LK.rc"
 if [[ $lk_rc -ne 0 || ! -s "$LK" ]]; then
     capture_failed "$LK" "exit $lk_rc, $(wc -c < "$LK" | tr -d ' ') bytes"
+elif ! notice_section_present "$LK"; then
+    # The checks below read the notices section; a run without it is a
+    # failed run, never one they read (tests/HARNESS-DESIGN.md Trap 13).
+    echo "no-section" > "$LK.rc"
+    capture_failed "$LK" "exit 0, no -V notices section"
 fi
 assert_command \
     label "the leakage warning reads 1200 included line(s) (100%) for 1,200 unclassified lines" \

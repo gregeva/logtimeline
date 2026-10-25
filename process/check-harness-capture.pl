@@ -3,8 +3,8 @@
 # so a run against an ltl that fails, or one that prints nothing, can be held
 # to tests/HARNESS-DESIGN.md § Reading a harness for a run that did not happen:
 # the harness reached its summary, and every check it passed is one that reads
-# no output of ltl. It reads a capture and never runs a harness, so every
-# harness run stays a direct command.
+# no output of ltl. It reads a capture and never runs a harness;
+# tests/run-suite.sh reads each harness's capture with it.
 #
 # Usage: check-harness-capture.pl [--brief] CAPTURE [CAPTURE ...]
 #   CAPTURE is a harness's standard output and standard error, captured

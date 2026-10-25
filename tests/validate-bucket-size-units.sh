@@ -117,6 +117,14 @@ timeline_text() {
     sed -E 's/\x1b\[[0-9;]*m//g' "$1" | grep -vE '^(command-line|environment) options: '
 }
 
+# has_timeline_row FILE — the run drew at least one timeline bucket row (a
+# date and a time at the start of the line): the evidence a comparison of two
+# timelines needs, since two runs that printed the same unrelated text compare
+# equal (tests/HARNESS-DESIGN.md Trap 13, shape 2).
+has_timeline_row() {
+    timeline_text "$1" | grep -E '^ *[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' > /dev/null
+}
+
 # benchmark_row FILE KEY — the value of one CONFIG row of -V benchmark-data;
 # a missing anchor is a hard failure (tests/HARNESS-DESIGN.md Trap 3/4).
 benchmark_row() {
@@ -210,17 +218,17 @@ for row in "${EQUIVALENCES[@]}"; do
     fi
 
     if [[ "$mode" == "full" ]]; then
-        # Two runs that fail alike print the same nothing: a failed run was
-        # counted above, and an empty one fails here (tests/HARNESS-DESIGN.md
-        # Trap 13).
+        # Two runs that fail alike print the same thing: a failed run was
+        # counted above, and one that drew no timeline row fails here
+        # (tests/HARNESS-DESIGN.md Trap 13).
         if [[ "$(cat "$TMP_DIR/a.rc")" != 0 || "$(cat "$TMP_DIR/b.rc")" != 0 ]]; then
             echo "  SKIP  $current_scenario :: timeline byte-identical (a run failed, counted above)"
-        elif [[ -z "$(timeline_text "$TMP_DIR/a.out")" || -z "$(timeline_text "$TMP_DIR/b.out")" ]]; then
+        elif ! has_timeline_row "$TMP_DIR/a.out" || ! has_timeline_row "$TMP_DIR/b.out"; then
             fail_with "timeline byte-identical for '$args_a' and '$args_b'" \
                 "the rendered timeline of a unit-form bucket width is byte-identical to the bare-number form (the echoed options line excepted)" \
                 'print_bar_graph() in ltl, fed by the resolved bucket width' \
                 "$CONTRACT_D3; $CONTRACT_D4" \
-                "a run printed no timeline: a $(wc -c < "$TMP_DIR/a.out" | tr -d ' ') bytes, b $(wc -c < "$TMP_DIR/b.out" | tr -d ' ') bytes"
+                "a run drew no timeline row: a $(timeline_text "$TMP_DIR/a.out" | grep -cE '^ *[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' || true) rows, b $(timeline_text "$TMP_DIR/b.out" | grep -cE '^ *[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' || true) rows"
         elif diff -q <(timeline_text "$TMP_DIR/a.out") <(timeline_text "$TMP_DIR/b.out") > /dev/null; then
             pass_with "timeline byte-identical for '$args_a' and '$args_b'"
         else

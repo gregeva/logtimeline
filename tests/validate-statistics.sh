@@ -67,8 +67,10 @@ source "$SCRIPT_DIR/lib/scenario-select.sh"
 # never inherited; issue #438).
 neutralize_colour_env
 
-# End-of-run cleanup runs only when standalone (CI unset).
-trap csv_cache_maybe_cleanup EXIT
+# End-of-run cleanup runs only when standalone (CI unset). The harness's own
+# captures live under TMP_DIR, removed on any exit.
+TMP_DIR=$(mktemp -d)
+trap 'csv_cache_maybe_cleanup; rm -rf "$TMP_DIR"' EXIT
 
 SHOW_ALL=0
 CAPTURE_BASELINES=0
@@ -245,7 +247,7 @@ membership_capture_for_scenario() {
     fi
     local abs_log tmp
     abs_log="$(resolve_log_path "$logfile")"
-    tmp="$(mktemp)"
+    tmp="$(mktemp "$TMP_DIR/membership.XXXXXX")"
     # shellcheck disable=SC2086  # word-splitting on $options is intentional
     if ! "$LTL" --disable-progress -ni -V message-grouping $options "$abs_log" \
             >"$tmp" 2>"$tmp.stderr"; then
@@ -287,7 +289,7 @@ pa_capture_for_scenario() {
     local abs_log
     abs_log="$(resolve_log_path "$logfile")"
     local tmp
-    tmp="$(mktemp)"
+    tmp="$(mktemp "$TMP_DIR/percentile-algorithm.XXXXXX")"
     # shellcheck disable=SC2086  # word-splitting on $options is intentional
     if ! "$LTL" --disable-progress -ni -V percentile-algorithm $options "$abs_log" \
             >"$tmp" 2>"$tmp.stderr"; then

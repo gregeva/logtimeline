@@ -40,8 +40,8 @@ source "$SCRIPT_DIR/lib/fixtures.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
 
-# Transient files (derived fixture) live in a temp directory cleaned on EXIT
-# per HARNESS-DESIGN.md Trap 10.
+# Transient files (the derived fixture and every run capture) live in a temp
+# directory cleaned on EXIT per HARNESS-DESIGN.md Trap 10.
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -394,15 +394,14 @@ test_single_width() {
     local hgw="$1"
     echo "Single histogram, -hgw $hgw"
 
-    local out
-    out=$(mktemp)
+    local out="$TMP_DIR/single-w$hgw.out"
     # shellcheck disable=SC2086
     local rc=0
     "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -V histogram-percentile-ticks -hg duration -hgw "$hgw" "$ACCESS_LOG" > "$out" 2>"$out.stderr" || rc=$?
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi
-    if run_unusable "$out" "$rc" "-hgw $hgw"; then rm -f "$out"; return 0; fi
+    if run_unusable "$out" "$rc" "-hgw $hgw"; then return 0; fi
 
     local report
     report=$(inspect_output "$out")
@@ -459,9 +458,6 @@ test_single_width() {
 
     # Position assertion (#450).
     assert_tick_positions "$out" "$report" 1 "-hgw $hgw" || true
-
-
-    rm -f "$out"
 }
 
 # ---------------------------------------------------------------------------
@@ -471,15 +467,14 @@ test_single_width() {
 test_multi_histogram() {
     echo "Multi-histogram, -hg duration,bytes"
 
-    local out
-    out=$(mktemp)
+    local out="$TMP_DIR/multi.out"
     # shellcheck disable=SC2086
     local rc=0
     "$LTL" --disable-progress -ni $SHAPE --terminal-width 200 -V histogram-percentile-ticks -hg duration,bytes -hgw 95 "$ACCESS_LOG" > "$out" 2>"$out.stderr" || rc=$?
     if ! assert_no_runtime_warnings "$out.stderr" "histogram-ticks"; then
         fail=$((fail + 1)); failures+=("perl-runtime-warnings-on-stderr")
     fi
-    if run_unusable "$out" "$rc" "multi"; then rm -f "$out"; return 0; fi
+    if run_unusable "$out" "$rc" "multi"; then return 0; fi
 
     local report
     report=$(inspect_output "$out")
@@ -523,8 +518,6 @@ test_multi_histogram() {
         assert_tick_positions "$out" "$report" "$hidx" "panel #$hidx" || true
 
     done
-
-    rm -f "$out"
 }
 
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).

@@ -197,20 +197,27 @@ check_category_row() {
 # it. A row whose label is exactly the raw category name means the lookup did
 # not reach the render. Anchored the same way as check_category_row: the label
 # sits at the left edge of the row and the value is right-aligned to its
-# boundary, so the label is read as the text before the run of spaces.
+# boundary, so the label is read as the text before the run of spaces. The
+# absence is read against the category table, so a render without its
+# Category / Total header is a failure, not a pass.
 check_no_raw_category_row() {
     "$PERL" -e '
         my ($render, $raw) = @ARGV;
         my $row_width = 41;
         open my $fh, "<", $render or die "cannot open $render: $!\n";
-        my $found = 0;
+        my ($found, $table) = (0, 0);
         while (my $line = <$fh>) {
             next if length($line) < 2 + $row_width;
             next unless substr($line, 0, 2) eq "  ";
             my $row = substr($line, 2, $row_width);
+            $table = 1 if $row =~ /^Category\s+Total$/;
             $found = 1 if $row =~ /^\Q$raw\E\s+\d+(?: \(\d+(?:\.\d+)?%\))?$/;
         }
         close $fh;
+        unless ($table) {
+            print "no category table (its Category / Total header) in the render\n";
+            exit 1;
+        }
         if ($found) {
             print "the raw category name [$raw] still labels a summary-table row\n";
             exit 1;

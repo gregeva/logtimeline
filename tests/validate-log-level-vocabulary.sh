@@ -172,6 +172,21 @@ skip_checks() {
     echo "  SKIP  $current_scenario :: the checks reading that run's capture (the run gave nothing to read)"
 }
 
+# The runs a check function makes inside assert_command's eval, a subshell,
+# leave their standard error in files beside their captures. They are read
+# here, in the harness's own shell, after the check, so a runtime warning on
+# any of them is a counted failure (HARNESS-DESIGN.md Trap 12, section
+# Runtime-warning cleanliness).
+check_run_warnings() {
+    local label="$1"; shift
+    local stderr_file
+    for stderr_file in "$@"; do
+        if ! assert_no_runtime_warnings "$stderr_file" "$current_scenario"; then
+            fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr-$label ($(basename "$stderr_file" .stderr))")
+        fi
+    done
+}
+
 # A level appears as its own row in the category table, and that row carries a
 # count. Absence means the category gate discarded every line carrying the
 # level (HARNESS-DESIGN.md § Harnesses must fail on missing anchors: a
@@ -276,10 +291,11 @@ check_failure_count_rises_with_added_severities() {
 
     local render_with="$TMP_DIR/failures-with.txt"
     local render_without="$TMP_DIR/failures-without.txt"
+    # Each run's standard error is kept for check_run_warnings, after the check.
     ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 \
-        --terminal-width "$WIDTH" "$fixture" ) 2>/dev/null | strip_ansi > "$render_with"
+        --terminal-width "$WIDTH" "$fixture" ) 2>"$TMP_DIR/failures-with.stderr" | strip_ansi > "$render_with"
     ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 \
-        --terminal-width "$WIDTH" "$removed" ) 2>/dev/null | strip_ansi > "$render_without"
+        --terminal-width "$WIDTH" "$removed" ) 2>"$TMP_DIR/failures-without.stderr" | strip_ansi > "$render_without"
 
     "$PERL" -e '
         my ($a, $b) = @ARGV;
@@ -360,8 +376,9 @@ check_error_rate_counts_fatal() {
     # computed value rather than a rendered approximation.
     local dir_a="$TMP_DIR/rate-a" dir_b="$TMP_DIR/rate-b"
     rm -rf "$dir_a" "$dir_b"; mkdir -p "$dir_a" "$dir_b"
-    ( cd "$dir_a" && "$LTL" --disable-progress -ni -bs 1 -oe -n 1 --terminal-width "$WIDTH" -o "$with_fatal" ) >/dev/null 2>&1
-    ( cd "$dir_b" && "$LTL" --disable-progress -ni -bs 1 -oe -n 1 --terminal-width "$WIDTH" -o "$without_fatal" ) >/dev/null 2>&1
+    # Each run's standard error is kept for check_run_warnings, after the check.
+    ( cd "$dir_a" && "$LTL" --disable-progress -ni -bs 1 -oe -n 1 --terminal-width "$WIDTH" -o "$with_fatal" ) >/dev/null 2>"$TMP_DIR/rate-a.stderr"
+    ( cd "$dir_b" && "$LTL" --disable-progress -ni -bs 1 -oe -n 1 --terminal-width "$WIDTH" -o "$without_fatal" ) >/dev/null 2>"$TMP_DIR/rate-b.stderr"
 
     "$PERL" -e '
         my ($da, $db) = @ARGV;
@@ -735,6 +752,7 @@ assert_command \
     asserts     'FATAL denotes a failure and must contribute to the error rate alongside ERROR and the 4xx/5xx status classes. Measured by comparing a FATAL-and-ERROR run against an ERROR-only run: the two-failure run must report a strictly higher error rate than the one-failure run.' \
     produced_by 'normalize_data_for_output() in ltl — the error-rate accumulation' \
     contract    'features/447-message-control-character-normalisation.md § D6 — FATAL counts toward the error rate'
+check_run_warnings error-rate-runs "$TMP_DIR/rate-a.stderr" "$TMP_DIR/rate-b.stderr"
 
 # ---------------------------------------------------------------------------
 # Scenario: the severity names the syslog and java.util.logging vocabularies
@@ -808,6 +826,7 @@ assert_command \
     asserts     "SEVERE is java.util.logging's highest severity and ALERT and EMERGENCY sit above CRITICAL in syslog, so the default failure rule names all three. Measured by comparing a run carrying them against a run with those lines removed: the first must report a strictly higher FAILURE CLASSIFIED than the second." \
     produced_by '%classification_default in ltl, compiled into each entry through format_classification_src(); counted in read_and_process_logs()' \
     contract    'features/475-log-level-vocabulary-completion.md § D3 (the default failure rule gains SEVERE, ALERT and EMERGENCY)'
+check_run_warnings added-severities-runs "$TMP_DIR/failures-with.stderr" "$TMP_DIR/failures-without.stderr"
 
 WARNLESS="$TMP_DIR/non-failure-levels-only.txt"
 grep -vE ' (SEVERE|ALERT|EMERGENCY|CRITICAL) ' "$FIXTURE_EXTENDED" > "$WARNLESS"

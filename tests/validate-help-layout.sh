@@ -72,7 +72,8 @@ EXPECTED_LONG_COL=$((OPT_COL + SHORT_COL + 1))     # long form starts here
 # 120 cols gives every existing option's description enough room to wrap
 # meaningfully (at least 60 chars per description line) so wrap-continuation
 # alignment can be exercised.
-HELP_OUT=$(mktemp)
+TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
+HELP_OUT="$TMP_DIR/help.out"
 HELP_RC=0
 "$LTL" --terminal-width 120 --help > "$HELP_OUT" 2>"$HELP_OUT.stderr" || HELP_RC=$?
 
@@ -82,7 +83,7 @@ HELP_RC=0
 #   1. ANSI CSI sequences (just in case any leak in).
 #   2. Bold: "X\bX"  → "X"  (bs_bold)
 #   3. Underline: "_\bX" → "X"  (bs_underline)
-STRIPPED=$(mktemp)
+STRIPPED="$TMP_DIR/help.stripped"
 perl -CSDA -pe '
     s/\e\[[0-9;]*[A-Za-z]//g;
     1 while s/(.)\x08\1/$1/g;
@@ -482,9 +483,9 @@ assert_pair() {
     else
         emit_fail \
             label       "$short, $long" \
-            asserts     "Both the short form ($short) and long form ($long) appear on the same row of --help output, in the canonical 'short, long' order; missing-pair regressions cost the user a discoverable surface (memory: 'short forms required for every CLI option')" \
+            asserts     "Both the short form ($short) and long form ($long) appear on the same row of --help output, in the canonical 'short, long' order; missing-pair regressions cost the user a discoverable surface" \
             produced_by 'print_help() in ltl - the option-table row that registers this flag emits short+long together' \
-            contract    "MEMORY.md feedback_short_forms_required: every CLI flag in ltl must have both short and long form; 'no short form' decisions are errors that need amending before wiring" \
+            contract    "CLAUDE.md section Before writing or changing code - a new option has a short form, a long form, a print_help() row and a docs/usage.md row in the same commit" \
             detail      "no row matched '^[[:space:]]+${short}, +${long}' in stripped --help output"
     fi
 }
@@ -496,8 +497,6 @@ fi
 # ---------------------------------------------------------------------------
 # Wrap-up
 # ---------------------------------------------------------------------------
-rm -f "$HELP_OUT" "$HELP_OUT.stderr" "$STRIPPED"
-
 echo ""
 echo "Results: $pass passed, $fail failed"
 if [[ "$fail" -gt 0 ]]; then

@@ -119,23 +119,31 @@ assert_command() {
 }
 
 # capture_run OUTFILE ARGS... — one render with ANSI intact and
-# -V section-layout, stderr to OUTFILE.stderr. A non-zero exit or an empty
-# capture is one failure, counted here, and returns 1 so the scenario skips
-# the checks that read it. The run's stderr is then checked for Perl runtime
-# warnings and the whole capture for lines wider than the terminal; both are
-# counted as assertions of the scenario that asked for the capture.
+# -V section-layout, stderr to OUTFILE.stderr. A non-zero exit, an empty
+# capture, or one without the section-layout section is one failure, counted
+# here, and returns 1 so the scenario skips the checks that read it. The run's
+# stderr is then checked for Perl runtime warnings and the whole capture for
+# lines wider than the terminal; both are counted as assertions of the
+# scenario that asked for the capture.
 capture_run() {
     local outfile="$1"; shift
-    local rc
+    local rc why=""
     set +e
     with_ansi_colour "$LTL" --disable-progress --terminal-width "$WIDTH" \
         -ni -bs 1440 -oe -n 1 -h "$HIGHLIGHT" -V section-layout "$@" "$FIXTURE" \
         > "$outfile" 2> "$outfile.stderr"
     rc=$?
     set -e
-    if [[ $rc -ne 0 || ! -s "$outfile" ]]; then
-        echo "  FAIL  $current_scenario :: capture failed (exit $rc, $(wc -c < "$outfile" | tr -d ' ') bytes): $*"
-        echo "        asserts:     the render this scenario reads exits 0 and prints"
+    if [[ $rc -ne 0 ]]; then
+        why="exit $rc"
+    elif [[ ! -s "$outfile" ]]; then
+        why="exit 0, nothing printed"
+    elif ! grep -q '^=== section-layout ===$' "$outfile"; then
+        why="exit 0, no section-layout section"
+    fi
+    if [[ -n "$why" ]]; then
+        echo "  FAIL  $current_scenario :: capture failed ($why, $(wc -c < "$outfile" | tr -d ' ') bytes): $*"
+        echo "        asserts:     the render this scenario reads exits 0 and prints its -V section-layout section"
         echo "        produced_by: ltl"
         echo "        contract:    tests/HARNESS-DESIGN.md Trap 13"
         sed 's/^/        | /' "$outfile.stderr" | head -5

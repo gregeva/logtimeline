@@ -12,8 +12,8 @@
 # that deletes the shared cache.
 #
 # Invoked in two situations:
-#   1. By an orchestrator (release-process step list, future master test
-#      runner) after all harnesses in a chain have completed.
+#   1. By tests/run-suite.sh, before the first harness of the suite and after
+#      the last.
 #   2. By each harness's `csv_cache_maybe_cleanup` at end of run iff
 #      running standalone (CI env var unset).
 #

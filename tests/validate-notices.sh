@@ -107,12 +107,13 @@ run_ok() {
     fi
 }
 
-# ran <tag>: the run exited 0 and wrote its output. An absence, or a count of
-# 0, read from a run that did not holds, so such a check needs its evidence
-# first and is skipped, counting nothing, without it (tests/HARNESS-DESIGN.md
-# Trap 13); the run's failure is counted by run_ok or by the checks that read
-# what it should have written.
-ran() { [[ "$(cat "$TMP_DIR/$1.rc" 2>/dev/null)" == 0 && -s "$TMP_DIR/$1.out" ]]; }
+# ran <tag>: the run exited 0 and wrote its notices section. An absence, or a
+# count of 0, read from a run that did not holds, and so does one read from a
+# run that printed something other than what it was asked for, so such a check
+# needs its evidence first and is skipped, counting nothing, without it
+# (tests/HARNESS-DESIGN.md Trap 13); the run's failure is counted by run_ok or
+# by the checks that read what it should have written.
+ran() { [[ "$(cat "$TMP_DIR/$1.rc" 2>/dev/null)" == 0 && "$(has_section "$1")" == yes ]]; }
 skipped() { echo "  SKIP  $current_scenario :: $1 (no evidence the run it reads happened)"; }
 
 # section <tag>: the notices section's body, delimiters excluded; empty when absent.

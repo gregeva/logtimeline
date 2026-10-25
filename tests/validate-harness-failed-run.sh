@@ -11,7 +11,8 @@
 #      counting helper run inside $( ), a summary inside a scenario's block, a
 #      grep or ls lookup assigned with no fallback.
 #   2. A run of every scenario it registers against an ltl that prints nothing
-#      and exits 1, and against one that prints nothing and exits 0, read by
+#      and exits 1, one that prints nothing and exits 0, and one that prints
+#      an unrelated line and exits 0, read by
 #      process/check-harness-capture.pl: the summary is reached, the exit
 #      status is not 0, the PASS lines number as many as the passed count, and
 #      every PASS line is marked run-free.
@@ -62,12 +63,15 @@ fail_with() {   # label, asserts, produced_by, detail
     return 0
 }
 
-# The two stubs: two-line Perl scripts, each in a directory of its own.
+# The three stubs: two-line Perl scripts, each in a directory of its own.
 for stub in failing:1 silent:0; do
     mkdir -p "$TMP_DIR/${stub%%:*}"
     printf '#!/usr/bin/env perl\nexit %s;\n' "${stub#*:}" > "$TMP_DIR/${stub%%:*}/ltl"
     chmod +x "$TMP_DIR/${stub%%:*}/ltl"
 done
+mkdir -p "$TMP_DIR/noise"
+printf '#!/usr/bin/env perl\nprint "an unrelated line\\n";\n' > "$TMP_DIR/noise/ltl"
+chmod +x "$TMP_DIR/noise/ltl"
 
 # The harnesses checked: every tests/validate-*.sh that names LTL, this one
 # excepted.
@@ -125,6 +129,15 @@ read_scenarios() {
     done < <("$harness" --list 2>/dev/null | awk '/^Scenarios:/ { s = 1; next } s && /^  [^[:space:]]+$/ { print $1; next } s { exit }')
 }
 
+# What a stub does, as a failure message names it.
+stub_behaviour() {
+    case "$1" in
+        failing) echo 'exits 1 having printed nothing' ;;
+        silent)  echo 'exits 0 having printed nothing' ;;
+        noise)   echo 'exits 0 having printed an unrelated line' ;;
+    esac
+}
+
 # One run of the harness against a stub, read by the capture checker.
 check_stub_run() {
     local harness="$1" stub="$2"
@@ -139,7 +152,7 @@ check_stub_run() {
         pass_with "$runs: the summary is reached" "a run of the harness against the $stub stub"
     else
         fail_with "$runs: the summary is reached" \
-            "The harness reaches its summary when ltl $( [[ $stub == failing ]] && echo 'exits 1' || echo 'exits 0' ) having printed nothing: no step ends it early (shape 13, Trap 12)" \
+            "The harness reaches its summary when ltl $(stub_behaviour "$stub"): no step ends it early (shape 13, Trap 12)" \
             'the harness' "$(tail -5 "$capture")"
         return 0
     fi
@@ -179,6 +192,7 @@ while read -r _scenario; do
     else
         check_stub_run "$harness" failing
         check_stub_run "$harness" silent
+        check_stub_run "$harness" noise
     fi
     echo ""
 done < <(scenario_selected)
@@ -189,4 +203,4 @@ if [[ "$fail" -gt 0 ]]; then
     for f in "${failures[@]}"; do echo "  - $f"; done
     exit 1
 fi
-echo "EVERY HARNESS HOLDS ON A RUN THAT DID NOT HAPPEN"
+echo "EVERY HARNESS HOLDS ON A RUN THAT DID NOT HAPPEN, OR PRINTED SOMETHING UNRELATED"

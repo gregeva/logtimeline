@@ -56,6 +56,12 @@ fail=0
 failures=()
 current_scenario=""
 
+# The title banner every rendered --help and --explain page opens with
+# (print_title()). A capture holding it holds a page; exit 0 and a non-empty
+# capture are not that evidence, since a run that printed one unrelated line
+# has both (HARNESS-DESIGN.md Trap 13).
+RENDERED_ANCHOR=',:: ltl ::'
+
 # Strip ANSI escape sequences and backspace-overstrike pairs from a file
 # so the assertions can match plain rendered text.
 strip_decoration() {
@@ -97,8 +103,9 @@ check_capture_warnings() {
 }
 
 # A capture that a comparison or an absence check reads must be a rendered
-# topic: ltl exited 0 and printed it. Without this, two runs that failed the
-# same way compare identical, and an error message carries no internals.
+# topic: ltl exited 0 and printed a page, its title banner present. Without
+# this, two runs that failed the same way compare identical, and an error
+# message carries no internals.
 # Takes one or more "<exit>:<path>" captures run_ltl echoes. Silent when
 # every topic rendered; otherwise counts a failure for each one that did not
 # and returns 1, so the caller skips the checks that would read it and the
@@ -107,12 +114,12 @@ check_capture_rendered() {
     local capture ec out rendered=0
     for capture in "$@"; do
         ec="${capture%%:*}" out="${capture#*:}"
-        if [[ "$ec" -ne 0 || ! -s "$out" ]]; then
+        if [[ "$ec" -ne 0 ]] || ! grep -qF -- "$RENDERED_ANCHOR" "$out"; then
             echo "  FAIL  $current_scenario"
-            echo "        asserts:     the run renders the topic the assertions read: ltl exits 0 and prints it"
+            echo "        asserts:     the run renders the topic the assertions read: ltl exits 0 and prints it, its title banner ($RENDERED_ANCHOR) present"
             echo "        produced_by: print_explain_topic() in ltl"
             echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors (a comparison or an absence check reads a rendered topic)"
-            echo "        exit: $ec; stdout lines: $(wc -l < "$out" | tr -d ' '); stderr: $(head -2 "${out%.txt}.stderr" | tr '\n' '|')"
+            echo "        exit: $ec; stdout lines: $(wc -l < "$out" | tr -d ' '); title banner: $(grep -qF -- "$RENDERED_ANCHOR" "$out" && echo present || echo absent); stderr: $(head -2 "${out%.txt}.stderr" | tr '\n' '|')"
             fail=$((fail + 1))
             failures+=("$current_scenario :: topic not rendered (exit $ec)")
             rendered=1
@@ -181,15 +188,16 @@ assert_no_line() {
     : "${produced_by:?assert_no_line requires produced_by}"
     : "${contract:?assert_no_line requires contract}"
 
-    # An empty capture holds no forbidden line because nothing was rendered.
-    if [[ ! -s "$outfile" ]]; then
+    # A capture that holds no rendered page holds no forbidden line because
+    # nothing was rendered; a run-free file is read once it is not empty.
+    if [[ ! -s "$outfile" ]] || { [[ -z "$run_free" ]] && ! grep -qF -- "$RENDERED_ANCHOR" "$outfile"; }; then
         echo "  FAIL  $current_scenario"
-        echo "        pattern:     !$pattern (capture is empty: nothing to check)"
+        echo "        pattern:     !$pattern (nothing to check: the capture is empty or holds no rendered page, no title banner)"
         echo "        asserts:     $asserts"
         echo "        produced_by: $produced_by"
         echo "        contract:    $contract"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: !$pattern (capture is empty)")
+        failures+=("$current_scenario :: !$pattern (no rendered page)")
     elif grep -qE "$pattern" "$outfile"; then
         echo "  FAIL  $current_scenario"
         echo "        pattern:     !$pattern (unexpectedly present)"
@@ -335,15 +343,16 @@ assert_max_line_width() {
     : "${produced_by:?assert_max_line_width requires produced_by}"
     : "${contract:?assert_max_line_width requires contract}"
 
-    # An empty capture has no overlong line because nothing was rendered.
-    if [[ ! -s "$outfile" ]]; then
+    # A capture that holds no rendered page has no overlong line because
+    # nothing was rendered.
+    if ! grep -qF -- "$RENDERED_ANCHOR" "$outfile"; then
         echo "  FAIL  $current_scenario"
-        echo "        width:       <= $max (capture is empty: nothing to check)"
+        echo "        width:       <= $max (nothing to check: the capture holds no rendered page, no title banner)"
         echo "        asserts:     $asserts"
         echo "        produced_by: $produced_by"
         echo "        contract:    $contract"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: max width $max (capture is empty)")
+        failures+=("$current_scenario :: max width $max (no rendered page)")
         return 0
     fi
 
@@ -1161,10 +1170,10 @@ scenario_pager_ansi() {
             print;
             exit;
         }
-    ' "$LTL/../ltl" 2>/dev/null)
+    ' "$LTL")
     # Fallback: scan the whole file for the less invocation.
     if [[ -z "$pager_default" ]]; then
-        pager_default=$(grep -oE "'less[^']*'" "$REPO_DIR/ltl" | head -1 | tr -d "'") || pager_default=""
+        pager_default=$(grep -oE "'less[^']*'" "$LTL" | head -1 | tr -d "'") || pager_default=""
     fi
     local probe="$TMP_DIR/pager-probe.txt"
     echo "$pager_default" > "$probe"
@@ -1172,21 +1181,19 @@ scenario_pager_ansi() {
         pattern     'less -R' \
         asserts     "Unix-default pager is 'less -R'; the -R flag tells less to interpret ANSI color escapes from the title banner rather than render them as literal ^[[Nm text. Plain 'less' would show the codes verbatim and confuse users." \
         produced_by 'pipe_to_pager() in ltl (Unix branch when $PAGER is unset)' \
-        contract    'Issue #261: pager configuration is part of the user-visible help/explain contract; regression here would re-introduce the ANSI-leak bug the user originally reported' \
-        run_free    "the checkout's ltl source"
+        contract    'Issue #261: pager configuration is part of the user-visible help/explain contract; regression here would re-introduce the ANSI-leak bug the user originally reported'
 
     current_scenario="pager-ansi:strip_ansi-exists"
     echo "[$current_scenario]"
     # Assert strip_ansi() function is defined in ltl source (safety net for
     # Windows `more` and fallback paths).
     local sym_probe="$TMP_DIR/sym-probe.txt"
-    grep -nE '^sub strip_ansi\b' "$REPO_DIR/ltl" > "$sym_probe" || true
+    grep -nE '^sub strip_ansi\b' "$LTL" > "$sym_probe" || true
     assert_line "$sym_probe" \
         pattern     '^[0-9]+:sub strip_ansi' \
         asserts     "strip_ansi() helper exists in ltl. It is the fallback for environments where the pager cannot interpret ANSI (notably legacy Windows \`more\`) and for the pager-failure path." \
         produced_by 'strip_ansi() in ltl' \
-        contract    'Issue #261: ANSI-stripping must be available as a fallback so the title banner cannot leak as literal text in any supported configuration' \
-        run_free    "the checkout's ltl source"
+        contract    'Issue #261: ANSI-stripping must be available as a fallback so the title banner cannot leak as literal text in any supported configuration'
 
     current_scenario="pager-ansi:strip_ansi-removes-CSI"
     echo "[$current_scenario]"

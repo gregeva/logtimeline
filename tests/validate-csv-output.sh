@@ -62,9 +62,10 @@ neutralize_colour_env
 
 
 # End-of-run cleanup runs only when standalone (CI unset). Trap covers
-# both clean exit and error paths.
-KEY_CUT_DIR=""
-trap 'csv_cache_maybe_cleanup; [[ -n "$KEY_CUT_DIR" ]] && rm -rf "$KEY_CUT_DIR"; true' EXIT
+# both clean exit and error paths. The harness's own captures live under
+# TMP_DIR, removed on any exit.
+TMP_DIR="$(mktemp -d)"
+trap 'csv_cache_maybe_cleanup; rm -rf "$TMP_DIR"; true' EXIT
 
 # Sanity: required files exist. A missing file would silently skip work and
 # falsely pass, so fail loudly here.
@@ -331,7 +332,7 @@ key_cut_scenario() {
         'The request line longer than the cap is kept as a key of exactly the cap: the key sites cut at the cut the run reports'
 }
 
-KEY_CUT_DIR="$(mktemp -d)"
+KEY_CUT_DIR="$TMP_DIR/key-cut"
 key_cut_scenario key-cut-csv 350 -o
 key_cut_scenario key-cut-csv-grouping 350 -o -g
 key_cut_scenario key-cut-csv-no-retention none -n 0 -o
@@ -442,7 +443,7 @@ cache_assert 'an artifact with no record of its producing code is stale' \
 
 # 5. The refresh itself: the warning reaches stderr and the artifact is rebuilt.
 cache_backdate "$CACHE_MSG" $(( (_CSV_CACHE_MAX_AGE_MINUTES + 5) * 60 ))
-cache_refresh_err="$(mktemp)"
+cache_refresh_err="$TMP_DIR/cache-refresh.err"
 set +e
 csv_cache_produce "$CACHE_SCENARIO" "$cache_logfile" "$cache_options" \
     "$(csv_cache_logfile_shorthand "$cache_logfile")" 2>"$cache_refresh_err"
@@ -453,7 +454,6 @@ cache_assert 'a stale cache is refreshed, and says so' \
     "$([[ $rc -eq 0 && $refresh_age -lt 300 ]] && grep -q 'WARNING stale cache' "$cache_refresh_err" && echo 0 || echo 1)" \
     "produce_rc=$rc artifact_age_seconds=$refresh_age stderr=$(sed 's/^/          /' "$cache_refresh_err")" \
     'The refresh is not silent. A cache that quietly serves stale artifacts is what kept this invisible for three days, so the run states that the artifacts were stale and are being produced again, and the artifact on disk is the new one.'
-rm -f "$cache_refresh_err"
 fi
 
 echo ""
