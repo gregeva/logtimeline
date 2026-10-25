@@ -1588,7 +1588,7 @@ The same whole run from the scratchpad worktree at f51c2655 passes the same
 ### Stage 2 gate
 
 On 61ecec7a, `$version_number` restored to `0.20.0`. The `after` benchmark,
-single-day-access-log-standard, against the `before` on cd4c3639: total
+single-day-access-log-standard, against the `before` taken at stage 2's start: total
 4.9 s against 5.2 s, rss_peak 101.3 MB against 102.4 MB; `ltl`'s only change
 is the version string. The full suite, `./tests/run-suite.sh`: 54
 harnesses, 54 passed, the checker 780 checks. `$TMPDIR` listed at the
