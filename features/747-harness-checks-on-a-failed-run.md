@@ -1561,6 +1561,8 @@ and exits 1, passing only its run-free checks (explain 59, format-detection
 `$TMPDIR`, which closes S2-AC5's part for D6's seven harnesses. The checker
 passes their scenarios, 60 checks: fifteen a harness, the checker in the
 working tree already running the noise stub of drop S2-8.
+The same 16 runs from the scratchpad worktree at 4479c0c0 report the same
+summary, exit status, passed and failed counts as the main checkout.
 
 ### Resuming stage 2
 
