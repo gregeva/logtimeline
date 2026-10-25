@@ -182,15 +182,31 @@ selections are release instruments and are never run during issue work.
 ### (b) The complete harness suite, after the benchmark
 
 Every `tests/validate-*.sh` exits 0, and each summary line shows assertions
-actually ran. Run `CI=1 ./tests/validate-csv-output.sh` before
-`CI=1 ./tests/validate-statistics.sh` (shared cache), then the rest. Capture
-each harness's output once to a scratch file and inspect the file.
+actually ran. The suite runs through one script, and only through it:
+
+```bash
+./tests/run-suite.sh <scratch-dir>      # long and resource-intensive: the gate's run, once
+```
+
+It runs every harness to its end, whatever an earlier one returned:
+`validate-csv-output.sh`, then `validate-statistics.sh` (they share the CSV
+cache), then the rest, `validate-harness-failed-run.sh` last, each under
+`CI=1`, with `./tests/cleanup-test-artifacts.sh` before the first and after
+the last. Each harness's output is captured to `<scratch-dir>/<harness>.txt`;
+one line per harness and `<scratch-dir>/suite.tsv` give its exit, its summary
+counts and its capture. A harness passes when it exits 0 and its summary
+counts at least one passed check; the script exits 0 only when every harness
+passed. Inspect the captures, never a re-run. The Bash guard refuses the
+script in a checkout whose `$version_number` still carries its issue marker
+or that holds an uncommitted change.
 
 The suite is the gate's failsafe, never a development tool. While working, the
 check is the developer's own runs aimed at the change, and the harness
 scenarios the change needs, named with `--scenario` (`tests/HARNESS-DESIGN.md`
-§ Running what the change needs), never a whole harness. The full suite runs here, once; its second pass on the
-generated read path belongs to the release gate (§ 5, step 4).
+§ Running what the change needs). At the end of a stage, the few harnesses
+the issue's work touches may run whole; at the end of a drop, not. The full
+suite runs here, once; its second pass on the generated read path belongs to
+the release gate (§ 5, step 4).
 
 ## 4. Merge and close
 
@@ -296,8 +312,8 @@ architect, is a last resort after the steps have been tried singly.
 
 1. `git checkout release/X.Y.Z && git pull origin release/X.Y.Z`
 2. Verify `$version_number` reads `X.Y.Z` (no branch left its `-{issue}` marker). If wrong, fix it here and note which branch.
-3. Run every `tests/validate-*.sh`, `CI=1 ./tests/validate-csv-output.sh` first, then `CI=1 ./tests/validate-statistics.sh`, then the rest; capture once, inspect the files. The gate is the complete suite.
-4. For `validate-statistics.sh`: T3/T4 failures on any layer (L1 drift, L2 invariants, L3 NumPy/SciPy oracle) block; T1/T2 advisories are reviewed for intentional drift. Then `./tests/cleanup-test-artifacts.sh`.
+3. `./tests/run-suite.sh <scratch-dir>`: every `tests/validate-*.sh`, in the order and with the captures of § 3 (b); inspect the files. The gate is the complete suite.
+4. For `validate-statistics.sh`: T3/T4 failures on any layer (L1 drift, L2 invariants, L3 NumPy/SciPy oracle) block; T1/T2 advisories are reviewed for intentional drift.
    Then the suite runs a second time, on the generated read path
    (`features/621-generated-read-loop-body.md` D3). The harnesses' fixtures are
    under the read path's size threshold, so the first run reads every file with
@@ -310,12 +326,10 @@ architect, is a last resort after the steps have been tried singly.
    changes, so it runs in the first pass only. So is
    `tests/validate-harness-failed-run.sh`, which runs every harness against
    stubs of its own whatever `LTL` names, and would repeat the first pass.
+   The script makes the copy in the scratch directory, refuses to run when it
+   differs from `ltl` in more than that one line, and leaves both harnesses out:
    ```bash
-   gen="$(mktemp -d)/ltl"
-   sed 's/^my \$read_path_threshold       = 2_097_152;/my $read_path_threshold       = 0;/' ltl > "$gen" && chmod +x "$gen"
-   diff ltl "$gen" | grep -c '^>'      # exactly 1, or the copy is wrong
-   LTL="$gen" CI=1 ./tests/validate-csv-output.sh   # then validate-statistics.sh, then the rest but validate-read-path.sh and validate-harness-failed-run.sh
-   ./tests/cleanup-test-artifacts.sh
+   ./tests/run-suite.sh --generated-read-path <another-scratch-dir>
    ```
 5. `caffeinate -s ./tests/baseline/run-benchmark.sh all --label vX.Y.Z` (≈2.5 h; `all` is required, `full` is not sufficient).
 6. `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv`

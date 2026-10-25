@@ -37,9 +37,11 @@ behaviour in any harness. These are the rules that have cost time when skipped:
   `tests/validate-scenario-selector.sh`.
 - While iterating, run only the scenarios the change needs, one `--scenario`
   per name (names are under `--list`; a scenario reading another's capture is
-  named with it), never the whole harness; capture the output once and grep the file. The full suite runs once,
-  as the completion gate (`docs/process/workflow.md` § 3), and a harness change
-  puts that gate in force because what "passing" means has changed.
+  named with it), never the whole harness; capture the output once and grep the file. At the end of a stage,
+  the few harnesses the issue touches may run whole; at the end of a drop, not.
+  The full suite runs once, as the completion gate, through `tests/run-suite.sh`
+  (`docs/process/workflow.md` § 3), and a harness change puts that gate in force
+  because what "passing" means has changed.
 - Tests are derived from the acceptance criteria in the feature doc, written
   before the code (`docs/test-driven-development.md`). A test written from the
   implementation confirms the implementation, including its misreading.

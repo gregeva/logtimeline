@@ -66,15 +66,38 @@ deny "run-benchmark.sh full/xl/all without 'caffeinate -s' - the host sleeps mid
     if $cmd =~ /(?:^|[;&|(]\s*|\b(?:nohup|time|sudo|caffeinate(?:\s+-\S+)*)\s+)(?:\.\/|\S*\/)?run-benchmark\.sh\s+(?:full|xl|all)\b/
     && $cmd !~ /\bcaffeinate\b[^;&|]*run-benchmark\.sh/;
 
-# --- harnesses run by scenario while working; a whole harness, or a loop over
-# them, is the completion gate's form (CLAUDE.md § Before running a command)
-for my $segment (split /[;&|\n()]+/, $cmd) {
-    next unless $segment =~ /^\s*(?:\w+=\S*\s+)*(?:(?:bash|sh|time|caffeinate(?:\s+-\S+)*)\s+)*(?:\S*\/)?validate-[\w-]+\.sh\b(.*)$/;
-    ask "a harness run without --scenario is the completion gate's form, never a development check - confirm this is the gate"
-        unless $1 =~ /--scenario\b|--list\b/;
+# --- the full suite runs through tests/run-suite.sh, once, at the completion
+# gate: refused in a checkout whose version is still stamped or that holds an
+# uncommitted change (docs/process/workflow.md § 3). Any one harness passes.
+if ($cmd =~ m{(?:^|[;&|(\n])\s*(?:\w+=\S*\s+)*(?:(?:bash|sh|nohup|time|caffeinate(?:\s+-\S+)*)\s+)*["']?((?:[^\s;&|()"'=]*/)?)run-suite\.sh\b}) {
+    my $dir = $1;
+    my $purpose = "tests/run-suite.sh is the full harness suite, long and resource-intensive, run once at the completion gate before the PR (docs/process/workflow.md § 3); work in progress runs the harnesses it needs by scenario (tests/HARNESS-DESIGN.md § Running what the change needs)";
+    deny "$purpose. Name it by a literal path, with no cd in the same command, so the checkout it runs from can be checked"
+        if $dir =~ /[\$`]/ || $cmd =~ /(?:^|[;&|(]\s*)(?:cd|pushd)\s/;
+    $dir =~ s{^~/}{$ENV{HOME}/};
+    my $cwd = $call->{cwd} // $ENV{CLAUDE_PROJECT_DIR} // '.';
+    $dir = $dir eq '' ? $cwd : $dir =~ m{^(?:/|[A-Za-z]:[\\/])} ? $dir : "$cwd/$dir";
+    my ($checkout) = -d $dir ? git_lines( '-C', $dir, 'rev-parse', '--show-toplevel' ) : ();
+    deny "$purpose. $dir is not in a git checkout" unless defined $checkout;
+    my @unmet;
+    my $source = '';
+    if ( open my $fh, '<', "$checkout/ltl" ) { local $/; $source = <$fh>; close $fh }
+    my ($version) = $source =~ /^my \$version_number\s*=\s*"([^"]*)"/m;
+    push @unmet, '$version_number reads "' . ( $version // 'nothing' ) . '", not restored to X.Y.Z'
+        unless ( $version // '' ) =~ /^\d+\.\d+\.\d+$/;
+    my @changed = map { s/^\s*\S+\s+//r } git_lines( '-C', $checkout, 'status', '--porcelain', '--untracked-files=no' );
+    push @unmet, scalar(@changed) . ' uncommitted change(s): ' . join( ', ', @changed ) if @changed;
+    deny "$purpose. $checkout is not at the gate: " . join( '; ', @unmet ) if @unmet;
 }
-ask "a loop over every harness is the completion gate - confirm this is the gate"
-    if $cmd =~ /\bfor\s+\w+\s+in\s+[^;]*validate-\*\.sh/;
+
+# A git command's output, one chomped line each.
+sub git_lines {
+    open my $fh, '-|', 'git', @_ or return ();
+    local $/ = "\n";
+    chomp( my @lines = <$fh> );
+    close $fh;
+    return @lines;
+}
 
 # --- release-only instruments and guard overrides need the architect's yes
 ask "run-benchmark.sh full/xl/all is a release-gate instrument (about 2.5 h), never a development tool - confirm this is the release cut"

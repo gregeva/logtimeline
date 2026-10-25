@@ -218,10 +218,12 @@ about anything else, these still hold.
       `--list`. An unknown name or flag exits non-zero having run nothing, so a
       run that reports assertions is a run of what was named.
 - [ ] Only the harness under discussion runs while working it, and only its
-      scenarios the change needs. The full suite runs once, as the completion
-      gate. Before launching any gate: name the behaviour this change could have
-      altered; if none, there is nothing to prove. A harness run without
-      `--scenario` asks the architect first (`process/claude-hooks/guard-bash.sh`).
+      scenarios the change needs. At the end of a stage the few harnesses the
+      issue touches may run whole; at the end of a drop, not. The full suite
+      runs once, as the completion gate, through `tests/run-suite.sh` and
+      nothing else; the Bash guard refuses it outside the gate. Before
+      launching any gate: name the behaviour this change could have altered;
+      if none, there is nothing to prove.
 - [ ] Every `ltl` invocation in a test is shaped to the assertion that reads it:
       smallest fixture carrying the signal, everything unread switched off via
       documented options (`-bs 1440 -oe` for detection and selection assertions).
@@ -437,8 +439,9 @@ rules in this file are enforced rather than advised:
   `process/claude-hooks/session-start.sh` prints the outstanding-state sweep into
   context. Before every Bash call `process/claude-hooks/guard-bash.sh` blocks
   destructive operations against `logs/`, `ltl` without `--disable-progress`,
-  `git merge`, pushes to main, `--delete-branch`, and model-versioned commit
-  trailers, and asks before release-only benchmark tiers or `--no-verify`.
+  `git merge`, pushes to main, `--delete-branch`, model-versioned commit
+  trailers, and `tests/run-suite.sh` in a checkout not at the completion gate,
+  and asks before release-only benchmark tiers or `--no-verify`.
   Before every file write `process/claude-hooks/guard-write.sh` blocks writes
   under `logs/`, to released baseline TSVs, and of problem reports into the repo,
   and a feature doc write that cites a `features/` or `docs/` record the
@@ -494,7 +497,7 @@ perl -c ltl                                         # syntax check; the whole ga
 ./tests/validate-<name>.sh --scenario <a> --scenario <b>   # the scenarios the change needs, while iterating
 ./tests/baseline/run-benchmark.sh single-day-access-log-standard --label <issue>-before   # and -after, first in the gate
 ./tests/baseline/compare-results.sh summary tests/baseline/results/<issue>-before.tsv tests/baseline/results/<issue>-after.tsv
-# Full suite (completion gate only, after the benchmark): CI=1 validate-csv-output.sh, then CI=1 validate-statistics.sh (shared cache), then the rest
+./tests/run-suite.sh <scratch-dir>                  # the full suite: completion gate only, after the benchmark
 ./tests/cleanup-test-artifacts.sh                   # the only sanctioned cleanup
 ```
 

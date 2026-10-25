@@ -283,6 +283,61 @@ decided by reading it.
   them in one follow-up of drop S2-1, which would run those harnesses twice,
   and over leaving them recorded only, which leaves every run of
   index-read-back and statistics-demand adding files to `$TMPDIR`.
+- **D7** (the architect, 2026-10-25, during drop S2-7). The full suite has one
+  entry point, `tests/run-suite.sh`, and the Bash guard checks that entry
+  point and nothing else about harnesses. Found first: in the two days to
+  2026-10-25 the guard's two harness rules in
+  `process/claude-hooks/guard-bash.sh` (a harness run without `--scenario`,
+  a loop over `tests/validate-*.sh`) stopped 91 commands for confirmation,
+  and none was a run of the suite: 60 passed their scenarios in a shell
+  variable, 11 named a harness in an assignment or an argument, 9 had a
+  quoted grep pattern split at its `|`, 10 looped over the harness files to
+  read them, and 1 ran one harness whole. The one suite run of those days, a
+  script in a session's scratchpad, met no check. No record named an entry
+  point: `docs/process/workflow.md` § 3 (b) and § 5 step 3 run each harness
+  in turn.
+  - `tests/run-suite.sh` runs every harness to its end, whatever an earlier
+    one returned: `CI=1 ./tests/validate-csv-output.sh`, then
+    `CI=1 ./tests/validate-statistics.sh`, then the rest, the failed-run
+    checker last. Each harness's output goes to its own file in a directory
+    given as the argument; it prints one line per harness (name, exit code,
+    summary line, duration, log path) and a closing count of passed and
+    failed with the failures named. A harness passes when it exits 0 and its
+    capture reaches a summary counting at least one passed check, read by
+    `process/check-harness-capture.pl`, as § 3 (b) defines the gate ("Every
+    `tests/validate-*.sh` exits 0, and each summary line shows assertions
+    actually ran"); the script exits 0 only when every harness passed. An
+    option runs the release cut's second pass on the generated read path:
+    the copy of `ltl` with a threshold of 0 made in the output directory and
+    refused when it differs in more than that line, `LTL` set, read-path and
+    the failed-run checker left out.
+    The run-to-the-end behaviour is as recommended, the architect having
+    asked whether a failure stops the suite: it does not. The workflow
+    (§ 3 (b), § 5 steps 3 and 4) and CLAUDE.md name the script as the way to
+    run the suite.
+  - The guard's two harness rules are removed. A command that runs
+    `tests/run-suite.sh` is refused outright (exit 2, as the write guard
+    refuses a citation not read) unless, in the checkout the script runs
+    from, `$version_number` is restored to `X.Y.Z` and no change is
+    uncommitted (an untracked file, such as the issue's benchmark TSVs, is
+    not a change). Its message says the script is the full suite, long and
+    resource-intensive, run once at the completion gate before the PR
+    (`docs/process/workflow.md` § 3), that work in progress runs the
+    harnesses it needs by scenario, and which condition is unmet. A path
+    holding a variable, or a `cd` in the same command, is refused too, the
+    checkout being unknown. No override.
+  - While working, harnesses run by scenario. At the end of a stage, the few
+    harnesses the issue's work touches may run whole; at the end of a drop,
+    not (a drop ends with the developer's own runs and the scenarios that
+    read what it changed). `tests/HARNESS-DESIGN.md` § Running what the
+    change needs, `.claude/rules/harnesses.md`, `docs/process/workflow.md`
+    § 3 (b) and CLAUDE.md say so.
+  - The working note of § Drop 2 that every harness run is a direct command,
+    so the guard sees it, is retired.
+  - Chosen over detecting a suite run in any command (loops, wrapper scripts
+    read from disk, quote-aware splitting), with the gate's preconditions
+    checked there and a timed override: the architect rejected it as
+    catching the wrong commands and missing the one that runs the suite.
 
 ## Constraints
 
@@ -688,8 +743,6 @@ Working notes for whoever resumes:
   ending in `/ltl` (`STUB=.../failing/ltl`) as a run of `ltl` without
   `--disable-progress` and blocks it; quote the value
   (`LTL="$SD/failing/ltl"`).
-- Every harness run is a direct command naming `tests/validate-<name>.sh`, so
-  the Bash guard sees it; no wrapper script runs harnesses.
 - A worktree for the drop checks exists under the scratchpad at `wt747`
   (detached at cdbc1205, with a `logs` symlink); move it to each drop's commit
   with `git -C <wt> checkout --detach <commit>`, and remove it at close-out with
@@ -1203,9 +1256,8 @@ commit and a push on the branch, and a comment pointing here.
    from the worktree.
 5. **The gate** (`docs/process/workflow.md` § 3), as at stage 1:
    - `$version_number` restored, then the `after` benchmark;
-   - the full suite: csv-output and statistics first under `CI=1`, then the
-     rest, the checker last;
-   - `./tests/cleanup-test-artifacts.sh`.
+   - the full suite, `./tests/run-suite.sh <scratch-dir>` (D7), its
+     captures inspected.
 
    Then the PR into `release/0.20.0`, the merge, and the close-out: #747
    closed again with its completion comment; the branch, the TSVs and the

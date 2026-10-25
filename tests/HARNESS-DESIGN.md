@@ -331,7 +331,10 @@ a scenario that reads a capture another scenario writes is run by naming both,
 and registration order runs the producer first. The bare run is the suite's
 form and the completion gate's (`docs/process/workflow.md` § 3), never the
 default while iterating: it spends the time of every scenario the change cannot
-touch, and it skips the question of what the change needs proving.
+touch, and it skips the question of what the change needs proving. At the end
+of a stage, the few harnesses the issue's work touches may run whole; at the
+end of a drop, not. The whole suite runs only through `tests/run-suite.sh`, at
+the gate.
 
 This is the selector-shaped form of *Harnesses must fail on missing anchors*
 below: a selector that matches nothing is an unasserted run. Two failure modes
