@@ -18,9 +18,10 @@ behaviour in any harness. These are the rules that have cost time when skipped:
 - A harness change passes its scenario of the failed-run checker before it is
   committed: `./tests/validate-harness-failed-run.sh --scenario <name>`
   (`tests/HARNESS-DESIGN.md` § The failed-run checker). Its source holds the
-  three rules there, and against an `ltl` that fails and one that prints
-  nothing it reaches its summary, exits non-zero, and passes only checks whose
-  PASS line is marked `[run-free: <what it read>]`.
+  three rules there, and against an `ltl` that fails, one that prints nothing
+  and one that prints an unrelated line, it reaches its summary, exits
+  non-zero, and passes only checks whose PASS line is marked
+  `[run-free: <what it read>]`.
 - Every harness that invokes `ltl` includes the stderr runtime-warning check
   (`tests/lib/runtime-warnings.sh`); a ` at <file> line <N>` on stderr is a bug.
 - Each `ltl` invocation is shaped to the assertion that reads it: smallest

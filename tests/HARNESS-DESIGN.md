@@ -764,10 +764,11 @@ by grep 10.
 
 **Confirming a fix.** Once a harness is read and fixed, its scenario of the
 failed-run checker confirms it (§ The failed-run checker): the source rules
-hold, and against both stubs the harness reaches its summary, exits non-zero,
-and passes only checks marked run-free. A guard that a check's run wrote what
-the check reads is shown failing on a stub that exits 0 having printed one
-unrelated line, or on a doctored capture without the line.
+hold, and against the three stubs the harness reaches its summary, exits
+non-zero, and passes only checks marked run-free. A guard that a check's run
+wrote what the check reads is shown failing on the third stub, which exits 0
+having printed one unrelated line, or, where that stub cannot reach the
+check, on a doctored capture without the line.
 
 ## The failed-run checker
 
@@ -796,11 +797,11 @@ certain there:
 | summary-in-scenario | the line printing the summary sits in a block other than a top-level `if` that does not test `scenario_wanted` or `scenario_selected`; or no line prints a summary in a form `process/check-harness-capture.pl` reads | the summary prints after the last scenario, at the top level, whatever the selection |
 | lookup-no-fallback | a variable is assigned from a command substitution that runs `grep` or `ls`, with no `\|\|` inside the substitution or after it | `\|\| var=""` on the assignment, or `\|\| true` inside it, and the empty value asserted on (shape 10) |
 
-**What it reads from a run.** The two stubs are two-line Perl scripts in a
+**What it reads from a run.** The three stubs are two-line Perl scripts in a
 temporary directory, named by their absolute paths: one prints nothing and
-exits 1, the other prints nothing and exits 0. The harness runs every scenario
-its `--list` names against each, and `process/check-harness-capture.pl` reads
-the capture. A run is a failure when:
+exits 1, one prints nothing and exits 0, and one prints an unrelated line and
+exits 0. The harness runs every scenario its `--list` names against each,
+and `process/check-harness-capture.pl` reads the capture. A run is a failure when:
 
 - the summary is not reached: a step ended the harness (shape 13, or a lookup
   under `set -e`, shape 10);

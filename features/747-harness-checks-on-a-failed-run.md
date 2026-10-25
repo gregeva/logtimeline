@@ -29,7 +29,8 @@ three fixed (§ Drop S2-4). Drop S2-5 done 2026-10-25 (89ac5a19): drop 5's six r
 fixed (§ Drop S2-5). Drop S2-6 done 2026-10-25 (3e2f7221): drop 6's four read, two
 fixed, and D6's one in that group (§ Drop S2-6). Drop S2-7 done
 2026-10-25: drop 7's six read, four fixed, and D6's two in that group
-(§ Drop S2-7). Next: § Resuming stage 2.
+(§ Drop S2-7). Drop S2-8 done 2026-10-25: the checker runs the noise stub
+(§ Drop S2-8). Next: § Resuming stage 2.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -1299,11 +1300,11 @@ harness's `--list` (§ Drop 8); the checker makes its own stubs.
 - [x] **S2-AC7.** The seven notice absences and duration-display's latency
       absence fail on a run that lacks what they read. *Assertable*: S7's
       proof.
-- [ ] **S2-AC8.** Against the noise stub every harness that runs `ltl`
+- [x] **S2-AC8.** Against the noise stub every harness that runs `ltl`
       reaches its summary, exits non-zero, prints as many PASS lines as it
       counts, and passes only checks marked run-free (D5). *Assertable*: the
       checker's run, its noise-stub checks.
-- [ ] **S2-AC9.** The method asks the third question, and the checker runs
+- [x] **S2-AC9.** The method asks the third question, and the checker runs
       the noise stub on every harness. *Assertable*: `tests/HARNESS-DESIGN.md`
       read, and the checker's fifteen checks per harness.
 - [ ] **S2-AC10.** The gate: every harness exits 0 at its passed count, and
@@ -1564,48 +1565,29 @@ working tree already running the noise stub of drop S2-8.
 The same 16 runs from the scratchpad worktree at 4479c0c0 report the same
 summary, exit status, passed and failed counts as the main checkout.
 
+### Drop S2-8
+
+The failed-run checker runs each harness against a third stub, `noise`, a
+two-line Perl script that prints `an unrelated line` and exits 0, with the
+same four conditions as the other two: fifteen checks a harness (the three
+source rules, four a stub). Its header comment, its summary message and a
+failure's message name what each stub does. `tests/HARNESS-DESIGN.md` names
+the three stubs under Confirming a fix and in § The failed-run checker;
+`.claude/rules/harnesses.md` names them in its checker rule. The CLAUDE.md
+checkpoint names no stub, only the checker's scenario, which now covers the
+third, and is left as it is.
+
+Runs: the checker's whole run from the main checkout passes all 52
+harnesses, 780 checks, 208 of them against the noise stub: every harness
+that runs `ltl` reaches its summary against it, exits non-zero, prints as
+many PASS lines as it counts, and passes only checks marked run-free.
+
 ### Resuming stage 2
 
-Where the work stands, 2026-10-25, stopped by the architect during drop
-S2-7's runs:
+Where the work stands, 2026-10-25: drops S2-1 to S2-8 done, each with its
+record above. Next: the gate, the PR, the merge and the close-out, as
+§ Stage 2 Delivery says.
 
-- **Done**: drops S2-1 to S2-6, each with its record above, each confirmed
-  from a worktree, each told on #747.
-- **In the working tree, not committed**: drop S2-7's changes to
-  `tests/validate-explain.sh`, `tests/validate-format-detection.sh`,
-  `tests/validate-index-read-back.sh` and
-  `tests/validate-statistics-demand.sh`, and its record, § Drop S2-7, whose
-  reading, fixes and proofs are done. duration-display and filter-summary
-  have no case and are unchanged.
-- **Next, in order**:
-  1. Drop S2-7's runs, from the main checkout, one after another: the four
-     changed harnesses on the real `ltl` and the failing, silent and noise
-     stubs, every scenario named, `$TMPDIR` listed before and after; then
-     their checker scenarios. The passed counts on the real `ltl` to keep:
-     explain 728, format-detection 472, index-read-back 107,
-     statistics-demand 167. Each stub run reaches its summary, exits 1 and
-     passes only run-free checks (explain 59, format-detection 3,
-     index-read-back 6, statistics-demand 1). Then the runs paragraph of
-     § Drop S2-7, S2-AC5's D6 part for index-read-back and
-     statistics-demand, the status line, a commit and a push; the same runs
-     from the worktree moved to that commit, compared; a second commit; a
-     comment on #747.
-  2. Drop S2-8, the checker: `tests/validate-harness-failed-run.sh` makes a
-     third stub, `noise` (a two-line Perl script printing
-     `an unrelated line`, exit 0), and runs each harness against it as
-     against the other two, `check_stub_run "$harness" noise`, its header
-     comment and its summary message naming the third stub: fifteen checks a
-     harness (the three source rules, four a stub). `tests/HARNESS-DESIGN.md`
-     names the third stub where it names two (§ Reading a harness, "against
-     both stubs" under Confirming a fix; § The failed-run checker, "The two
-     stubs are two-line Perl scripts"), and `.claude/rules/harnesses.md` in
-     its checker rule ("against an `ltl` that fails and one that prints
-     nothing"). The CLAUDE.md checkpoint names no stub, only the checker's
-     scenario, which then covers the third: it is left as it is, and the
-     record says so. The checker's whole run passes, from the main checkout
-     and from the worktree.
-  3. The gate, the PR, the merge and the close-out, as § Stage 2 Delivery
-     says.
 - **How each drop runs**: the harnesses read whole, with the review-gate
   greps of shapes 2, 3, 4 and 14 beside the noise baseline's unmarked list;
   each fix shown failing on the noise stub, or on a doctored copy of the
