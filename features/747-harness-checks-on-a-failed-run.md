@@ -30,7 +30,8 @@ fixed (§ Drop S2-5). Drop S2-6 done 2026-10-25 (3e2f7221): drop 6's four read, 
 fixed, and D6's one in that group (§ Drop S2-6). Drop S2-7 done
 2026-10-25: drop 7's six read, four fixed, and D6's two in that group
 (§ Drop S2-7). Drop S2-8 done 2026-10-25: the checker runs the noise stub
-(§ Drop S2-8). Next: § Resuming stage 2.
+(§ Drop S2-8). Gate passed 2026-10-25 (§ Stage 2 gate). Next:
+§ Resuming stage 2.
 Drops 5 and 6 were read during the baseline run; their cases are in
 § Per-harness record and their fix designs in § Fix designs read ahead. D3
 (the architect, during drop 1) adds drop 8, a final stage after drop 7.
@@ -1288,7 +1289,7 @@ harness's `--list` (§ Drop 8); the checker makes its own stubs.
       comments in drops S2-2 and S2-6).
 - [x] **S2-AC4.** doc-examples passes no example on a run whose output is
       not `ltl`'s. *Assertable*: S4's proof.
-- [ ] **S2-AC5.** No harness run leaves a file outside its own directory
+- [x] **S2-AC5.** No harness run leaves a file outside its own directory
       (D6 widened it from heatmap-palette and histogram-bin-counters).
       *Assertable*: S5's proof; for the seven harnesses of D6, the entries a
       real run adds to `$TMPDIR`, counted in each one's drop: none (the
@@ -1307,7 +1308,7 @@ harness's `--list` (§ Drop 8); the checker makes its own stubs.
 - [x] **S2-AC9.** The method asks the third question, and the checker runs
       the noise stub on every harness. *Assertable*: `tests/HARNESS-DESIGN.md`
       read, and the checker's fifteen checks per harness.
-- [ ] **S2-AC10.** The gate: every harness exits 0 at its passed count, and
+- [x] **S2-AC10.** The gate: every harness exits 0 at its passed count, and
       the checker passes every scenario. *Assertable*: the gate's run.
 
 ### Drop S2-1
@@ -1584,11 +1585,21 @@ many PASS lines as it counts, and passes only checks marked run-free.
 The same whole run from the scratchpad worktree at f51c2655 passes the same
 780 checks.
 
+### Stage 2 gate
+
+On 61ecec7a, `$version_number` restored to `0.20.0`. The `after` benchmark,
+single-day-access-log-standard, against the `before` on cd4c3639: total
+4.9 s against 5.2 s, rss_peak 101.3 MB against 102.4 MB; `ltl`'s only change
+is the version string. The full suite, `./tests/run-suite.sh`: 54
+harnesses, 54 passed, the checker 780 checks. `$TMPDIR` listed at the
+suite's start and after its end: the 113 entries added are all
+`BlobRegistryFiles-*`, a macOS WebKit directory 712 of which were there
+before and that nothing in the repository makes; no harness left an entry.
+
 ### Resuming stage 2
 
-Where the work stands, 2026-10-25: drops S2-1 to S2-8 done, each with its
-record above. Next: the gate, the PR, the merge and the close-out, as
-§ Stage 2 Delivery says.
+Where the work stands, 2026-10-25: drops S2-1 to S2-8 and the gate done.
+Next: the PR, the merge and the close-out, as § Stage 2 Delivery says.
 
 - **How each drop runs**: the harnesses read whole, with the review-gate
   greps of shapes 2, 3, 4 and 14 beside the noise baseline's unmarked list;
