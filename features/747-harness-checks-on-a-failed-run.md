@@ -1581,6 +1581,8 @@ Runs: the checker's whole run from the main checkout passes all 52
 harnesses, 780 checks, 208 of them against the noise stub: every harness
 that runs `ltl` reaches its summary against it, exits non-zero, prints as
 many PASS lines as it counts, and passes only checks marked run-free.
+The same whole run from the scratchpad worktree at f51c2655 passes the same
+780 checks.
 
 ### Resuming stage 2
 
