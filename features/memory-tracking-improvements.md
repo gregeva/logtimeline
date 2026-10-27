@@ -175,6 +175,65 @@ memory rows to attribute a memory change to the store that made it.
 | The run index, `memory_used` | "Peak memory during processing (bytes)" on a selection entry; the index itself is removed by #710 (remove the run index) | `features/index-file.md` |
 | `-mem` in `--help` and `docs/usage.md` | "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure" | `docs/usage.md`, the `-mem` row |
 
+### Records sweep (2026-10-27)
+
+`./process/find-records.sh --issues` over `-mem`, `-mem debug`, `MAXIMUM
+MEMORY USED`, `rss_peak`, `unattributed`, `memory-usage`, `benchmark-data`,
+`get_memory_usage`, `measure_memory_structures`, `named_structure_sizes`,
+`histogram_values_hl`, `max_memory_used` and `memory_used` listed 95 records
+and 41 issues. Every matching passage was read.
+
+**Records that bear on this work:**
+
+| Record | What it settles or constrains |
+|---|---|
+| `features/680-statistics-duration-copies.md` § 5.0 | A hidden third `-mem` operand, `release`, frees each message row's durations after its last use. Like any `-mem`, it also turns on the structure walks. It is a surface of `-mem` that the contract table above does not list. § 4.8 had already measured the peak gap: "`-mem`'s own `rss_peak` samples between steps and misses the spike inside statistics (969 MB against 1,124 MB on the same base run)". |
+| `features/180-named-pipeline-stages.md` | "Hard constraint: the `measure_memory_structures()` / `memory_debug_decomposition()` instrumentation checkpoints woven between steps keep their positions — their labels are observable `-mem`/debug output." Any decision that moves a reading meets this line. |
+| `features/457-summary-section-at-end-of-output.md` D2 | The reading that feeds MAXIMUM MEMORY USED sits immediately before the summary render. |
+| `features/616-gated-mean-derivation.md`, *The peak memory the run reports* | `$reported_max_memory_usage` is taken once, after the reading before the summary. The summary row, its memory shares and the aggregate export read it; "the index row and `-V benchmark-data` keep the lifetime peak". This is why the run index and the summary read different variables, by the architect's direction. |
+| `features/memory-baseline-profiling.md` DD-03a | `benchmark-data` reads the reading counters when its block prints, during the render, so it can trail the section's totals. Its `rss_peak` is read at the same moment, before the render's last two readings. |
+| `features/520-inert-sort-bytes-aggregate-demand.md` | "the structure walk raises RSS": memory there was measured from a separate `-mem` run per arm, apart from the timing. An earlier observation that `-mem` itself moves the peak. |
+| `features/472-highlight-bin-counter-telemetry.md` | `-mem` reports high-water marks, not live residency. |
+| `features/fuzzy-message-consolidation.md`, the decision on memory visibility | "All new data structures introduced by consolidation … are included in the `-mem` memory summary output". A rule of store coverage, kept by the consolidation stores in the map. #171 (transient consolidation structures tracked) and #346 (the message-statistics counter store missing from the map) are earlier cases of a store missing from the map. |
+| `features/2-memory-ceiling-progressive-eviction.md` E3; #2 (memory ceiling, open) | The planned ceiling controller steers on RSS read during the run, and RSS exceeds `Devel::Size` by 12.6 to 40.6 % per store. It would consume whatever in-run reading this work settles. No gate either way: each can reach a clean implementation without the other. |
+| `features/log-format-registry.md` D62 | `format_scan_subs` is a compile-boundary RSS delta, not a structure walk. It joins the high-water marks as a running total. |
+| `features/621-generated-read-loop-body.md` | The read loop's `-mem debug` sample carries a `#@when` gate marker. The packaged runtime adds 14 to 15 MB of unattributed memory. |
+| `features/614-operand-settlement.md` § 4.5 | `-mem` settles its operands (`debug`, the hidden `release`) through `settle_optional_operand()`. Any other word is a file argument. |
+| `features/412-notice-surfaces.md` | `get_memory_usage()` raises the `memory-unreadable` notice once per run on Windows. |
+| `docs/architecture-patterns.md` | Consumption sites of the run-scoped activation flag (`$memory_readings_active`), the `-V` telemetry sections (`emit_memory_usage_verbose`), the raw-store release table (`-mem release`) and the named pipeline stages. A new reading site or flag is recorded there. |
+| `features/189-bin-counter-primitives-implementation-readiness-audit.md` B13 | Catalogues `%histogram_values_hl` as a highlight twin to migrate with its base array. It does not note its absence from the `-mem` map. |
+| `features/528-record-lexical-retained-representation.md` D5; `features/561-retained-durations-as-numbers.md` | Harness assertions read the exact `MEMORY` rows of `-V benchmark-data`, `tests/validate-format-registry.sh` among them. Any row added or renamed reaches them. |
+| #354 (large message rows move to the bin data model, open); #372 (paired-event correlation, open); `features/60-metric-visibility-demand-map.md` (open) | Use `-mem` as their measuring instrument. None sets a contract on it. |
+
+**Dismissed, with the reason:**
+
+- *They use the memory rows as evidence of their own change and set no
+  contract on them:* `features/` 34, 189-histogram-bin-counter-primitives,
+  213, 225, 273, 303, 305, 342 (both docs), 358, 395, 412-notice-surfaces-research,
+  417, 420, the three 426 docs, 444, 445, 446, 453, 458, 459, 460, 476, 478, 524,
+  525, 564, 567, 580, 605, 609, 615, 619, 620, 640, 665, 674, 747, 750,
+  `bin-counter-accuracy-and-observability.md`, `duration-statistics.md`,
+  `user-defined-metrics.md`, `nytprof-profiling-workflow.md`; `features/` 58,
+  179 and 209 (other `benchmark-data` rows).
+- *They set how the memory rows are formatted, which this work does not
+  change:* `features/608-byte-unit-ladder.md`,
+  `features/617-width-to-format-rule.md`, `docs/percentage-presentation.md`,
+  `features/269-output-ordering-audit.md` F11 (the tie order of the breakdown,
+  now broken by name).
+- *They hold process or images:* `docs/process/workflow.md`,
+  `docs/process/screenshots.md`, `features/598-screenshot-capture.md`,
+  `docs/toolchain-guidance.md`.
+- *They record the run index's `memory_used` as read by nothing:*
+  `features/708-run-index-deprecation.md`.
+- *Release notes,* which are history: v0.10.2, v0.10.4, v0.13.0, v0.14.3, v0.14.4,
+  v0.15.0, v0.16.0, v0.17.0, v0.20.0.
+- *Closed issues,* whose record is a feature doc above or whose fix shipped:
+  #46, #50, #51, #131, #146, #171, #172, #180, #226, #289 (its highlight
+  counter store was retired under #472), #346, #356, #358, #362, #400, #413,
+  #415, #416, #417, #453, #455 (its record has no memory passage), #472, #503,
+  #561, #614, #680. #729 (process, tests and build, open) mentions `-mem` in
+  passing.
+
 ### The architect's direction (2026-10-12)
 
 - **The aim is a correct peak, not full attribution.** Attributing a routine's
@@ -315,6 +374,59 @@ final-pass walks of 0.61 to 0.64 s at one day, 17 of 1.66 s and 6 of 2.05 s at
 three days. The process-memory readings over the same runs cost 26 to 28 ms.
 Measured in § Issue #146 › Drop 2. This conflicts with the direction above (no
 measurement with an iterative cost) and belongs with the placement it sets.
+
+### Premise re-measured on the release branch (2026-10-27)
+
+The code has moved since the findings above. #146 changed the reading and
+added `-V memory-usage`, so the issue's cases were run again on
+`release/0.20.0` at `6290d95a`, on macOS, one run each, one after another.
+Each ran from a scratch directory with the benchmark's own options
+(`--disable-progress -V benchmark-data,memory-usage --terminal-width 200`, and
+`-mem` where stated) under `/usr/bin/time -l` for the operating system's peak.
+The benchmark's `-V benchmark-data` is used rather than bare `-V`, which makes
+grouping keep member keys (§ Memory Diagnostic Method).
+
+**The highlighted raw histogram values are still unmeasured.** On the one-day
+web application access log carrying execution time in the duration field
+(148 MB, 761,698 lines), with `-mem`:
+
+| Options | `histogram_values` | `unattributed` | `rss_peak` | OS peak |
+|---|---|---|---|---|
+| `-hg -hgdm raw` | 71.4 MB | 83.4 MB | 209.5 MB | 209.6 MB |
+| `-hg -hgdm raw -h HTTP` (every line highlighted) | 71.4 MB | 143.1 MB | 269.0 MB | 293.7 MB |
+| `-hg -hgdm raw -h POST` | 71.4 MB | 132.3 MB | 258.2 MB | 278.8 MB |
+| `-hg -h HTTP` (default data model) | 0 | 52.8 MB | 107.6 MB | 107.8 MB |
+
+With every line highlighted, `unattributed` rises by 59.7 MB over the
+unhighlighted run. `-mem` has no row for the highlighted copy, and
+`%histogram_values_hl` is still missing from `named_structure_sizes()`.
+
+**The reported peak falls short of the operating system's in three of the six
+cases, with `-mem` and without it:**
+
+| Input and options | With `-mem`: `rss_peak` / OS peak | Short by | Without `-mem`: `rss_peak` / OS peak | Short by |
+|---|---|---|---|---|
+| one-day log, `-hg -hgdm raw -h HTTP` | 269.0 / 293.7 MB | 24.7 MB | 264.4 / 291.6 MB | 27.2 MB |
+| one month of one server's web application access logs (1.5 GB, 28 files), `-bs 1440 -n 25 -g -m uuid` | 860.8 / 1,019.2 MB | 158.4 MB | 852.8 / 1,011.2 MB | 158.4 MB |
+| the same month, `-bs 1440 -hm -hg -g -m uuid` | 670.5 / 769.7 MB | 99.3 MB | 764.6 / 764.6 MB | 0 |
+
+- **The structure walks do not cause the gap.** It is the same with `-mem`
+  and without it on the first two cases.
+- **Where the reclaim falls varies from run to run.** On the third case the
+  reading after statistics caught the peak in one run and missed it by 99 MB
+  in the other, as § Findings describes.
+- **The `-n 25 -g -m uuid` case is new.** In the 0.19.0 rounds its three
+  identical runs peaked at 932, 936 and 969 MB, each equal to `time -l`. On
+  the release branch the OS peak is 1,011 to 1,019 MB, and the reported peak is
+  158 MB below it in both runs.
+- **Reading counts are the same with and without `-mem`.** The one-day log
+  took 8 readings: 6 at phase boundaries and 2 around the scan-sub compiles.
+  The month took 67 and 69: 5 and 7 at phase boundaries, 43 at grouping
+  checkpoints, 15 at final-pass windows and 4 around the scan-sub compiles.
+- **On macOS each reading launches `ps`.** The 58 grouping readings on the
+  month took 0.46 to 0.55 s, and every reading together 0.56 to 0.64 s of a
+  90 to 120 s run. The grouping readings grow in number with the input.
+- **No run's stderr carries ` at <file> line <N>`.**
 
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
