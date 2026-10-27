@@ -156,8 +156,9 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 
 **Status:** in progress since 2026-10-27, specification stage, recorded
 directly on `release/0.20.0`. Filed 2026-10-12, found while reading the third
-`all`-tier benchmark round of 0.19.0. Locked so far: D1, the reported peak is
-the operating system's kept high-water mark (§ Decisions below).
+`all`-tier benchmark round of 0.19.0. Locked so far (§ Decisions below): D1, the
+reported peak is the operating system's kept high-water mark; D2, macOS reads
+it from `getrusage` through `BSD::Resource`.
 
 ### Contract of the surfaces touched (confirmed by the architect, 2026-10-27)
 
@@ -572,8 +573,21 @@ the module loaded from the scratch library. One run each:
   shown to catch every peak and adds a test to every pass of each loop it
   instruments; its remaining value would be attribution, which the issue sets
   as a non-goal. Linux reads `VmHWM` and Windows `PeakWorkingSetSize`, the
-  same measure as today's reading; how macOS reads it is decided separately.
+  same measure as today's reading; how macOS reads it is D2.
   The `-mem` rows still come from the readings between steps.
+- **D2 (locked 2026-10-27): macOS reads its peak as the resident high-water
+  mark from `getrusage`, through `BSD::Resource`.** The module is loaded on
+  macOS only, as `Win32::API` is on Windows only. It joins the cpanfile
+  generator's module lists, macOS setup and the macOS static binaries. A run
+  without the module falls back to the readings' peak and prints the
+  `memory-unreadable` notice, as `get_memory_usage()` does today when the
+  Windows reading fails. All three platforms then report the same measure,
+  and § Default Behavior's "RSS high-water mark" holds. The reading equalled
+  `time -l`'s resident peak to the byte in both probe runs, at about 1 µs.
+  The alternative, launching `footprint -p`, reports the physical footprint
+  (0.3 to 1.0 % below the resident peak in three runs) and takes 25 to 38 ms
+  per call, by parsing another tool's text output. Whether the packaged macOS
+  binary carries the module is a prototype item.
 
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
