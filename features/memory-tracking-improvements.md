@@ -510,7 +510,7 @@ before it. For each platform:
 |---|---|---|---|---|---|
 | Linux | `VmHWM` in `/proc/self/status` | resident set size, the measure read today | a file read, as `get_memory_usage()` reads `/proc/self/statm` | not measured | no; no Linux host in this stage |
 | Windows | `PeakWorkingSetSize`, offset 8 of the `PROCESS_MEMORY_COUNTERS` that `get_memory_usage()` already fills | working set, the measure read today | the same call, another offset | that call: 0.15 to 0.25 ms after the run's first (§ Issue #146, Drop 2) | the field's value is in § Issue #146 › Findings |
-| macOS | `ru_maxrss` from `getrusage` | resident set size, the measure read today | not reachable from Homebrew Perl 5.44: `syscall` is not implemented (`d_syscall='undef'`), and `BSD::Resource`, the CPAN module that wraps it, is compiled code and not installed | not measured | no |
+| macOS | `ru_maxrss` from `getrusage` | resident set size, the measure read today | not through Homebrew Perl 5.44's own functions: `syscall` is not implemented (`d_syscall='undef'`). Through `BSD::Resource`, a compiled CPAN module not in the project's dependencies: version 1.2911 builds and passes its tests against Perl 5.44, installed into a scratch library only | 1.0 to 1.2 µs | yes, below |
 | macOS | `phys_footprint_peak`, printed by `footprint -p <pid>` | physical footprint, not resident set size | launching `footprint` and parsing its output, as the current reading launches `ps` | 25 to 38 ms | yes, below |
 | macOS | "Physical footprint (peak)", printed by `vmmap --summary <pid>` | physical footprint | launching `vmmap` | 570 to 590 ms | in a standalone script only |
 
@@ -539,6 +539,22 @@ that had fallen short, one run each:
   in each of three runs. The copy differs only after the last reading. So
   whether a phase-boundary reading lands before the memory is handed back
   varies between identical runs.
+
+The resident peak was probed the same way: a scratch copy that, at the same
+point, reads `getrusage` through `BSD::Resource` and times 1,000 calls, with
+the module loaded from the scratch library. One run each:
+
+| Case | `time -l` maximum resident set size | `ru_maxrss` at the end of the run | `rss_peak`, the phase-boundary readings | `getrusage` call |
+|---|---|---|---|---|
+| one-day log, `-hg -hgdm raw -h HTTP` | 291,160,064 bytes | 291,160,064 bytes | 263.9 MB | 1.16 µs |
+| the month, `-bs 1440 -hm -hg -g -m uuid` | 762,920,960 bytes | 762,920,960 bytes | 762.7 MB | 1.01 µs |
+
+- **`ru_maxrss` read once at the end equals the operating system's resident
+  peak to the byte** in both cases, including the one-day case, where the
+  phase-boundary readings fell 27.2 MB short.
+- **The month case caught its peak in this run** (762.7 against 762.9 MB),
+  where it fell 99 MB short in one of the two premise runs.
+- **Neither run's stderr carries ` at <file> line <N>`.**
 
 ### Decisions
 
