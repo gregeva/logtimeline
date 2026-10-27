@@ -632,6 +632,50 @@ the module loaded from the scratch library. One run each:
     ("converge it onto the same surface when touched"): this work changes the
     map the hand-kept list would otherwise drift further from.
 
+### Acceptance criteria
+
+Drafted 2026-10-27 for the architect's agreement. The paths each invariant
+covers were enumerated from the code on `release/0.20.0`:
+
+- *The peak's consumers:* `print_verbose_output()` (`MEMORY rss_peak`,
+  `MEMORY unattributed`), `print_summary_table()` (MAXIMUM MEMORY USED, the
+  breakdown's shares and `unattributed`), `write_aggregate_export()`
+  (`max_memory_used`), `write_index_file()` (`memory_used`, until #710
+  removes the run index).
+- *The reading sites,* each a caller of `get_memory_usage()`: `phase_boundary`
+  (the pipeline steps), `grouping_checkpoint` (`run_consolidation_checkpoint()`),
+  `grouping_final_pass` (`process_final_pass_window()`), `format_scan_compile`,
+  `csv_block_compile`, `debug_decomposition`, `debug_sample`, and the new
+  kept-peak reading.
+- *The stores:* the 38 of § Store inventory.
+- *The consumers of the memory output:* `tests/validate-memory-usage.sh`,
+  `tests/validate-verbose-content-shape.sh`, `tests/validate-format-registry.sh`
+  (`MEMORY format_scan_subs`), `tests/validate-statistics-demand.sh`
+  (`MEMORY log_analysis`), `tests/validate-byte-units.sh` (MAXIMUM MEMORY USED
+  under `-mem`), `tests/validate-read-path.sh` (its `-mem debug` option set),
+  `tests/validate-summary-contribution-bar.sh`,
+  `tests/validate-timestamp-precision.sh`, `tests/baseline/compare-results.sh`.
+- *The benchmark:* every benchmark run passes `-mem -V benchmark-data`, so the
+  kept peak and the walks reach every test.
+
+| # | Condition and observable outcome | Triage | Validation |
+|---|---|---|---|
+| 1 | On every run, with or without `-mem`, `MEMORY rss_peak` and MAXIMUM MEMORY USED are not above the operating system's peak for the process, and within 1 % below it, including the cases where the readings between steps fell short | assertable | macOS: the three premise cases (the one-day log `-hg -hgdm raw -h HTTP`; the month `-bs 1440 -n 25 -g -m uuid` and `-bs 1440 -hm -hg -g -m uuid`) under `/usr/bin/time -l`, with and without `-mem`. Windows x64: the one-day case, sampled for `PeakWorkingSet64` as in § Issue #146, on the Windows development host. Linux: the one-day case under `/usr/bin/time -v` in a container with the corpus mounted, at the cost of a container run, since no Linux host is at hand. Recorded under Results |
+| 2 | The 32-bit Windows branch reads `PeakWorkingSetSize` at offset 8, four bytes wide | unassertable | Strawberry Perl is x64 only; the offset follows from the structure layout (`cb` 4 + `PageFaultCount` 4). Recorded gap |
+| 3 | Each consumer of the peak reports the kept peak at its moment: MAXIMUM MEMORY USED and the export's `max_memory_used` carry the same value, `rss_peak` and the index's `memory_used` the lifetime peak, and the breakdown's shares and `unattributed` are computed against it | assertable | A harness scenario reading the four consumers above on one fixture run with `-mem -V benchmark-data -o`, the index written; criterion 1's runs read them at scale |
+| 4 | The reported peak is never below a reading the run took: under `-mem debug`, every `rss` in the `memory-usage / debug` records is at or below `rss_peak` | assertable | `tests/validate-memory-usage.sh`, a `-mem debug` scenario; holds on every platform |
+| 5 | Without `-mem`, no reading is taken between steps: `-V memory-usage` lists the kept-peak site, once per reporting moment, and under `-V benchmark-data` the compile sites; no `phase_boundary`, `grouping_checkpoint` or `grouping_final_pass` reading | assertable | `tests/validate-memory-usage.sh`, runs without `-mem`: plain, `-g` (checkpoints and windows), a CSV input |
+| 6 | On macOS without `BSD::Resource`, the run prints the `memory-unreadable` notice once, reports the readings' peak, and takes the readings between steps | assertable | `tests/validate-memory-usage.sh`, a macOS-only scenario that hides the module through an `@INC` hook given at invocation |
+| 7 | The packaged macOS binaries carry `BSD::Resource` and report the kept peak | unknown | Prototype item (D2) |
+| 8 | `build/generate-cpanfile.sh` names `BSD::Resource` for macOS and regenerates both cpanfiles byte-identical to the committed ones | assertable | Regenerate, `git diff --exit-code build/` |
+| 9 | Every store of § Store inventory is in `named_structure_sizes()`: under `-mem`, `-V benchmark-data` carries a `MEMORY` row for each of the 38, and on the one-day log with `-hg -hgdm raw -h HTTP` the highlighted raw values' row reads about 70 MB | assertable | The row names of one `-mem -V benchmark-data` run against the 38; the premise case for the size |
+| 10 | No store that grows with the input is left outside the map | assertable, with a cost the architect decides | Either the inventory's scan, re-run once at the end and recorded, or a harness that runs the scan at every gate against a committed list of the written stores that do not grow (about 124), which a new store then joins or the map does |
+| 11 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
+| 12 | Under `-mem`, grouping's stores' high-water marks and the cost of their walks meet the bounds the prototype sets | unknown | Prototype scope (§ Decisions, grouping's structure walks) |
+| 13 | `-V memory-usage` keeps its section contract, with the kept-peak site in its fixed order, and every consumer of the memory output still asserts | assertable | Each consumer listed above |
+| 14 | No benchmark test runs slower beyond run-to-run variation | assertable (a measurement, recorded under Results) | Before and after, three runs each, medians with ranges: `single-day-access-log-standard`, and the tests that reach grouping's walks, `single-day-access-log-top25-consolidate`, `single-day-access-log-heatmap-histogram-consolidate` and `humungous-log-uniqueness-top25-consolidate` (the most checkpoints) |
+| 15 | No ` at <file> line <N>` on stderr in any run above | assertable | Captured stderr grepped |
+
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
 **Status:** in progress, branch `146-windows-process-memory`.
