@@ -499,6 +499,46 @@ recorded, so this is raised as a question, not a correction.
 The copy's only difference is 38 more structure walks at each reading, which
 change when a reading falls against the allocator handing memory back.
 
+### The peak each platform keeps for the process (2026-10-27)
+
+Each operating system keeps the process's own high-water mark. Read once, it
+gives the true peak up to the moment of the reading, whatever was freed
+before it. For each platform:
+
+| Platform | The kept peak | Its measure | Reached from Perl | One reading | Measured here |
+|---|---|---|---|---|---|
+| Linux | `VmHWM` in `/proc/self/status` | resident set size, the measure read today | a file read, as `get_memory_usage()` reads `/proc/self/statm` | not measured | no; no Linux host in this stage |
+| Windows | `PeakWorkingSetSize`, offset 8 of the `PROCESS_MEMORY_COUNTERS` that `get_memory_usage()` already fills | working set, the measure read today | the same call, another offset | that call: 0.15 to 0.25 ms after the run's first (§ Issue #146, Drop 2) | the field's value is in § Issue #146 › Findings |
+| macOS | `ru_maxrss` from `getrusage` | resident set size, the measure read today | not reachable from Homebrew Perl 5.44: `syscall` is not implemented (`d_syscall='undef'`), and `BSD::Resource`, the CPAN module that wraps it, is compiled code and not installed | not measured | no |
+| macOS | `phys_footprint_peak`, printed by `footprint -p <pid>` | physical footprint, not resident set size | launching `footprint` and parsing its output, as the current reading launches `ps` | 25 to 38 ms | yes, below |
+| macOS | "Physical footprint (peak)", printed by `vmmap --summary <pid>` | physical footprint | launching `vmmap` | 570 to 590 ms | in a standalone script only |
+
+`ps` on macOS offers `%mem`, `pmem`, `rss` and `vsz`, with no peak. In a
+standalone script, memory freed with `undef` stayed resident (`ps` read
+481 MB after a 500 MB string was freed), so a toy process cannot show a peak
+above the current reading. The `footprint` reading was therefore probed in
+`ltl` itself: a scratch copy that calls `footprint -p` once, after the run's
+last reading in `pipeline_render()`. It ran under `time -l` on the three cases
+that had fallen short, one run each:
+
+| Case | `time -l` maximum resident set size | `time -l` peak memory footprint | `phys_footprint_peak` at the end of the run | `rss_peak`, the phase-boundary readings | `footprint` call |
+|---|---|---|---|---|---|
+| one-day log, `-hg -hgdm raw -h HTTP` | 291.0 MB | 288.1 MB | 275 MiB (288.4 MB) | 263.8 MB | 25.2 ms |
+| the month, `-bs 1440 -n 25 -g -m uuid` | 1,011.5 MB | 1,008.9 MB | 962 MiB (1,008.7 MB) | 1,011.4 MB | 38.3 ms |
+| the month, `-bs 1440 -hm -hg -g -m uuid` | 766.3 MB | 763.7 MB | 728 MiB (763.4 MB) | 666.8 MB | 36.0 ms |
+
+- **A single end-of-run reading gives the operating system's own footprint
+  peak.** `footprint` prints mebibytes under the label `MB`. Converted, its
+  peak matches `time -l`'s peak memory footprint to the mebibyte in all three
+  cases.
+- **The footprint peak is a different measure from the resident peak.** It
+  sat 0.3 to 1.0 % below the resident peak in these runs.
+- **The month `-n 25 -g -m uuid` case caught its peak in this run.** It read
+  1,011.4 MB against 1,011.5 MB, where the unmodified `ltl` fell 158 MB short
+  in each of three runs. The copy differs only after the last reading. So
+  whether a phase-boundary reading lands before the memory is handed back
+  varies between identical runs.
+
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
 **Status:** in progress, branch `146-windows-process-memory`.
