@@ -158,7 +158,8 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 directly on `release/0.20.0`. Filed 2026-10-12, found while reading the third
 `all`-tier benchmark round of 0.19.0. Locked so far (§ Decisions below): D1, the
 reported peak is the operating system's kept high-water mark; D2, macOS reads
-it from `getrusage` through `BSD::Resource`.
+it from `getrusage` through `BSD::Resource`. Grouping's structure walks under
+`-mem` are chosen by prototype.
 
 ### Contract of the surfaces touched (confirmed by the architect, 2026-10-27)
 
@@ -493,7 +494,8 @@ Out of the scan's reach:
 **An observation against finding 5.** § Findings states that no unmeasured
 global store reached 256 KB on the month. The two per-key grouping maps reach
 1.28 MB each here. The scratch copy's store list behind that finding is not
-recorded, so this is raised as a question, not a correction.
+recorded. Both maps join the named map under this work (§ Decisions), so the
+difference no longer bears on it.
 
 **The same case caught its peak in this run.** On the month's
 `-n 25 -g -m uuid`, the scratch copy reported 1,018.1 MB against the OS's
@@ -588,6 +590,47 @@ the module loaded from the scratch library. One run each:
   (0.3 to 1.0 % below the resident peak in three runs) and takes 25 to 38 ms
   per call, by parsing another tool's text output. Whether the packaged macOS
   binary carries the module is a prototype item.
+- **Grouping's structure walks under `-mem` are chosen by prototype (the
+  architect, 2026-10-27).** No design is locked. A grouping checkpoint fires
+  each time a category holds 5,000 keys awaiting consolidation
+  (`$consolidation_trigger`), 43 times on the month, and the final pass walks
+  again at each of its 15 windows: far too often to sample memory. The
+  prototype stage implements each candidate and the choice follows from the
+  measured overall impact of each:
+  - a walk at every checkpoint and window, as today;
+  - a walk only when a cheap count of grouping's stores has grown past its
+    highest by a margin;
+  - walks at phase boundaries only.
+
+  What is at stake, on the month `-bs 1440 -n 25 -g -m uuid` (`-mem debug`,
+  one run): grouping's stores peak where only the walks inside grouping see
+  them. The consolidation clusters reach 221.0 MB against 140.5 MB at the
+  after-read walk, the ID index 52.0 MB against under 1 MiB, the key trigrams
+  27.6 MB against 1.7 MB. On the two month cases, final grouping took 4.72 s
+  and 3.50 s with `-mem` against 1.68 s and 1.45 s without (macOS, one run
+  each); the reading stage's difference was within run-to-run variation.
+  § Issue #356 Specification S4 already keeps `-mem debug`'s walks out of
+  loops.
+- **Following from D1 and D2: without `-mem`, no reading is taken between
+  steps.** Those readings served only the peak. The phase-boundary readings
+  (5 to 7 a run) and the grouping readings (58 on the month, 0.46 to 0.55 s
+  of `ps` launches on macOS) are skipped, unless the kept peak cannot be read
+  and the run falls back to the readings' peak (D2).
+- **Settled by the records, recorded and taken (2026-10-27):**
+  - *Every store the inventory found growing with the input joins
+    `named_structure_sizes()`*, the 38 candidates, `%histogram_values_hl`
+    (69.8 MB on the day with every line highlighted) foremost. The done-when
+    names every such store. The breakdown's rule, a row per store of at least
+    1 KB (§ Issue #356 Specification S3), shows them: 6 to 12 more rows on the
+    inventory's runs. `-V benchmark-data` gains a `MEMORY` row per store.
+  - *`unattributed` keeps its definition* (S3): the peak less the sum of every
+    store's high-water mark, floored at zero, so the rows still reconcile to
+    MAXIMUM MEMORY USED. With D1's peak it now also carries the working memory
+    a step frees before the next reading: 24.7 to 158.4 MB on the premise
+    cases.
+  - *`MEMORY_FINAL` converges onto `named_structure_sizes()`*, per S5
+    ("converge it onto the same surface when touched"): this work changes the
+    map the hand-kept list would otherwise drift further from.
 
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
