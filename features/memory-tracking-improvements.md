@@ -156,7 +156,8 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 
 **Status:** in progress since 2026-10-27, specification stage, recorded
 directly on `release/0.20.0`. Filed 2026-10-12, found while reading the third
-`all`-tier benchmark round of 0.19.0. No decision is locked yet.
+`all`-tier benchmark round of 0.19.0. Locked so far: D1, the reported peak is
+the operating system's kept high-water mark (§ Decisions below).
 
 ### Contract of the surfaces touched (confirmed by the architect, 2026-10-27)
 
@@ -538,6 +539,25 @@ that had fallen short, one run each:
   in each of three runs. The copy differs only after the last reading. So
   whether a phase-boundary reading lands before the memory is handed back
   varies between identical runs.
+
+### Decisions
+
+- **D1 (locked 2026-10-27): the reported peak is the high-water mark the
+  operating system keeps for the process.** It is read wherever a peak is
+  reported (`-V benchmark-data`'s `rss_peak`, MAXIMUM MEMORY USED and the
+  aggregate export, the end of the run), in place of the highest of the
+  readings taken between steps. It is the only way to the done-when's "true
+  peak at no iterative cost" by construction: a peak freed inside a step,
+  such as the one inside `calculate_histogram_buckets()` on the one-day log,
+  is caught whatever the allocator does before the next reading, and so is the
+  month `-n 25 -g -m uuid` case, which fell 158 MB short in three runs and
+  caught its peak in two. The alternative, readings placed before deletions
+  and in front of loops with one conditional reading inside a loop, cannot be
+  shown to catch every peak and adds a test to every pass of each loop it
+  instruments; its remaining value would be attribution, which the issue sets
+  as a non-goal. Linux reads `VmHWM` and Windows `PeakWorkingSetSize`, the
+  same measure as today's reading; how macOS reads it is decided separately.
+  The `-mem` rows still come from the readings between steps.
 
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
