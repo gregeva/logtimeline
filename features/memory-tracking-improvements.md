@@ -671,7 +671,7 @@ check covers every store all of the time (2026-10-27). It is recorded in
 | 4 | The reported peak is never below a reading the run took: under `-mem debug`, every `rss` in the `memory-usage / debug` records is at or below `rss_peak` | assertable | `tests/validate-memory-usage.sh`, a `-mem debug` scenario; holds on every platform |
 | 5 | Without `-mem`, no reading is taken between steps: `-V memory-usage` lists the kept-peak site, once per reporting moment, and under `-V benchmark-data` the compile sites; no `phase_boundary`, `grouping_checkpoint` or `grouping_final_pass` reading | assertable | `tests/validate-memory-usage.sh`, runs without `-mem`: plain, `-g` (checkpoints and windows), a CSV input |
 | 6 | On macOS without `BSD::Resource`, the run prints the `memory-unreadable` notice once, reports the readings' peak, and takes the readings between steps | assertable | `tests/validate-memory-usage.sh`, a macOS-only scenario that hides the module through an `@INC` hook given at invocation |
-| 7 | The packaged macOS binaries carry `BSD::Resource` and report the kept peak | unknown | Prototype item (D2) |
+| 7 | The packaged macOS binary (arm64, the one the release workflow builds) carries `BSD::Resource` and reports the kept peak | unknown | Prototype item (D2) |
 | 8 | `build/generate-cpanfile.sh` names `BSD::Resource` for macOS and regenerates both cpanfiles byte-identical to the committed ones | assertable | Regenerate, `git diff --exit-code build/` |
 | 9 | Every store of § Store inventory is in `named_structure_sizes()`: under `-mem`, `-V benchmark-data` carries a `MEMORY` row for each of the 38, and on the one-day log with `-hg -hgdm raw -h HTTP` the highlighted raw values' row reads about 70 MB | assertable | The row names of one `-mem -V benchmark-data` run against the 38; the premise case for the size |
 | 10 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
@@ -679,6 +679,56 @@ check covers every store all of the time (2026-10-27). It is recorded in
 | 12 | `-V memory-usage` keeps its section contract, with the kept-peak site in its fixed order, and every consumer of the memory output still asserts | assertable | Each consumer listed above |
 | 13 | No benchmark test runs slower beyond run-to-run variation | assertable (a measurement, recorded under Results) | Before and after, three runs each, medians with ranges: `single-day-access-log-standard`, and the tests that reach grouping's walks, `single-day-access-log-top25-consolidate`, `single-day-access-log-heatmap-histogram-consolidate` and `humungous-log-uniqueness-top25-consolidate` (the most checkpoints) |
 | 14 | No ` at <file> line <N>` on stderr in any run above | assertable | Captured stderr grepped |
+
+### Prototype plan
+
+Two questions are open after the decisions. Both are answered on the issue
+branch, under `prototype/709-memory-peak/`, with scratch copies of `ltl` patched
+per arm, so each arm keeps the production call structure. Prototype code is not
+promoted; its output is a locked decision here and a findings report beside it.
+
+**P1. Grouping's structure walks under `-mem`** (trigger (c), execution
+frequency × cost: a walk of every store, once per checkpoint or window; and
+criterion 11's bounds, unknown until measured). The arms:
+
+| Arm | What it does |
+|---|---|
+| floor | `ltl` as tracked, without `-mem` |
+| every call | `ltl` as tracked, with `-mem`: a walk at every checkpoint and every final-pass window |
+| conditional | A walk at a checkpoint or window only when a cheap count of grouping's stores has grown past its highest by a margin. The count candidates (held keys, clusters) and two or three margins are tried |
+| boundaries only | No walk inside grouping; the phase-boundary walks only |
+
+Each arm also times its walks per routine, as § Issue #146's scratch probe did,
+so a combination (every checkpoint, the windows conditional or not walked)
+is read from the same runs without an arm of its own.
+
+- *Inputs, at staged scale:* the premise's server of the month folder, from
+  2026-01-02: 1, 3, 7 and 15 days (34.4, 66.6, 327.2 and 801.9 MB); and the
+  application log of 286K unique messages (97 MB), the benchmark's most
+  checkpoint-heavy file. Options: the benchmark's `top25-consolidate`
+  (`-n 25 -g -m uuid`, with `-bs 1440` on the access logs), with
+  `--disable-progress -V benchmark-data`.
+- *Measured, three runs per arm and input, interleaved, medians with ranges:*
+  total time and the `parse/read_files` and `finalize/group_similar` stages;
+  walks per routine and their time; each grouping store's high-water mark
+  against the every-call arm's; `time -l`'s resident peak, since the walk
+  itself raises it.
+- *Weighed with them:* the lines each arm adds, and where its condition lives.
+- *Exit:* the arm chosen per routine, locked as a decision here with its
+  measured justification; criterion 11's bounds written from it.
+
+**P2. The packaged macOS binary carries `BSD::Resource`** (trigger (d),
+criterion 7). A scratch copy carrying the `getrusage` reading is packed with
+`build/macos-package.sh arm64`, the module taken from a scratch library on
+`PERL5LIB`. The binary then runs the one-day case with `PERL5LIB` unset and the
+scratch library out of reach. Its kept peak must equal `time -l`'s resident
+peak. Exit: the check demonstrated, or the gap recorded with what is done
+instead. The release workflow builds the arm64 binary only, after
+`build/macos-setup.sh --package` installs the cpanfile's modules, so the
+cpanfile change of criterion 8 is what carries the module there.
+
+Both prototypes are on this host. P1's runs take about 40 to 60 minutes in the
+background.
 
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
