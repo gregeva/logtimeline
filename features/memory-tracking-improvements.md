@@ -429,6 +429,21 @@ cases, with `-mem` and without it:**
   90 to 120 s run. The grouping readings grow in number with the input.
 - **No run's stderr carries ` at <file> line <N>`.**
 
+**Where the missed peak falls.** Each of the two cases that fell short in both
+runs was run once more with `-mem debug`, and its `memory-usage / debug`
+records were read:
+
+| Case | OS peak | Highest reading | Readings on either side of the miss | Step between them |
+|---|---|---|---|---|
+| one-day log, `-hg -hgdm raw -h HTTP` | 293.2 MB | 268.5 MB, after statistics | 268.5 MB after statistics, 266.0 MB after the histogram | `calculate_histogram_buckets()`, with no reading inside it |
+| the month, `-bs 1440 -n 25 -g -m uuid` | 1,017.4 MB | 859.0 MB, after statistics | 717.9 MB after the read (its 103 in-loop samples reach 642.7 MB), 793.5 MB after grouping, 859.0 MB after statistics | the final grouping pass or `calculate_all_statistics()` |
+
+On the month, the final pass's window readings stayed at or below 859.0 MB.
+No `-mem debug` sample falls inside either step, because the per-key samples
+come every 10,000 keys and `-n 25` gives statistics 25 rows. Placing the peak
+in one of the two steps needs a step probe on a scratch copy (§ Memory
+Diagnostic Method).
+
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
 **Status:** in progress, branch `146-windows-process-memory`.
