@@ -594,9 +594,10 @@ the module loaded from the scratch library. One run each:
   architect, 2026-10-27).** No design is locked. A grouping checkpoint fires
   each time a category holds 5,000 keys awaiting consolidation
   (`$consolidation_trigger`), 43 times on the month, and the final pass walks
-  again at each of its 15 windows: far too often to sample memory. The
-  prototype stage implements each candidate and the choice follows from the
-  measured overall impact of each:
+  again at each of its 15 windows. The architect judges 43 checkpoint walks
+  acceptable; whether a walk at every window is too much is for the prototype
+  to show. The prototype stage implements each candidate and the choice
+  follows from the measured overall impact of each:
   - a walk at every checkpoint and window, as today;
   - a walk only when a cheap count of grouping's stores has grown past its
     highest by a margin;
@@ -635,7 +636,11 @@ the module loaded from the scratch library. One run each:
 ### Acceptance criteria
 
 Drafted 2026-10-27 for the architect's agreement. The paths each invariant
-covers were enumerated from the code on `release/0.20.0`:
+covers were enumerated from the code on `release/0.20.0`. Coverage of every
+store that grows with the input is not a criterion: the architect set it as
+development and troubleshooting guidance, applied with judgement, since no
+check covers every store all of the time (2026-10-27). It is recorded in
+`docs/architecture-patterns.md` § Named-structure memory map.
 
 - *The peak's consumers:* `print_verbose_output()` (`MEMORY rss_peak`,
   `MEMORY unattributed`), `print_summary_table()` (MAXIMUM MEMORY USED, the
@@ -669,12 +674,11 @@ covers were enumerated from the code on `release/0.20.0`:
 | 7 | The packaged macOS binaries carry `BSD::Resource` and report the kept peak | unknown | Prototype item (D2) |
 | 8 | `build/generate-cpanfile.sh` names `BSD::Resource` for macOS and regenerates both cpanfiles byte-identical to the committed ones | assertable | Regenerate, `git diff --exit-code build/` |
 | 9 | Every store of § Store inventory is in `named_structure_sizes()`: under `-mem`, `-V benchmark-data` carries a `MEMORY` row for each of the 38, and on the one-day log with `-hg -hgdm raw -h HTTP` the highlighted raw values' row reads about 70 MB | assertable | The row names of one `-mem -V benchmark-data` run against the 38; the premise case for the size |
-| 10 | No store that grows with the input is left outside the map | assertable, with a cost the architect decides | Either the inventory's scan, re-run once at the end and recorded, or a harness that runs the scan at every gate against a committed list of the written stores that do not grow (about 124), which a new store then joins or the map does |
-| 11 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
-| 12 | Under `-mem`, grouping's stores' high-water marks and the cost of their walks meet the bounds the prototype sets | unknown | Prototype scope (§ Decisions, grouping's structure walks) |
-| 13 | `-V memory-usage` keeps its section contract, with the kept-peak site in its fixed order, and every consumer of the memory output still asserts | assertable | Each consumer listed above |
-| 14 | No benchmark test runs slower beyond run-to-run variation | assertable (a measurement, recorded under Results) | Before and after, three runs each, medians with ranges: `single-day-access-log-standard`, and the tests that reach grouping's walks, `single-day-access-log-top25-consolidate`, `single-day-access-log-heatmap-histogram-consolidate` and `humungous-log-uniqueness-top25-consolidate` (the most checkpoints) |
-| 15 | No ` at <file> line <N>` on stderr in any run above | assertable | Captured stderr grepped |
+| 10 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
+| 11 | Under `-mem`, grouping's stores' high-water marks and the cost of their walks meet the bounds the prototype sets | unknown | Prototype scope (§ Decisions, grouping's structure walks) |
+| 12 | `-V memory-usage` keeps its section contract, with the kept-peak site in its fixed order, and every consumer of the memory output still asserts | assertable | Each consumer listed above |
+| 13 | No benchmark test runs slower beyond run-to-run variation | assertable (a measurement, recorded under Results) | Before and after, three runs each, medians with ranges: `single-day-access-log-standard`, and the tests that reach grouping's walks, `single-day-access-log-top25-consolidate`, `single-day-access-log-heatmap-histogram-consolidate` and `humungous-log-uniqueness-top25-consolidate` (the most checkpoints) |
+| 14 | No ` at <file> line <N>` on stderr in any run above | assertable | Captured stderr grepped |
 
 ## Issue #146: Windows process memory, validated before the old dependency goes
 

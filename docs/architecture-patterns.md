@@ -769,6 +769,47 @@ has two emitters and its emitter sub carries an older name (audit, FP.2). The na
 
 ---
 
+## Named-structure memory map
+
+**Definition.** `named_structure_sizes()` is the one map of the stores `-mem`
+measures: a name per store and its `Devel::Size` size. Under `-mem`,
+`measure_memory_structures()` walks it and keeps each store's high-water mark,
+which the `-mem` breakdown and the `-V benchmark-data` `MEMORY` rows report;
+the peak less their sum is `unattributed`. `-mem debug` walks the same map at
+each phase boundary. A store holding compiled code cannot be walked (the walk
+crashes); the `format_scan_subs` compile-boundary figure stands for it.
+
+**Intended uses.** A large data store, whether found during an investigation
+or added to the code, joins the map in the same change, under its own name.
+This is development and troubleshooting guidance, applied with judgement:
+covering every store all of the time is neither expected nor checked by a
+test.
+
+**Reasoning.** A store missing from the map is counted only in
+`unattributed`, and a developer reading the breakdown cannot tell which store
+grew. Grouping's transient structures (#171), the message-statistics counter
+store (#346) and the highlighted raw histogram values (#709) were each found
+missing that way. A walk costs time that grows with the stores it measures
+(`features/memory-tracking-improvements.md` § Issue #146, Drop 2), so walks
+run only under `-mem`.
+
+**Consumption sites.**
+- `measure_memory_structures` :: `my %current_sizes = named_structure_sizes();`
+- `memory_debug_decomposition` :: `my %sizes = named_structure_sizes();`
+- `run_consolidation_checkpoint` :: `measure_memory_structures('grouping_checkpoint');`
+- `process_final_pass_window` :: `measure_memory_structures('grouping_final_pass');`
+- `print_verbose_output` :: `printf "MEMORY\t%s\t%d\n", $struct, $memory_high_water_marks{$struct};`
+- `print_summary_table` :: `my $unattributed = $reported_max_memory_usage - $total_hwm;`
+
+**Owning record.** `features/memory-tracking-improvements.md` (§ Issue #356
+Specification, S2 to S5, and § Issue #709).
+
+**Status.** Needs refinement: the stores § Issue #709's inventory found
+outside the map, and the walk at each grouping checkpoint and final-pass
+window, whose form #709's prototype chooses.
+
+---
+
 ## One resolution surface per vocabulary
 
 **Definition.** Parsing, matching, validation and formatting of a value class
