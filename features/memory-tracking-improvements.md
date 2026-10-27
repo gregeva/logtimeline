@@ -154,9 +154,26 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 
 ## Issue #709: unmeasured stores and a peak that misses working memory
 
-**Status:** filed 2026-10-12, `status: backlog`; no work started. Found while
-reading the third `all`-tier benchmark round of 0.19.0. Nothing here is a
-locked decision.
+**Status:** in progress since 2026-10-27, specification stage, recorded
+directly on `release/0.20.0`. Filed 2026-10-12, found while reading the third
+`all`-tier benchmark round of 0.19.0. No decision is locked yet.
+
+### Contract of the surfaces touched (confirmed by the architect, 2026-10-27)
+
+What the work serves: the analyst reads MAXIMUM MEMORY USED to know what a
+run needed; the developer reads the `-mem` breakdown and the benchmark's
+memory rows to attribute a memory change to the store that made it.
+
+| Surface | Contract | Record |
+|---|---|---|
+| MAXIMUM MEMORY USED, the run summary | "RSS (Resident Set Size) high-water mark is always captured and displayed as MAXIMUM MEMORY USED in the summary table", on every run, with or without `-mem` | § Default Behavior; restated in the direction below: "the one memory figure every run reports" |
+| The `-mem` breakdown | A row per named store of at least 1 KB, as a share of the peak, then an `unattributed` row: the peak less the sum of every store's high-water mark, floored at zero, so the rows reconcile to the peak | § Output Format, the notes; § Issue #356 Specification, S3 |
+| `-V benchmark-data`, `MEMORY` rows | `rss_peak` whenever `-V` is active; under `-mem` a row per store's high-water mark, then `MEMORY unattributed`, a reserved name in the row namespace | `features/memory-baseline-profiling.md` DD-03 |
+| `-V benchmark-data`, `MEMORY_FINAL` rows | Listed by hand in the benchmark block; to converge onto `named_structure_sizes()` when touched | § Issue #356 Specification, S5 |
+| `-V memory-usage` | A `site` line per caller of the memory reading, with its count and time; a new reading site joins the list in its fixed order | § `-V memory-usage` section contract |
+| The aggregate export, `max_memory_used` | The MAXIMUM MEMORY USED string, as the run summary prints it | `features/503-yaml-aggregate-export.md` D19 |
+| The run index, `memory_used` | "Peak memory during processing (bytes)" on a selection entry; the index itself is removed by #710 (remove the run index) | `features/index-file.md` |
+| `-mem` in `--help` and `docs/usage.md` | "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure" | `docs/usage.md`, the `-mem` row |
 
 ### The architect's direction (2026-10-12)
 
