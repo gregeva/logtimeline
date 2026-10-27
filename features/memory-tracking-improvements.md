@@ -174,6 +174,7 @@ memory rows to attribute a memory change to the store that made it.
 | The aggregate export, `max_memory_used` | The MAXIMUM MEMORY USED string, as the run summary prints it | `features/503-yaml-aggregate-export.md` D19 |
 | The run index, `memory_used` | "Peak memory during processing (bytes)" on a selection entry; the index itself is removed by #710 (remove the run index) | `features/index-file.md` |
 | `-mem` in `--help` and `docs/usage.md` | "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure" | `docs/usage.md`, the `-mem` row |
+| `-mem release`, hidden (added from the records sweep) | "by default the message rows keep their data; the release is behind a hidden `-mem release`": each message row's durations are freed after their last use. Being `-mem`, it also turns on the structure walks | `features/680-statistics-duration-copies.md` § 5.0 |
 
 ### Records sweep (2026-10-27)
 
