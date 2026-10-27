@@ -444,6 +444,61 @@ come every 10,000 keys and `-n 25` gives statistics 25 rows. Placing the peak
 in one of the two steps needs a step probe on a scratch copy (§ Memory
 Diagnostic Method).
 
+### Store inventory (2026-10-27)
+
+**Method.** `ltl` has 255 file-scope hashes and arrays. A scan of every
+assignment, increment and push after the declarations found 185 that are
+written while the tool runs; 23 of those are in `named_structure_sizes()`.
+Most of the rest are option settings, registries, display tables or other
+per-run constants. The 38 that could grow with lines, keys, buckets or files
+were added to the map of a scratch copy (rows prefixed `x_`). The copy ran
+with `-mem --terminal-width 200` under option families the eleven benchmark
+scenarios do not reach:
+- on the one-day log: bare `-V -n 25 -g -m uuid`;
+  `-V benchmark-data -hg -hgdm raw -hm -hmdm raw -mdm raw -h HTTP`;
+  `-V benchmark-data -idx`, run twice so the index is written and then read
+  back; `-V benchmark-data -n 25 -g -m uuid`;
+- on the month: `-V benchmark-data -bs 1440 -n 25 -g -m uuid`.
+
+No run's stderr carries ` at <file> line <N>`.
+
+**Unmeasured stores of 64 KB or more:**
+
+| Store | Grows with | Filled under | High-water mark |
+|---|---|---|---|
+| `%histogram_values_hl` | highlighted lines | `-hg` on the raw data model with a highlight | 69.8 MB, the day with every line highlighted |
+| `%consolidation_key_generation`, `%consolidation_key_checkpoint_count` | distinct message keys | `-g` | 559 KB each on the day, with or without bare `-V`; 1.28 MB each on the month |
+| `@verbose_output` | the verbose sections printed | bare `-V` | 513 KB, the day grouped |
+| `%format_detection_evidence`, `%format_detection_sample` | files read | every run | 195 KB and 111 KB, the month's 28 files |
+| `%index_file_data` | files read | every run | 69 KB, the month's 28 files |
+
+The other 31 candidates stayed under 64 KB in every run: the other streaming
+grouping maps, the per-file and index-read stores, the per-bucket heatmap
+percentiles, the histogram's buckets, boundaries and statistics with their
+highlight twins, the telemetry and demand stores, the timestamp date cache,
+the `-mem debug` records and the notice records. The mapped twin
+`heatmap_raw_hl` reads 41.7 MB on the same highlighted run, beside
+`heatmap_raw` at 41.7 MB.
+
+Out of the scan's reach:
+- *Stores holding compiled code* (`%format_scan_sub_cache`,
+  `@format_registry`). A `Devel::Size` walk of these segfaults (§ Memory
+  Diagnostic Method), and the `format_scan_subs` compile-boundary figure stands
+  for them.
+- *Stores declared after `named_structure_sizes()`.* Those are the notice and
+  terminal stores, each per notice or per run.
+
+**An observation against finding 5.** § Findings states that no unmeasured
+global store reached 256 KB on the month. The two per-key grouping maps reach
+1.28 MB each here. The scratch copy's store list behind that finding is not
+recorded, so this is raised as a question, not a correction.
+
+**The same case caught its peak in this run.** On the month's
+`-n 25 -g -m uuid`, the scratch copy reported 1,018.1 MB against the OS's
+1,018.2 MB. The unmodified `ltl` fell 158 MB short in each of its three runs.
+The copy's only difference is 38 more structure walks at each reading, which
+change when a reading falls against the allocator handing memory back.
+
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
 **Status:** in progress, branch `146-windows-process-memory`.
