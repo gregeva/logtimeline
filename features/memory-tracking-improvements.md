@@ -1164,9 +1164,21 @@ the floor reports none:
 - *Two sizes, 4.9 to 5.5 % apart,* on every input whose keys do not group.
 - *It is not the walks.* The smaller size appears under the every-call arm, the
   grouping's-stores-only arm and drop 5 alike.
-- *It is not the data.* On 15 unmasked days the two sizes come with the same
-  line, file and message-row counts in `-V benchmark-data`, and the same
-  stderr apart from `time -l`'s figures.
+- *It is not the data.* The store holds the same elements in both states:
+  - On one unmasked day (`-bs 1440 -g`), 12 identical runs under
+    `-mem -V benchmark-data,message-grouping` ended at 43.8 MB ten times and
+    41.4 MB twice.
+  - The `message-grouping` section matched across the two states: every
+    group's keys, rows and counters, and all 37,664 records of its
+    `accounting` sub-section, which give each category and grouping key at
+    every stage, and each reported row, its occurrences, durations counted,
+    durations retained and bytes.
+  - On 15 unmasked days, the two sizes come with the same line, file and
+    message-row counts in `-V benchmark-data`.
+- *Another variation, separate from this one:* the one line of the section that
+  differs is `similarity_cliff_edge_pct`, reported for the group whose final
+  pass is skipped. It read 70 to 75 % across the 12 runs, and differs between
+  runs in the same size state.
 - *The cause is not established.*
 - *It meets criterion 11's 5 % capture bound.* A run in the smaller state reports
   the message store at 94.7 % of the reference (754.4 against 796.8 MB on
