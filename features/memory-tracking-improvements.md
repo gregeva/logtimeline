@@ -1179,7 +1179,28 @@ the floor reports none:
   differs is `similarity_cliff_edge_pct`, reported for the group whose final
   pass is skipped. It read 70 to 75 % across the 12 runs, and differs between
   runs in the same size state.
-- *The cause is not established.*
+- *The cause is the per-process hash seed.* Perl draws a random 256-bit hash
+  seed per run (`HASH_FUNCTION = SBOX32_WITH_SIPHASH_1_3`, printed under
+  `PERL_HASH_SEED_DEBUG=1`). Replaying a captured seed with `PERL_HASH_SEED`
+  reproduced its run's size to the byte: on one unmasked day, the smaller
+  state's seed gave 41,427,803 bytes twice and the larger state's seed
+  43,832,795. Key-order perturbation plays no part: with
+  `PERL_PERTURB_KEYS=0` and the seed left random, the smaller state appeared in
+  3 of 12 runs. Fixed seeds of 64 bits or less fill only part of the seed;
+  42 such runs all gave the larger state.
+- *The difference is 64 bytes per message entry.* 2,404,992 bytes is exactly
+  64 × 37,578, of the 37,597 entries. Sixty-four bytes is eight pointers, a
+  small hash's bucket array doubling from 8 to 16 buckets. Since Perl 5.18 a
+  hash splits only when an insert collides, which depends on the seed, and
+  every entry has the same field names inserted in the same order, so in one
+  run either every entry splits or none does. This mechanism is read from
+  the arithmetic and the seed's determinism; a single entry's bucket count
+  was not inspected.
+- *`Devel::Size` measures it exactly.* It sums the memory each structure has
+  allocated: each scalar's head and body, each string buffer at its allocated
+  length, each array's allocated slots, each hash's bucket array and entries.
+  It leaves out the allocator's own overhead. The two states are memory the
+  process really holds, not imprecision in the walk.
 - *It meets criterion 11's 5 % capture bound.* A run in the smaller state reports
   the message store at 94.7 % of the reference (754.4 against 796.8 MB on
   15 unmasked days). Drop 5's capture run fell in the larger state on all
