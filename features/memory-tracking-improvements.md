@@ -154,13 +154,48 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 
 ## Issue #709: unmeasured stores and a peak that misses working memory
 
-**Status:** in progress since 2026-10-27, specification stage, recorded
-directly on `release/0.20.0`. Filed 2026-10-12, found while reading the third
-`all`-tier benchmark round of 0.19.0. Locked so far (§ Decisions below): D1, the
-reported peak is the operating system's kept high-water mark; D2, macOS reads
-it from `getrusage` through `BSD::Resource`. Grouping's structure walks under
-`-mem` are chosen by prototype. The prototype plan was confirmed on
-2026-10-28; the delivery plan is drafted.
+**Status:** in progress since 2026-10-27. The specification stage, recorded
+directly on `release/0.20.0`, is complete (2026-10-28). The prototype stage
+starts on the architect's direction. Blocked by #757 (a Linux-specific
+variant of the cpanfile) from delivery plan drop 2 on. Filed 2026-10-12,
+found while reading the third `all`-tier benchmark round of 0.19.0.
+- Locked (§ Decisions): D1, the reported peak is the operating system's kept
+  high-water mark; D2, macOS reads it from `getrusage` through
+  `BSD::Resource`.
+- The prototype chooses grouping's structure walks under `-mem`.
+- The acceptance criteria are agreed, and the prototype and delivery plans
+  confirmed.
+
+### Resuming
+
+**Done, the specification stage (2026-10-27 to 2026-10-28):**
+- the contracts, confirmed;
+- the records sweep;
+- the premise re-measured on the release branch;
+- the store inventory, with the 38 candidates listed;
+- the peak each platform keeps, with the `BSD::Resource` probe;
+- D1 and D2;
+- the acceptance criteria;
+- the prototype plan;
+- the delivery plan and its edges.
+
+**Next, on the architect's direction, § Delivery plan, Start:**
+- Cut `709-memory-peak-and-unmeasured-stores` from `release/0.20.0` in its
+  own worktree, and set `$version_number` to `0.20.0-709`.
+- Run the `before` benchmark on the base commit.
+- Then P1 and P2 (§ Prototype plan), on the macOS development host.
+
+**Where it can block or move hosts:**
+- Drop 2 waits for #757.
+- Criterion 1 in drop 2 also runs on the Windows development host and in a
+  Linux container.
+
+**Nothing is kept outside the repository.** This stage's scratch copies of
+`ltl`, and the scratch library `BSD::Resource` was built into, were
+session scratch:
+- P1 builds its copies from the 38 stores listed under § Store inventory;
+- P2 builds the module into a fresh scratch library with
+  `cpanm -L <dir> BSD::Resource`.
 
 ### Contract of the surfaces touched (confirmed by the architect, 2026-10-27)
 
@@ -466,6 +501,29 @@ scenarios do not reach:
 
 No run's stderr carries ` at <file> line <N>`.
 
+**The 38 candidates.** These are the scratch copy's stores, by variable. Each
+joins `named_structure_sizes()` under its own name (§ Decisions), and
+criterion 9 checks for them.
+- *Histogram and heatmap:* `%histogram_values_hl`, `%histogram_buckets`,
+  `%histogram_buckets_hl`, `%histogram_stats`, `%histogram_stats_hl`,
+  `%histogram_boundaries`, `%heatmap_percentiles`.
+- *Streaming grouping:* `%consolidation_cat_stats`,
+  `%consolidation_category_unmatched_count`,
+  `%consolidation_pattern_generation`, `%consolidation_key_generation`,
+  `%consolidation_key_checkpoint_count`, `%consolidation_absorption_ema`,
+  `%consolidation_streaming_absorbed`, `%consolidation_final_pass_skipped`,
+  `%consolidation_cliff_edge`.
+- *Files, the run index and format detection:* `@files_processed`,
+  `%in_files_matched`, `%index_file_data`, `%index_preseed`,
+  `%index_aggregated`, `%format_detection`, `%format_detection_evidence`,
+  `%format_detection_sample`, `%timestamp_date_cache`, `%unregistered_levels`,
+  `%unregistered_levels_by_file`.
+- *Output, telemetry and records:* `@verbose_output`,
+  `%verbose_section_buffer`, `%section_rows`, `%category_totals`,
+  `@progress_history`, `@notice_records`, `@memory_debug_records`,
+  `%bin_counter_telemetry`, `%stats_demand_telemetry`, `%udm_skipped_lines`,
+  `%numeric_filter_no_metric`.
+
 **Unmeasured stores of 64 KB or more:**
 
 | Store | Grows with | Filled under | High-water mark |
@@ -636,8 +694,8 @@ the module loaded from the scratch library. One run each:
 
 ### Acceptance criteria
 
-Drafted 2026-10-27 for the architect's agreement. The paths each invariant
-covers were enumerated from the code on `release/0.20.0`. Coverage of every
+Drafted 2026-10-27; agreed by the architect on 2026-10-28. The paths each
+invariant covers were enumerated from the code on `release/0.20.0`. Coverage of every
 store that grows with the input is not a criterion: the architect set it as
 development and troubleshooting guidance, applied with judgement, since no
 check covers every store all of the time (2026-10-27). It is recorded in
