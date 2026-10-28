@@ -19,6 +19,8 @@
 #   grouponly    at every checkpoint and window a walk of only the stores
 #                grouping writes (GROUPING_STORES below); every store at the
 #                phase boundaries
+#   transient    grouponly without the message store and its counters: at every
+#                checkpoint and window a walk of the consolidation_* stores only
 #   cond-<count>-<margin>
 #                a reading at a checkpoint or window only when <count> has
 #                grown past its value at the last such reading by <margin>
@@ -150,6 +152,25 @@ write_arm('every', $common);
     rep(\$t, $site_cp, "    measure_memory_structures('grouping_checkpoint', 1);\n", 1, 'grouponly: checkpoint');
     rep(\$t, $site_fp, "    measure_memory_structures('grouping_final_pass', 1);\n", 1, 'grouponly: window');
     write_arm('grouponly', $t);
+}
+
+# --- transient --------------------------------------------------------------------
+# grouponly without the message store and its counters: inside grouping, a walk
+# of the consolidation_* stores alone; the boundary walks cover the rest.
+{
+    my $t = $common;
+    my @transient = grep { !/^%log_messages/ } @grouping_stores;
+    die "make-arms: expected 15 transient stores, have " . scalar(@transient) . "\n" unless @transient == 15;
+    rep(\$t, "\n# P1: the stores grouping writes, walked alone by the grouponly arm.\n"
+             . "sub p1_grouping_structure_sizes {\n    require Devel::Size;\n    return (\n"
+             . join('', map { map_line($_) } @grouping_stores) . "    );\n}\n",
+             "\n# P1: grouping's consolidation_* stores, walked alone by the transient arm.\n"
+             . "sub p1_grouping_structure_sizes {\n    require Devel::Size;\n    return (\n"
+             . join('', map { map_line($_) } @transient) . "    );\n}\n",
+             1, 'transient: subset');
+    rep(\$t, $site_cp, "    measure_memory_structures('grouping_checkpoint', 1);\n", 1, 'transient: checkpoint');
+    rep(\$t, $site_fp, "    measure_memory_structures('grouping_final_pass', 1);\n", 1, 'transient: window');
+    write_arm('transient', $t);
 }
 
 # --- cond-<count>-<margin> --------------------------------------------------------

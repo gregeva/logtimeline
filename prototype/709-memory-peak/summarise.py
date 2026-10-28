@@ -20,7 +20,7 @@ import sys
 
 GROUPING_PREFIXES = ("consolidation_", "log_messages")
 INSIDE = ("grouping_checkpoint", "grouping_final_pass")
-ARM_ORDER = ["tracked", "every", "boundaries", "grouponly", "cond-either-0"]
+ARM_ORDER = ["tracked", "every", "boundaries", "grouponly", "transient", "cond-either-0"]
 MB = 1e6
 
 
