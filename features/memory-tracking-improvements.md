@@ -189,7 +189,7 @@ stamp and the `before` benchmark; P1's instruments and its trace runs (§ P1
 before the timed runs); the qualification of its inputs; its timed runs and
 the transient-stores arm (§ P1 results); D3; criterion 11's bounds.
 
-**Next:** delivery plan drop 2, which waits for #757.
+**Next:** delivery plan drops 4 and 5; then drops 2 and 3, which wait for #757.
 
 **Kept outside the repository, on the first macOS development host:**
 - `tests/baseline/results/709-before-1.tsv`, `-2.tsv` and `-3.tsv`, untracked,
@@ -1085,6 +1085,10 @@ The set ran noisier than the first (the floor's range on 15 masked days was
 Drafted 2026-10-28. The stage starts only on the architect's direction. Each
 drop is committed and pushed on the issue branch before the next one starts.
 The issue's one PR follows the completion gate.
+
+**Order (the architect, 2026-10-28):** drops 4 and 5 are delivered first,
+since neither depends on #757; drops 2 and 3 follow once #757 is delivered,
+then drop 6.
 
 **Start.**
 - The branch `709-memory-peak-and-unmeasured-stores` is cut from
