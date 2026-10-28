@@ -156,7 +156,8 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 
 **Status:** in progress since 2026-10-27. The specification stage, recorded
 directly on `release/0.20.0`, is complete (2026-10-28). The prototype stage
-starts on the architect's direction. Blocked by #757 (a Linux-specific
+started on the architect's direction on 2026-10-28 (§ P1 before the timed
+runs). Blocked by #757 (a Linux-specific
 variant of the cpanfile) from delivery plan drop 2 on. Filed 2026-10-12,
 found while reading the third `all`-tier benchmark round of 0.19.0.
 - Locked (§ Decisions): D1, the reported peak is the operating system's kept
@@ -179,19 +180,27 @@ found while reading the third `all`-tier benchmark round of 0.19.0.
 - the prototype plan;
 - the delivery plan and its edges.
 
-**Next, on the architect's direction, § Delivery plan, Start:**
-- Cut `709-memory-peak-and-unmeasured-stores` from `release/0.20.0` in its
-  own worktree, and set `$version_number` to `0.20.0-709`.
-- Run the `before` benchmark on the base commit.
-- Then P1 and P2 (§ Prototype plan), on the macOS development host.
+**Done, the start of the prototype stage (2026-10-28):** the issue branch,
+the version stamp and the `before` benchmark; P1's instruments and its trace
+runs (§ P1 before the timed runs).
+
+**Next:** P1's timed runs, then P2 (§ Prototype plan), on the macOS
+development host.
+
+**Kept outside the repository, on the first macOS development host:**
+- `tests/baseline/results/709-before-1.tsv`, `-2.tsv` and `-3.tsv`, untracked,
+  in the `release/0.20.0` worktree (`.claude/worktrees/release-0.20.0`),
+  captured at `b24b8589`; compared only with an `after` captured on that
+  machine, from the issue worktree beside it.
+- The issue worktree, `.claude/worktrees/709-memory-peak-and-unmeasured-stores`.
 
 **Where it can block or move hosts:**
 - Drop 2 waits for #757.
 - Criterion 1 in drop 2 also runs on the Windows development host and in a
   Linux container.
 
-**Nothing is kept outside the repository.** This stage's scratch copies of
-`ltl`, and the scratch library `BSD::Resource` was built into, were
+**The specification stage kept nothing outside the repository.** Its scratch
+copies of `ltl`, and the scratch library `BSD::Resource` was built into, were
 session scratch:
 - P1 builds its copies from the 38 stores listed under § Store inventory;
 - P2 builds the module into a fresh scratch library with
@@ -793,6 +802,75 @@ cpanfile change of criterion 8 is what carries the module there.
 
 Both prototypes are on this host. P1's runs take about 50 to 70 minutes in the
 background. The architect confirmed this plan on 2026-10-28.
+
+### P1 before the timed runs (2026-10-28)
+
+**Started.** The branch `709-memory-peak-and-unmeasured-stores` was cut from
+`release/0.20.0` at `b24b8589`, in its own worktree, with `$version_number`
+set to `0.20.0-709` (`3e4cbf91`). The `before` benchmark ran at `b24b8589`
+from the release worktree: the four tests of criterion 13, three interleaved
+rounds, in 80 s.
+
+**The instruments,** in `prototype/709-memory-peak/` on the issue branch
+(`33bec43f`):
+- `make-arms.pl` generates every arm from `ltl` by substitutions it counts, so
+  a moved base fails. Every arm but the floor carries the 38 stores of
+  § Store inventory in the map, and times each walk per reading site.
+- `trace.sh` runs a trace arm once per input. At every reading it records the
+  site, the keys held for grouping, the clusters, the RSS, the walk's time and
+  every store's size.
+- `simulate.py` replays the conditional arms over those records. A walk
+  changes no store, so which readings an arm takes, and the high-water marks
+  they capture, follow exactly from one trace. Only the time needs the timed
+  arms.
+- Under D1 a reading inside grouping serves only its walk, so an arm that skips
+  the walk skips the whole `measure_memory_structures()` call.
+
+**The plan's inputs do not carry the cost handed forward from #146.** One
+trace run per input, macOS, every reading walked over the map with the 38
+stores:
+
+| Input | Options | Walks inside grouping | Their time | Phase-boundary walks | Run total | Peak RSS |
+|---|---|---|---|---|---|---|
+| 1 day of the month server | `-bs 1440 -n 25 -g -m uuid` | 16 | 0.09 s | 0.02 s | 2.07 s | 128.5 MB |
+| 3 days | same | 16 | 0.14 s | 0.04 s | 3.94 s | 132.7 MB |
+| 7 days | same | 23 | 0.78 s | 0.17 s | 16.35 s | 255.2 MB |
+| 15 days | same | 39 | 2.86 s | 0.42 s | 42.82 s | 447.6 MB |
+| the application log of 286K unique messages | `-bs 60 -n 25 -g -m uuid` | 6 | 0.005 s | 0.002 s | 3.52 s | 58.0 MB |
+| 1 day of the month server | `-ni -g`, as #146 measured | 20 | 0.55 s | 0.20 s | 4.33 s | 187.3 MB |
+| 3 days | same | 23 | 1.56 s | 0.72 s | 8.10 s | 297.0 MB |
+| 7 days | same | 25 | 3.29 s | 1.73 s | 22.93 s | 636.9 MB |
+
+- **#146's case is grouping without the UUID mask.** Its day is the same file
+  (168,981 lines). Almost no keys group there, so the message store keeps
+  nearly every distinct request: 43.8 MB at 1 day, 319.5 MB at 7 days. Every
+  walk covers it.
+- **With the mask, the walks cost 0.2 to 8 % of the run.** Without it they
+  cost 17 to 28 %. The plan's inputs, the benchmark's `top25-consolidate`
+  options, are all masked.
+- **The walks inside grouping see stores no boundary walk sees.** On 15
+  masked days, the clusters reach 102.8 MB at the last final-pass window and
+  read 0.7 MB at the next boundary. The ID index reaches 52.0 to 80.5 MB and
+  the key trigrams 27.6 to 40.7 MB at a checkpoint holding about 5,000 keys,
+  on every access-log input. At the boundaries both read 0.1 MB or less, apart from the trigrams at
+  0.5 to 1.7 MB on the masked days.
+
+**Which readings each conditional count takes, replayed over the eight
+traces.** A store counts as captured within 5 % of the every-call arm's
+high-water mark, for each grouping store of 1 MB or more:
+
+| Count, margin | Masked inputs | Unmasked inputs |
+|---|---|---|
+| keys held, +0 % to +200 % | misses the clusters on every access-log input (102.8 → 59.1 MB at 15 days), and the ID index on the unique-messages log (5.9 → 0.6 MB) | captures every store at +0 %, with 2 walks; from +10 %, the ID index 80.5 → 75.9 MB |
+| clusters, +0 % and +10 % | captures every store, with 4 to 14 walks | captures every store, with 3 to 5 walks |
+| clusters, +25 % and up | misses on some inputs and not others: +25 % misses the clusters on 7 days (41.0 → 16.4 MB) and +50 % does not | misses the ID index (80.5 → 0.6 to 3.2 MB) and the trigrams |
+| either count, +0 % | captures every store, with 5 to 15 walks: 1.28 s of 2.86 s at 15 days | captures every store, 1.18 s of 3.29 s at 7 days |
+| either count, +10 % | captures every store, with 4 to 6 walks: 0.37 s of 2.86 s at 15 days | captures every store, 0.83 s of 3.29 s at 7 days |
+
+The keys held follow the ID index and trigrams, which peak at a checkpoint.
+The clusters grow in the final pass, after the held keys have fallen. Neither
+count alone covers both families; either count, firing when one of the two has
+grown past its value at the last reading, covers them on these inputs.
 
 ### Delivery plan
 
