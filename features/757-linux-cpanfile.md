@@ -175,17 +175,19 @@ Recorded with it, each the one sensible option:
 
 Agreed by the architect, 2026-10-28. His corrections: criterion 3 is the rename
 of `build/cpanfile` to the per-platform naming; criterion 5 includes the Windows
-build under Wine writing the Windows file; the builds run on the macOS
-development host, the container builds through Rancher Desktop, which Claude
-starts and stops itself.
+build under Wine writing the Windows file; the builds run locally. The
+macOS development host is a virtual machine without nested virtualization, so
+no container runtime starts there (below); the builds run on GitHub Actions
+instead (architect, 2026-10-28).
 
 1. **With no platform argument, the generator writes the host's file alone.**
    *Assertable.* Observable: on macOS only `build/cpanfile.macos` is written,
    on Linux only `build/cpanfile.linux`, under Git Bash on Windows only
-   `build/cpanfile.windows`. Validation: run on the macOS development host, in
-   an Ubuntu container under Rancher Desktop, and with a `uname` first on PATH
-   that reports `MINGW64_NT-10.0` as Git Bash does; the files written are
-   listed after each.
+   `build/cpanfile.windows`. Validation: run on the macOS development host, on
+   Linux by the CI Ubuntu job of the release workflow's `workflow_dispatch` run
+   on the issue branch (its log names the file written), and with a `uname`
+   first on PATH that reports `MINGW64_NT-10.0` as Git Bash does; the files
+   written are listed after each.
 2. **With a platform argument, it writes that platform's file whatever the
    host.** *Assertable.* Observable: `macos`, `linux` and `windows` each write
    that file alone, `all` writes the three. Validation: each run on macOS.
@@ -211,12 +213,11 @@ starts and stops itself.
    alone writes the Linux file. Validation, each reader in the scope table: on
    macOS `build/macos-setup.sh`, the environment check (conditions 3 and 4),
    the preflight with `LTL_PROFILING_INSTALL=0` and `build/install-deps.sh`; in
-   an Ubuntu container under Rancher Desktop `build/linux-setup.sh`, the check
-   and the preflight; through Rancher Desktop `build/ubuntu-package.sh amd64`,
-   and `build/windows-package.sh` in a scratch checkout without
-   `build/cpanfile.windows`, each binary answering `--version`; the three CI
-   jobs by a `workflow_dispatch` run of the release workflow on the issue
-   branch.
+   an Ubuntu container `build/linux-setup.sh`, the check and the preflight; the
+   builds by a `workflow_dispatch` run of the release workflow on the issue
+   branch, whose macOS, Ubuntu (amd64, arm64) and Windows jobs each produce a
+   binary answering `--version`. Its Windows job runs on `ubuntu-latest`, the
+   case above.
 6. **The macOS binary carries the macOS file's modules** (#709's criterion 7,
    moved here). *Assertable.* Observable: the scratch copy of `ltl` that
    requires `BSD::Resource`, packed on the macOS development host with `pp` as
@@ -225,5 +226,10 @@ starts and stops itself.
    reporting the kept peak, reads #709's reading and is checked on the binary
    built once that reading is in `ltl`.
 
-Rancher Desktop is not installed on the macOS development host (2026-10-28):
-no application, no `rdctl`, no `docker` on PATH.
+No container runtime runs on the macOS development host (2026-10-28). It is a
+virtual machine (`hw.model` `VirtualMac2,1`, "Apple M1 Pro (Virtual)") with no
+hypervisor support (`kern.hv_support` 0). Rancher Desktop, once installed,
+stops with "Virtualization does not appear to be supported on your machine",
+and Apple's virtualization framework with "Virtualization is not available on
+this hardware"; Apple supports a virtual machine inside one only on M3 chips or
+later.
