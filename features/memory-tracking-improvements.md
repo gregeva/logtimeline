@@ -766,14 +766,18 @@ criterion 11's bounds, unknown until measured). The arms:
 | conditional | A walk at a checkpoint or window only when a cheap count of grouping's stores has grown past its value at the last such walk by a margin. Timed: either count (the keys held or the clusters) at +0 %. The keys held and the clusters alone, at +0 % to +200 %, are replayed over the traces, not timed (§ P1 qualification of inputs and options) |
 | boundaries only | No walk inside grouping; the phase-boundary walks only |
 | grouping's stores only | A walk at every checkpoint and window that covers only the stores `run_consolidation_checkpoint()` and `process_final_pass_window()` write (the `consolidation_*` stores, including the per-key maps the inventory adds, `log_messages`, and `log_messages_counters`, which a merge deletes from); every store at the phase boundaries |
+| transient stores only | Grouping's stores only, without the message store and its counters: a walk at every checkpoint and window of the 15 `consolidation_*` stores; every store at the phase boundaries |
 
 Each arm also times its walks per routine, as § Issue #146's scratch probe did,
 so a combination (every checkpoint, the windows conditional or not walked)
 is read from the same runs without an arm of its own. A walk inside grouping
 covers the whole of `named_structure_sizes()` today, 29 stores, so every arm's
 copy carries the 38 stores of § Store inventory in the map, as delivered: the
-map's size sets each walk's cost. The last arm was added on 2026-10-28, while
-laying out the delivery plan, when this came to light.
+map's size sets each walk's cost. The grouping's-stores-only arm was added on
+2026-10-28, while laying out the delivery plan, when this came to light. The
+transient-stores-only arm was added the same day, on the architect's approval,
+from § P1 results. It ran in a second set of three rounds, beside the floor and
+the every-call arm.
 
 - *Inputs, approved by the architect on 2026-10-28 from § P1 qualification of
   inputs and options,* each for a behaviour at the walk sites:
