@@ -154,10 +154,10 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 
 ## Issue #709: unmeasured stores and a peak that misses working memory
 
-**Status:** in progress since 2026-10-27. The specification stage, recorded
-directly on `release/0.20.0`, is complete (2026-10-28). The prototype stage
-started on the architect's direction on 2026-10-28 (§ P1 before the timed
-runs). Blocked by #757 (a Linux-specific
+**Status:** in progress since 2026-10-27. The specification and prototype
+stages are complete (2026-10-28), and delivery plan drops 4 and 5 are
+delivered on the issue branch, ahead of drops 2 and 3 by the architect's
+order. Blocked by #757 (a Linux-specific
 variant of the cpanfile) from delivery plan drop 2 on: #757 owns declaring
 `BSD::Resource` for macOS, installing it in macOS setup and carrying it in the
 macOS binary, and #709 keeps the reading and its fallback (the architect,
@@ -189,7 +189,34 @@ stamp and the `before` benchmark; P1's instruments and its trace runs (§ P1
 before the timed runs); the qualification of its inputs; its timed runs and
 the transient-stores arm (§ P1 results); D3; criterion 11's bounds.
 
-**Next:** delivery plan drops 2 and 3, which wait for #757; then drop 6.
+**Done, delivery plan drops 4 and 5 (2026-10-28),** on the issue branch, no
+PR yet: the 38 inventory stores in the map and `MEMORY_FINAL` converged
+(§ Drop 4, `bb4511ac`); grouping's walks per D3 (§ Drop 5, `68385228`);
+criterion 11 checked under one pinned hash seed (`8cba52b3`), after the
+finding that the message store's size follows the per-process hash seed.
+
+**Next, once #757 is delivered:**
+- Drop 2, the kept peak (D1, D2).
+  - The issue branch needs none of #757's commits, since this issue changes no
+    build file. What it needs is `BSD::Resource` installed on the macOS host
+    by #757's macOS setup, for criterion 1, and the module absent for
+    criterion 6's fallback scenario.
+  - Criterion 1 also runs on the Windows development host and in a Linux
+    container.
+- Drop 3, readings between steps only under `-mem`.
+- After each of drops 2 and 3, both of which change
+  `measure_memory_structures()`, re-run criterion 11:
+  `prototype/709-memory-peak/criterion-11.sh check ltl <work dir>`, from the
+  issue worktree. Its reference marks (`results/criterion-11-reference.tsv`)
+  were made with this host's Perl 5.44. On another Perl, regenerate them first
+  with `criterion-11.sh reference`, from drop 4's code (`git show
+  bb4511ac:ltl`).
+- Then drop 6:
+  - restore `$version_number` to `0.20.0`;
+  - run the `after` benchmark (criterion 13) from the issue worktree, against
+    the `before` TSVs below;
+  - run the completion gate;
+  - open the one PR.
 
 **Kept outside the repository, on the first macOS development host:**
 - `tests/baseline/results/709-before-1.tsv`, `-2.tsv` and `-3.tsv`, untracked,
