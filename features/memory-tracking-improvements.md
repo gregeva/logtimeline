@@ -158,7 +158,10 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 directly on `release/0.20.0`, is complete (2026-10-28). The prototype stage
 started on the architect's direction on 2026-10-28 (§ P1 before the timed
 runs). Blocked by #757 (a Linux-specific
-variant of the cpanfile) from delivery plan drop 2 on. Filed 2026-10-12,
+variant of the cpanfile) from delivery plan drop 2 on: #757 owns declaring
+`BSD::Resource` for macOS, installing it in macOS setup and carrying it in the
+macOS binary, and #709 keeps the reading and its fallback (the architect,
+2026-10-28). Filed 2026-10-12,
 found while reading the third `all`-tier benchmark round of 0.19.0.
 - Locked (§ Decisions): D1, the reported peak is the operating system's kept
   high-water mark; D2, macOS reads it from `getrusage` through
@@ -184,8 +187,9 @@ found while reading the third `all`-tier benchmark round of 0.19.0.
 the version stamp and the `before` benchmark; P1's instruments and its trace
 runs (§ P1 before the timed runs); the qualification of its inputs; its timed runs (§ P1 results).
 
-**Next:** the choice of grouping's walks from § P1 results, then P2 (§ Prototype plan), on the macOS
-development host.
+**Next:** the transient-stores-only arm's runs (§ Prototype plan), then the
+architect's choice of grouping's walks from § P1 results, which ends the
+prototype stage. Drop 2 waits for #757.
 
 **Kept outside the repository, on the first macOS development host:**
 - `tests/baseline/results/709-before-1.tsv`, `-2.tsv` and `-3.tsv`, untracked,
@@ -201,10 +205,8 @@ development host.
 
 **The specification stage kept nothing outside the repository.** Its scratch
 copies of `ltl`, and the scratch library `BSD::Resource` was built into, were
-session scratch:
-- P1 builds its copies from the 38 stores listed under § Store inventory;
-- P2 builds the module into a fresh scratch library with
-  `cpanm -L <dir> BSD::Resource`.
+session scratch. P1 builds its copies from the 38 stores listed under § Store
+inventory.
 
 ### Contract of the surfaces touched (confirmed by the architect, 2026-10-27)
 
@@ -647,8 +649,9 @@ the module loaded from the scratch library. One run each:
   The `-mem` rows still come from the readings between steps.
 - **D2 (locked 2026-10-27): macOS reads its peak as the resident high-water
   mark from `getrusage`, through `BSD::Resource`.** The module is loaded on
-  macOS only, as `Win32::API` is on Windows only. It joins the cpanfile
-  generator's module lists, macOS setup and the macOS static binaries. A run
+  macOS only, as `Win32::API` is on Windows only. Declaring it for macOS,
+  installing it in macOS setup and carrying it in the macOS binary belong to
+  #757 (a Linux-specific variant of the cpanfile; the architect, 2026-10-28). A run
   without the module falls back to the readings' peak and prints the
   `memory-unreadable` notice, as `get_memory_usage()` does today when the
   Windows reading fails. All three platforms then report the same measure,
@@ -656,8 +659,7 @@ the module loaded from the scratch library. One run each:
   `time -l`'s resident peak to the byte in both probe runs, at about 1 µs.
   The alternative, launching `footprint -p`, reports the physical footprint
   (0.3 to 1.0 % below the resident peak in three runs) and takes 25 to 38 ms
-  per call, by parsing another tool's text output. Whether the packaged macOS
-  binary carries the module is a prototype item.
+  per call, by parsing another tool's text output.
 - **Grouping's structure walks under `-mem` are chosen by prototype (the
   architect, 2026-10-27).** No design is locked. A grouping checkpoint fires
   each time a category holds 5,000 keys awaiting consolidation
@@ -739,8 +741,8 @@ check covers every store all of the time (2026-10-27). It is recorded in
 | 4 | The reported peak is never below a reading the run took: under `-mem debug`, every `rss` in the `memory-usage / debug` records is at or below `rss_peak` | assertable | `tests/validate-memory-usage.sh`, a `-mem debug` scenario; holds on every platform |
 | 5 | Without `-mem`, no reading is taken between steps: `-V memory-usage` lists the kept-peak site, once per reporting moment, and under `-V benchmark-data` the compile sites; no `phase_boundary`, `grouping_checkpoint` or `grouping_final_pass` reading | assertable | `tests/validate-memory-usage.sh`, runs without `-mem`: plain, `-g` (checkpoints and windows), a CSV input |
 | 6 | On macOS without `BSD::Resource`, the run prints the `memory-unreadable` notice once, reports the readings' peak, and takes the readings between steps | assertable | `tests/validate-memory-usage.sh`, a macOS-only scenario that hides the module through an `@INC` hook given at invocation |
-| 7 | The packaged macOS binary (arm64, the one the release workflow builds) carries `BSD::Resource` and reports the kept peak | unknown | Prototype item (D2) |
-| 8 | `build/generate-cpanfile.sh` names `BSD::Resource` for macOS only, in no Linux or Windows cpanfile, and regenerates every cpanfile byte-identical to the committed ones | assertable | Regenerate, `git diff --exit-code build/`; the module's name grepped in each cpanfile |
+| 7 | Moved to #757 (a Linux-specific variant of the cpanfile) by the architect, 2026-10-28: the packaged macOS binary carries `BSD::Resource` and reports the kept peak | — | #757 |
+| 8 | Moved to #757 by the architect, 2026-10-28: `build/generate-cpanfile.sh` names `BSD::Resource` for macOS only, in no Linux or Windows cpanfile | — | #757 |
 | 9 | Every store of § Store inventory is in `named_structure_sizes()`: under `-mem`, `-V benchmark-data` carries a `MEMORY` row for each of the 38, and on the one-day log with `-hg -hgdm raw -h HTTP` the highlighted raw values' row reads about 70 MB | assertable | The row names of one `-mem -V benchmark-data` run against the 38; the premise case for the size |
 | 10 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
 | 11 | Under `-mem`, grouping's stores' high-water marks and the cost of their walks meet the bounds the prototype sets | unknown | Prototype scope (§ Decisions, grouping's structure walks) |
@@ -750,7 +752,7 @@ check covers every store all of the time (2026-10-27). It is recorded in
 
 ### Prototype plan
 
-Two questions are open after the decisions. Both are answered on the issue
+One question is open after the decisions. It is answered on the issue
 branch, under `prototype/709-memory-peak/`, with scratch copies of `ltl` patched
 per arm, so each arm keeps the production call structure. Prototype code is not
 promoted; its output is a locked decision here and a findings report beside it.
@@ -806,17 +808,12 @@ the every-call arm.
 - *Exit:* the arm chosen per routine, locked as a decision here with its
   measured justification; criterion 11's bounds written from it.
 
-**P2. The packaged macOS binary carries `BSD::Resource`** (trigger (d),
-criterion 7). A scratch copy carrying the `getrusage` reading is packed with
-`build/macos-package.sh arm64`, the module taken from a scratch library on
-`PERL5LIB`. The binary then runs the one-day case with `PERL5LIB` unset and the
-scratch library out of reach. Its kept peak must equal `time -l`'s resident
-peak. Exit: the check demonstrated, or the gap recorded with what is done
-instead. The release workflow builds the arm64 binary only, after
-`build/macos-setup.sh --package` installs the cpanfile's modules, so the
-cpanfile change of criterion 8 is what carries the module there.
+**The packaged macOS binary carrying `BSD::Resource` is not a prototype of
+#709.** Packaging belongs to #757 (a Linux-specific variant of the cpanfile),
+on which #709 depends (the architect, 2026-10-28). Nothing was built or packed
+for it.
 
-Both prototypes are on this host. P1's timed runs take about 40 minutes in the
+P1 is on this host. Its timed runs take about 40 minutes in the
 background. The architect confirmed this plan on 2026-10-28, and its timed matrix after the qualification of inputs the same day.
 
 ### P1 before the timed runs (2026-10-28)
@@ -1061,21 +1058,18 @@ The issue's one PR follows the completion gate.
   13, three runs each. It runs before P1, never alongside it, because both are
   timings.
 
-1. **The prototypes, P1 and P2.**
-   - The findings report goes beside them.
+1. **The prototype, P1.**
+   - The findings report goes beside it.
    - The architect locks the choice of grouping's walks, and criterion 11's
      bounds are written from it.
-   - Criterion 7 is shown, or its gap is recorded.
-2. **The kept peak (D1, D2), and the build that carries the module.**
+2. **The kept peak (D1, D2), once #757 is delivered.**
    - Each platform reads the kept peak at its own `-V memory-usage` site, and
      the four consumers of the peak read it.
    - On macOS, the fallback and its `memory-unreadable` notice.
-   - `BSD::Resource` is declared for macOS only, in the cpanfile that #757
-     (a Linux-specific variant of the cpanfile) separates from Linux's, and
-     every cpanfile is regenerated. The generator finds a module through
-     `ltl`'s own `require`, so the declaration and the reading change
-     together. macOS setup installs the module from the cpanfile.
-   - Criteria 1 to 4, 6 to 8, 12 and 14, on this drop's surfaces. Criterion 1's
+   - No build file changes here: #757 (a Linux-specific variant of the
+     cpanfile) declares `BSD::Resource` for macOS, installs it in macOS setup
+     and carries it in the macOS binary.
+   - Criteria 1 to 4, 6, 12 and 14, on this drop's surfaces. Criterion 1's
      Windows run is on the Windows development host, and its Linux run in a
      container.
 3. **Readings between steps only under `-mem`, or in the fallback**
