@@ -184,7 +184,7 @@ found while reading the third `all`-tier benchmark round of 0.19.0.
 the version stamp and the `before` benchmark; P1's instruments and its trace
 runs (§ P1 before the timed runs).
 
-**Next:** P1's timed runs, then P2 (§ Prototype plan), on the macOS
+**Next:** the timed inputs and arms, chosen from § P1 qualification of inputs and options; then P1's timed runs, then P2 (§ Prototype plan), on the macOS
 development host.
 
 **Kept outside the repository, on the first macOS development host:**
@@ -870,7 +870,101 @@ high-water mark, for each grouping store of 1 MB or more:
 The keys held follow the ID index and trigrams, which peak at a checkpoint.
 The clusters grow in the final pass, after the held keys have fallen. Neither
 count alone covers both families; either count, firing when one of the two has
-grown past its value at the last reading, covers them on these inputs.
+grown past its value at the last reading, covers them on these inputs. On the
+application logs it does not (§ P1 qualification of inputs and options).
+
+### P1 qualification of inputs and options (2026-10-28)
+
+The inputs above were taken from the plan without checking what they
+exercise at the two walk sites; the architect directed that they be
+qualified. The walk sites are reached as follows (`ltl` at `b24b8589`):
+
+- **A checkpoint fires** when a category holds 5,000 keys no pattern matched
+  (`consolidation_fire_checkpoints()`, `$consolidation_trigger`), for every
+  group of the category holding two or more.
+- **It walks only if it runs its pass.** From its third checkpoint, a group
+  whose absorption average says every survivor would be evicted takes the
+  fast path in `run_consolidation_checkpoint()`, which returns before the walk.
+- **The final pass walks once per window** of up to 1,000 keys
+  (`process_final_pass_window()`). A group handing forward 20,000 keys or more
+  after streaming absorbed 5 % of its keys or less is skipped
+  (`$consolidation_skip_min_keys`, `$consolidation_skip_absorption`): it has
+  no windows.
+- **A walk covers every store in the map at that moment,** not only
+  grouping's: during the read, the time-bucket store's durations and any
+  heatmap or histogram store too.
+- **`-n` and `--terminal-width` do not reach grouping:** its only reference
+  to the width is the progress line, and `-g` cuts every key at 350
+  characters.
+
+**The method.** `prototype/709-memory-peak/qualify.sh` (`e77d7581`) runs each
+candidate of `candidates.txt` twice, untimed, on macOS:
+- *a census run:* `ltl` as tracked, without `-mem`, under `-V
+  message-grouping`, for the checkpoints each group fired, its final-pass
+  windows and whether its final pass was skipped. The section adds member
+  keys and accounting, never a decision, so its counts are the run's control
+  flow;
+- *a trace run:* the trace arm, under `-mem -V benchmark-data,memory-usage`.
+
+In every run the final-pass walks equal the census windows. No run's stderr
+carries ` at <file> line <N>`.
+
+| Candidate | Options | Keys grouping saw | Checkpoints fired / walked | Windows | Groups skipped | Walks inside grouping, time | Walks' share of the run | Largest walk |
+|---|---|---|---|---|---|---|---|---|
+| month server, 1 day | `-bs 1440 -g -m uuid` | 34,675 | 9 / 9 | 7 | 0 | 16, 0.10 s | 5.5 % | 92.8 MB |
+| 7 days | same | 288,151 | 15 / 15 | 8 | 0 | 23, 1.00 s | 6.9 % | 143.5 MB |
+| 15 days | same | 1,265,282 | 29 / 27 | 12 | 0 | 39, 2.98 s | 8.1 % | 277.3 MB |
+| 7 days, heatmap and histogram | `-bs 1440 -hm -hg -g -m uuid` | 288,151 | 15 / 15 | 8 | 0 | 23, 0.55 s | 3.2 % | 92.5 MB |
+| month server, 1 day | `-bs 1440 -g` | 37,643 | 23 / 14 | 6 | 1 | 20, 0.52 s | 17.6 % | 139.7 MB |
+| 7 days | same | 280,593 | 117 / 18 | 7 | 1 | 25, 3.36 s | 22.4 % | 395.5 MB |
+| 15 days | same | 663,238 | 272 / 23 | 9 | 2 | 32, 11.32 s | 26.5 % | 934.8 MB |
+| PLM web server access log, 1 day | `-du us -g` | 284 | 5 / 5 | 5 | 0 | 10, 0.01 s | 2.1 % | 11.3 MB |
+| same | `-du us -g -xqs` | 75,700 | 20 / 6 | 3 | 1 | 9, 0.86 s | 17.7 % | 331.9 MB |
+| 286K unique error messages | `-g` | 286,775 | 6 / 6 | 3 | 0 | 9, 0.10 s | 2.2 % | 237.4 MB |
+| same | `-g -m uuid` | 333 | 3 / 3 | 3 | 0 | 6, 0.01 s | 0.2 % | 11.6 MB |
+| security log, near-identical rejections | `-g` | 2,230 | 2 / 2 | 3 | 0 | 5, 0.05 s | 1.8 % | 72.3 MB |
+| large error log | `-g` | 543 | 1 / 1 | 1 | 0 | 2, 0.01 s | 0.6 % | 19.8 MB |
+| general application log, 85 MB | `-g` | 7,846 | 6 / 6 | 9 | 0 | 15, 0.30 s | 5.8 % | 182.7 MB |
+| script log with duration, bytes and count | `-g` | 6,102 | 2 / 2 | 3 | 0 | 5, 0.05 s | 1.0 % | 49.9 MB |
+| method server, one node, 12 rotations | `-g` | 7,266 | 6 / 6 | 3 | 0 | 9, 0.12 s | 1.0 % | 107.9 MB |
+
+The share counts the boundary walks too. The month server is the one of
+§ P1 before the timed runs; the PLM access log is the query-string specimen of
+`docs/test-logs.md`.
+
+- **The cost is where keys do not group.** Without the UUID mask, and with
+  `-xqs`, nearly every key stays its own row. The message store reaches
+  795.8 MB at 15 days, and each walk covers it. The walks take 17.6 to 26.5 %
+  of the run, rising with the input. Most checkpoints there take the fast path
+  (249 of 272 at 15 days), so the walks grow in size, not in number.
+- **The most walks are where keys do group.** With the mask, nearly every
+  checkpoint runs its pass: 16 to 39 walks. Only there do the clusters peak in
+  the final pass (102.8 MB at 15 days, 59.1 MB at the boundaries).
+- **The ID index and the trigrams peak at a checkpoint on every family,** and
+  at the boundaries read at most 33.0 MB against up to 209.0 MB inside
+  grouping. They are the largest transient stores on most candidates.
+- **The plan's application-log input exercises almost nothing.** The 286K
+  unique messages fire 6 checkpoints, and under the benchmark's mask, which
+  collapses them to 333 keys, 3. The plan's line calling it the most
+  checkpoint-heavy file is not borne out at the walk sites.
+- **The heatmap and histogram make the walks cheaper,** 0.55 against 1.00 s
+  on 7 masked days, with the same control flow. Under the heatmap the
+  time-bucket store does not hold its durations in the walked map: its
+  largest walk is 92.5 MB against 143.5 MB.
+
+**No conditional count captures on every family,** replayed over the 16
+traces with `simulate.py`:
+- *Either count, at +0 % and +10 %,* misses on the general application log
+  (ID index 111.0 → 59.4 MB, trigrams 57.1 → 33.0 MB) and on the security log
+  (ID index 44.4 → 6.8 MB). On the other 14 it captures every grouping store
+  of 1 MB or more.
+- *Keys held* misses on 11 of the 16 at +0 %, every masked month input among
+  them, and on 14 at +10 %.
+- *Clusters* takes no reading at all on the security log.
+
+The ID index and the trigrams grow with the trigrams of the keys held, not
+with their number: on the general application log a checkpoint holding 5,605
+keys built a 4.0 MB index, and the next, holding 5,406, a 111.0 MB one.
 
 ### Delivery plan
 
