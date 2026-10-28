@@ -187,7 +187,7 @@ found while reading the third `all`-tier benchmark round of 0.19.0.
 the version stamp and the `before` benchmark; P1's instruments and its trace
 runs (§ P1 before the timed runs); the qualification of its inputs; its timed runs (§ P1 results).
 
-**Next:** the transient-stores-only arm's runs (§ Prototype plan), then the
+**Next:** the
 architect's choice of grouping's walks from § P1 results, which ends the
 prototype stage. Drop 2 waits for #757.
 
@@ -1038,10 +1038,34 @@ On the 1-day inputs the ranges are as wide as the differences.
   0.10 to 0.47 s per run launching `ps` at every boundary, checkpoint and
   window. Delivery plan drop 3 removes these readings.
 
-**Not measured:** an arm whose walk inside grouping covers only the
-`consolidation_*` stores, leaving the message store to the boundary walks.
-Its cost cannot be read from the traces: a walk's time follows the number of
-values it visits, not their bytes.
+**The transient-stores-only arm, measured on the architect's approval.**
+Inside grouping, each checkpoint and window walks only the 15
+`consolidation_*` stores; the boundary walks cover every store. It ran in a
+second set of three rounds beside the floor and the every-call arm: 72 runs
+in 25 minutes, every one exiting 0, with no ` at <file> line <N>` on stderr.
+The set ran noisier than the first (the floor's range on 15 masked days was
+39.5 to 49.0 s), so its arms are compared with each other only
+(`prototype/709-memory-peak/findings.md`, at `47376618` on the issue branch).
+
+| Input | Floor | Every call | Transient stores only | Walks inside grouping: every call → transient |
+|---|---|---|---|---|
+| month server, `-bs 1440 -g -m uuid`, 1 day | 2.24 s [2.12–2.64] | +9.4 % | +4.0 % | 0.09 → 0.05 s |
+| 7 days | 15.84 s [15.84–22.34] | +6.2 % | +3.2 % | 0.80 → 0.27 s |
+| 15 days | 43.45 s [39.48–49.00] | +6.8 % | +1.0 % | 2.97 → 0.97 s |
+| month server, `-bs 1440 -g`, 1 day | 4.32 s [4.20–5.66] | +26.6 % | +11.3 % | 0.66 → 0.11 s |
+| 7 days | 20.62 s [19.71–21.52] | +34.4 % | +19.9 % | 3.55 → 0.12 s |
+| 15 days | 51.08 s [48.17–51.29] | +39.2 % | +9.1 % | 13.67 → 0.13 s |
+| PLM access log, `-du us -g -xqs` | 8.32 s [7.41–10.24] | +17.2 % | +10.9 % | 0.82 → 0.34 s |
+| general application log, `-g` | 6.23 s [5.69–10.15] | +4.5 % | +3.2 % | 0.35 → 0.31 s |
+
+- *It captures every grouping store* of 1 MB or more within 5 % of the
+  every-call arm's high-water mark on all eight inputs. That includes the
+  message store, which the boundary walks catch.
+- *What remains of `-mem`'s cost is the boundary walks:* 4.28 s of the 4.65 s
+  above the floor on 15 unmasked days. The walks inside grouping take 0.13 s.
+- *One residual is unexplained.* On 7 unmasked days the arm runs 4.1 s above
+  the floor, while its walks take 2.0 s. Its range (23.40 to 25.27 s) does not
+  reach the floor's (19.71 to 21.52 s).
 
 ### Delivery plan
 
