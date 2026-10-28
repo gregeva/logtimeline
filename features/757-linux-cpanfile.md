@@ -7,7 +7,9 @@ drop 2 on.
 
 Status: specification stage, from 2026-10-28. The contracts of the surfaces
 touched are confirmed by the architect; the records sweep, the findings, the
-architect's direction, the scope and the acceptance criteria are recorded below.
+architect's direction and the scope are recorded below, and the acceptance
+criteria are agreed (architect, 2026-10-28), with his corrections to 3, 5 and 6
+applied.
 
 ## What it is for
 
@@ -154,7 +156,9 @@ Recorded with it, each the one sensible option:
   that build for a platform other than the host's: Windows from a Linux runner
   or a macOS host, the Ubuntu container from a macOS host. The `unix` argument
   goes with the file it wrote.
-- `build/cpanfile` is removed and no reader names it.
+- `build/cpanfile` is renamed `build/cpanfile.macos`, so the three files are
+  named alike, `build/cpanfile.<platform>`, and no reader names
+  `build/cpanfile`.
 - Each packaging script generates its target platform's file before reading
   it, as the three setups already do, so a build never reads a file written
   for another host. The CI Windows job runs on `ubuntu-latest`, where the
@@ -169,39 +173,57 @@ Recorded with it, each the one sensible option:
 
 ## Acceptance criteria
 
+Agreed by the architect, 2026-10-28. His corrections: criterion 3 is the rename
+of `build/cpanfile` to the per-platform naming; criterion 5 includes the Windows
+build under Wine writing the Windows file; the builds run on the macOS
+development host, the container builds through Rancher Desktop, which Claude
+starts and stops itself.
+
 1. **With no platform argument, the generator writes the host's file alone.**
-   *Assertable.* Observable: on macOS only `build/cpanfile.macos` is written, on Linux only
-   `build/cpanfile.linux`, under Git Bash on Windows only
+   *Assertable.* Observable: on macOS only `build/cpanfile.macos` is written,
+   on Linux only `build/cpanfile.linux`, under Git Bash on Windows only
    `build/cpanfile.windows`. Validation: run on the macOS development host, in
-   an Ubuntu container, and with a `uname` first on PATH that reports
-   `MINGW64_NT-10.0` as Git Bash does; the files written are listed after each.
+   an Ubuntu container under Rancher Desktop, and with a `uname` first on PATH
+   that reports `MINGW64_NT-10.0` as Git Bash does; the files written are
+   listed after each.
 2. **With a platform argument, it writes that platform's file whatever the
-   host.** *Assertable.* Observable: `macos`, `linux` and `windows` each write that file
-   alone, `all` writes the three. Validation: each run on macOS.
-3. **The module lists are today's.** *Assertable.* Observable: `build/cpanfile.macos` and
-   `build/cpanfile.linux` equal today's `build/cpanfile` byte for byte,
-   `build/cpanfile.windows` is unchanged, and two runs are byte-identical.
-   Validation: `cmp` against `git show f72c2167:build/cpanfile` and
-   `git show f72c2167:build/cpanfile.windows`.
+   host.** *Assertable.* Observable: `macos`, `linux` and `windows` each write
+   that file alone, `all` writes the three. Validation: each run on macOS.
+3. **The three files are named alike, `build/cpanfile.<platform>`.**
+   *Assertable.* Observable: `build/cpanfile` is renamed
+   `build/cpanfile.macos`, beside `build/cpanfile.linux` and
+   `build/cpanfile.windows`, and `git log --follow build/cpanfile.macos` carries
+   the old file's history. The rename changes no module list: the macOS and
+   Linux files equal `git show f72c2167:build/cpanfile` byte for byte, the
+   Windows file equals `git show f72c2167:build/cpanfile.windows`, and two
+   runs of the generator are byte-identical.
 4. **A module one platform loads is in that platform's file alone** (#709's
-   criterion 8, moved here). *Assertable.* Observable: run on a scratch copy of `ltl` carrying
-   a `require BSD::Resource` line, passed as the generator's script name, the
-   macOS file names `BSD::Resource` and the Linux and Windows files do not;
-   `Win32::API` is in the Windows file alone.
+   criterion 8, moved here). *Assertable.* Observable: run on a scratch copy of
+   `ltl` carrying a `require BSD::Resource` line, passed as the generator's
+   script name, the macOS file names `BSD::Resource` and the Linux and Windows
+   files do not; `Win32::API` is in the Windows file alone.
 5. **Every reader reads its platform's file, and none names `build/cpanfile`.**
-   *Assertable.* Observable: `git grep` for `build/cpanfile` not followed by a platform
-   suffix, outside `features/` and `releases/`, returns nothing; each reader
-   runs to its end on its host. Validation, each reader listed in the scope
-   table: on macOS `build/macos-setup.sh`, the environment check (conditions 3
-   and 4), the preflight with `LTL_PROFILING_INSTALL=0` and
-   `build/install-deps.sh`; in an Ubuntu container `build/linux-setup.sh`, the
-   check and the preflight; from macOS `build/ubuntu-package.sh amd64` and
-   `build/windows-package.sh`, each binary answering `--version`; the three CI
+   *Assertable.* Observable: `git grep` for `build/cpanfile` not followed by a
+   platform suffix, outside `features/` and `releases/`, returns nothing; each
+   reader runs to its end on its host. The Windows build under Wine, run on a
+   host that is not Windows, writes `build/cpanfile.windows` itself and installs
+   from it, as the CI Windows job does on `ubuntu-latest`, where the generator
+   alone writes the Linux file. Validation, each reader in the scope table: on
+   macOS `build/macos-setup.sh`, the environment check (conditions 3 and 4),
+   the preflight with `LTL_PROFILING_INSTALL=0` and `build/install-deps.sh`; in
+   an Ubuntu container under Rancher Desktop `build/linux-setup.sh`, the check
+   and the preflight; through Rancher Desktop `build/ubuntu-package.sh amd64`,
+   and `build/windows-package.sh` in a scratch checkout without
+   `build/cpanfile.windows`, each binary answering `--version`; the three CI
    jobs by a `workflow_dispatch` run of the release workflow on the issue
    branch.
 6. **The macOS binary carries the macOS file's modules** (#709's criterion 7,
-   moved here). *Assertable.* Observable: the scratch copy of `ltl` that requires
-   `BSD::Resource`, packed with `pp` as `build/macos-package.sh` invokes it,
-   with the module installed, lists `BSD/Resource.pm` under `unzip -l`. The
-   criterion's other half, the binary reporting the kept peak, reads #709's
-   reading and is checked on the binary built once that reading is in `ltl`.
+   moved here). *Assertable.* Observable: the scratch copy of `ltl` that
+   requires `BSD::Resource`, packed on the macOS development host with `pp` as
+   `build/macos-package.sh` invokes it, with the module installed, lists
+   `BSD/Resource.pm` under `unzip -l`. The criterion's other half, the binary
+   reporting the kept peak, reads #709's reading and is checked on the binary
+   built once that reading is in `ltl`.
+
+Rancher Desktop is not installed on the macOS development host (2026-10-28):
+no application, no `rdctl`, no `docker` on PATH.
