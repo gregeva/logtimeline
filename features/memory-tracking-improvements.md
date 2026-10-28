@@ -673,7 +673,7 @@ check covers every store all of the time (2026-10-27). It is recorded in
 | 5 | Without `-mem`, no reading is taken between steps: `-V memory-usage` lists the kept-peak site, once per reporting moment, and under `-V benchmark-data` the compile sites; no `phase_boundary`, `grouping_checkpoint` or `grouping_final_pass` reading | assertable | `tests/validate-memory-usage.sh`, runs without `-mem`: plain, `-g` (checkpoints and windows), a CSV input |
 | 6 | On macOS without `BSD::Resource`, the run prints the `memory-unreadable` notice once, reports the readings' peak, and takes the readings between steps | assertable | `tests/validate-memory-usage.sh`, a macOS-only scenario that hides the module through an `@INC` hook given at invocation |
 | 7 | The packaged macOS binary (arm64, the one the release workflow builds) carries `BSD::Resource` and reports the kept peak | unknown | Prototype item (D2) |
-| 8 | `build/generate-cpanfile.sh` names `BSD::Resource` for macOS and regenerates both cpanfiles byte-identical to the committed ones | assertable | Regenerate, `git diff --exit-code build/` |
+| 8 | `build/generate-cpanfile.sh` names `BSD::Resource` for macOS only, in no Linux or Windows cpanfile, and regenerates every cpanfile byte-identical to the committed ones | assertable | Regenerate, `git diff --exit-code build/`; the module's name grepped in each cpanfile |
 | 9 | Every store of § Store inventory is in `named_structure_sizes()`: under `-mem`, `-V benchmark-data` carries a `MEMORY` row for each of the 38, and on the one-day log with `-hg -hgdm raw -h HTTP` the highlighted raw values' row reads about 70 MB | assertable | The row names of one `-mem -V benchmark-data` run against the 38; the premise case for the size |
 | 10 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
 | 11 | Under `-mem`, grouping's stores' high-water marks and the cost of their walks meet the bounds the prototype sets | unknown | Prototype scope (§ Decisions, grouping's structure walks) |
@@ -760,11 +760,11 @@ The issue's one PR follows the completion gate.
    - Each platform reads the kept peak at its own `-V memory-usage` site, and
      the four consumers of the peak read it.
    - On macOS, the fallback and its `memory-unreadable` notice.
-   - `BSD::Resource` joins the generator's Unix-only list, and both cpanfiles
-     are regenerated. The generator finds a module through `ltl`'s own
-     `require`, so the list and the reading change together. macOS setup
-     installs the module from the cpanfile. The Unix cpanfile also serves
-     Linux, which then installs a module it never loads.
+   - `BSD::Resource` is declared for macOS only, in the cpanfile that #757
+     (a Linux-specific variant of the cpanfile) separates from Linux's, and
+     every cpanfile is regenerated. The generator finds a module through
+     `ltl`'s own `require`, so the declaration and the reading change
+     together. macOS setup installs the module from the cpanfile.
    - Criteria 1 to 4, 6 to 8, 12 and 14, on this drop's surfaces. Criterion 1's
      Windows run is on the Windows development host, and its Linux run in a
      container.
@@ -779,7 +779,21 @@ The issue's one PR follows the completion gate.
    Results. Then the completion gate per `docs/process/workflow.md` § 3, then
    the PR.
 
-**Edges (the dependency-first test, 2026-10-28).** None blocks; no native edge.
+**Edges (the dependency-first test, 2026-10-28).** One blocks.
+- **#757 (a Linux-specific variant of the cpanfile) blocks #709**, a native
+  edge, filed at the architect's direction as a sub-issue of #729 (process,
+  tests and build). #709 cannot reach a clean implementation before it.
+  Today `build/cpanfile` serves macOS and Linux, so declaring `BSD::Resource`
+  there would have three effects on Linux, all for a module it never loads:
+  - `build/linux-setup.sh` stops until the module's package is named
+    (`features/750-interpreter-resolution.md` § `build/linux-setup.sh`);
+  - the environment check's condition 3, the Perl loads every runtime module
+    of the cpanfile, fails until the package is installed (same record,
+    § Phase 4: the expected conditions);
+  - the Linux release binary's container build, `build/ubuntu-package.sh`,
+    installs it.
+
+  The prototype stage does not depend on #757; drop 2 does.
 - **#710 (remove the run index).** Each of the two reaches a clean
   implementation without the other. The index's `memory_used` is one of the
   peak's four consumers. Whichever issue lands second either moves it to the
