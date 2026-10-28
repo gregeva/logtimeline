@@ -184,7 +184,7 @@ found while reading the third `all`-tier benchmark round of 0.19.0.
 the version stamp and the `before` benchmark; P1's instruments and its trace
 runs (§ P1 before the timed runs).
 
-**Next:** the timed inputs and arms, chosen from § P1 qualification of inputs and options; then P1's timed runs, then P2 (§ Prototype plan), on the macOS
+**Next:** P1's timed runs, on the matrix the architect approved (§ Prototype plan), then P2, on the macOS
 development host.
 
 **Kept outside the repository, on the first macOS development host:**
@@ -763,9 +763,9 @@ criterion 11's bounds, unknown until measured). The arms:
 |---|---|
 | floor | `ltl` as tracked, without `-mem` |
 | every call | `ltl` as tracked, with `-mem`: a walk at every checkpoint and every final-pass window |
-| conditional | A walk at a checkpoint or window only when a cheap count of grouping's stores has grown past its highest by a margin. The count candidates (held keys, clusters) and two or three margins are tried |
+| conditional | A walk at a checkpoint or window only when a cheap count of grouping's stores has grown past its value at the last such walk by a margin. Timed: either count (the keys held or the clusters) at +0 %. The keys held and the clusters alone, at +0 % to +200 %, are replayed over the traces, not timed (§ P1 qualification of inputs and options) |
 | boundaries only | No walk inside grouping; the phase-boundary walks only |
-| grouping's stores only | A walk at every checkpoint and window that covers only the stores `run_consolidation_checkpoint()` and `process_final_pass_window()` write (the `consolidation_*` stores, including the per-key maps the inventory adds, and `log_messages`); every store at the phase boundaries |
+| grouping's stores only | A walk at every checkpoint and window that covers only the stores `run_consolidation_checkpoint()` and `process_final_pass_window()` write (the `consolidation_*` stores, including the per-key maps the inventory adds, `log_messages`, and `log_messages_counters`, which a merge deletes from); every store at the phase boundaries |
 
 Each arm also times its walks per routine, as § Issue #146's scratch probe did,
 so a combination (every checkpoint, the windows conditional or not walked)
@@ -775,12 +775,24 @@ copy carries the 38 stores of § Store inventory in the map, as delivered: the
 map's size sets each walk's cost. The last arm was added on 2026-10-28, while
 laying out the delivery plan, when this came to light.
 
-- *Inputs, at staged scale:* the premise's server of the month folder, from
-  2026-01-02: 1, 3, 7 and 15 days (34.4, 66.6, 327.2 and 801.9 MB); and the
-  application log of 286K unique messages (97 MB), the benchmark's most
-  checkpoint-heavy file. Options: the benchmark's `top25-consolidate`
-  (`-n 25 -g -m uuid`, with `-bs 1440` on the access logs), with
-  `--disable-progress -V benchmark-data`.
+- *Inputs, approved by the architect on 2026-10-28 from § P1 qualification of
+  inputs and options,* each for a behaviour at the walk sites:
+  - the premise's server of the month folder, from 2026-01-02, at 1, 7 and
+    15 days (34.4, 327.2 and 801.9 MB), `-bs 1440 -g -m uuid`: the most walks,
+    and the clusters' peak in the final pass;
+  - the same days, `-bs 1440 -g`: the walks' cost, the checkpoints' fast path
+    and the final-pass skip;
+  - the PLM web server access log of one day, `-du us -g -xqs`: the cost on
+    another access-log family, with the largest index;
+  - the general application log of 85 MB, `-g`: a family carrying no
+    duration, where the index peaks while neither count is at a high.
+
+  `prototype/709-memory-peak/candidates.txt` names their files and options.
+  Every arm runs with `--disable-progress -V benchmark-data,memory-usage`, and
+  `-mem` on every arm but the floor. Bare `-V` is not used: it turns on the
+  grouping section, which keeps member keys in every cluster and so changes
+  the stores the walks measure. `-n` and `--terminal-width` do not reach
+  grouping and are left at their defaults.
 - *Measured, three runs per arm and input, interleaved, medians with ranges:*
   total time and the `parse/read_files` and `finalize/group_similar` stages;
   walks per routine and their time; each grouping store's high-water mark
@@ -800,8 +812,8 @@ instead. The release workflow builds the arm64 binary only, after
 `build/macos-setup.sh --package` installs the cpanfile's modules, so the
 cpanfile change of criterion 8 is what carries the module there.
 
-Both prototypes are on this host. P1's runs take about 50 to 70 minutes in the
-background. The architect confirmed this plan on 2026-10-28.
+Both prototypes are on this host. P1's timed runs take about 40 minutes in the
+background. The architect confirmed this plan on 2026-10-28, and its timed matrix after the qualification of inputs the same day.
 
 ### P1 before the timed runs (2026-10-28)
 
