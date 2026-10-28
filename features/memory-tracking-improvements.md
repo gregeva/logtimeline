@@ -189,7 +189,7 @@ stamp and the `before` benchmark; P1's instruments and its trace runs (§ P1
 before the timed runs); the qualification of its inputs; its timed runs and
 the transient-stores arm (§ P1 results); D3; criterion 11's bounds.
 
-**Next:** delivery plan drop 5; then drops 2 and 3, which wait for #757.
+**Next:** delivery plan drops 2 and 3, which wait for #757; then drop 6.
 
 **Kept outside the repository, on the first macOS development host:**
 - `tests/baseline/results/709-before-1.tsv`, `-2.tsv` and `-3.tsv`, untracked,
@@ -1126,6 +1126,52 @@ Every other harness scenario that runs `-mem` or reads a `MEMORY` row passes:
 `validate-runtime-config.sh`, `validate-statistics-demand.sh`,
 `validate-udm-counting.sh` and `validate-section-layout.sh`, and
 `validate-verbose-content-shape.sh`.
+
+### Drop 5: grouping's walks per D3 (2026-10-28)
+
+Delivered at `68385228` on the issue branch. Under `-mem`,
+`measure_memory_structures()` walks `grouping_structure_names()`, the 15
+`consolidation_*` stores of the map, at the `grouping_checkpoint` and
+`grouping_final_pass` sites, and every store at the phase boundaries. The two
+grouping call sites are unchanged.
+
+**Criterion 11 met** (`prototype/709-memory-peak/check-criterion-11.py`,
+output in `results/d5-criterion-11.txt`, macOS, one run per input):
+- *Capture:* on the eight P1 inputs every grouping store of 1 MB or more is
+  within 5 % of the every-call reference.
+- *Cost:* on 15 days of one server's access logs grouped without the UUID
+  mask, the wall clock was 54.43 s [53.15–54.82] with `-mem` against
+  49.82 s [49.58–51.93] without, +9.3 % (bound 12 %). Drop 4's code took
+  66.21 s [65.44–66.64], +32.9 %.
+
+No run's stderr carries ` at <file> line <N>`, and
+`tests/validate-memory-usage.sh` passes whole (28).
+
+**Finding: the message store's size differs between identical runs.** Across
+every run of P1 and of drop 5, by input. Every arm with `-mem` reports
+`MEMORY_FINAL log_messages`, the store's size as the benchmark block prints;
+the floor reports none:
+
+| Input | Runs | Final message-store size |
+|---|---|---|
+| one server's access logs, 1 day, `-bs 1440 -g` | 19 | 43.8 MB ×14, 41.4 MB ×5 |
+| 7 days | 19 | 337.3 MB ×16, 319.4 MB ×3 |
+| 15 days | 25 | 794.0 MB ×22, 751.8 MB ×3 |
+| PLM web server access log, `-du us -g -xqs` | 19 | 101.0 MB ×14, 96.1 MB ×5 |
+| the same server, `-bs 1440 -g -m uuid`, 1, 7 and 15 days | 19 each | one size; on 7 days 52.7 and 52.6 MB |
+| general application log, `-g` | 19 | one size |
+
+- *Two sizes, 4.9 to 5.5 % apart,* on every input whose keys do not group.
+- *It is not the walks.* The smaller size appears under the every-call arm, the
+  grouping's-stores-only arm and drop 5 alike.
+- *It is not the data.* On 15 unmasked days the two sizes come with the same
+  line, file and message-row counts in `-V benchmark-data`, and the same
+  stderr apart from `time -l`'s figures.
+- *The cause is not established.*
+- *It meets criterion 11's 5 % capture bound.* A run in the smaller state reports
+  the message store at 94.7 % of the reference (754.4 against 796.8 MB on
+  15 unmasked days). Drop 5's capture run fell in the larger state on all
+  eight inputs.
 
 ### Delivery plan
 
