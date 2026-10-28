@@ -145,7 +145,7 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 
 ### S5. Single resolution surface
 
-`named_structure_sizes()` (extracted during the investigation) is the only place the named map is defined; `measure_memory_structures()` and the `-mem debug` sampler both consume it. The `MEMORY_FINAL` emission in the benchmark block still lists structures ad hoc — converge it onto the same surface when touched.
+`named_structure_sizes()` (extracted during the investigation) is the only place the named map is defined; `measure_memory_structures()` and the `-mem debug` sampler both consume it. The `MEMORY_FINAL` emission in the benchmark block still lists structures ad hoc — converge it onto the same surface when touched. Converged under #709 drop 4: `MEMORY_FINAL` carries one row per store of the map, and the map itself is `named_structures()`, a name and a reference per store, which `named_structure_sizes()` walks.
 
 ### Non-goals
 
@@ -189,7 +189,7 @@ stamp and the `before` benchmark; P1's instruments and its trace runs (§ P1
 before the timed runs); the qualification of its inputs; its timed runs and
 the transient-stores arm (§ P1 results); D3; criterion 11's bounds.
 
-**Next:** delivery plan drops 4 and 5; then drops 2 and 3, which wait for #757.
+**Next:** delivery plan drop 5; then drops 2 and 3, which wait for #757.
 
 **Kept outside the repository, on the first macOS development host:**
 - `tests/baseline/results/709-before-1.tsv`, `-2.tsv` and `-3.tsv`, untracked,
@@ -219,7 +219,7 @@ memory rows to attribute a memory change to the store that made it.
 | MAXIMUM MEMORY USED, the run summary | "RSS (Resident Set Size) high-water mark is always captured and displayed as MAXIMUM MEMORY USED in the summary table", on every run, with or without `-mem` | § Default Behavior; restated in the direction below: "the one memory figure every run reports" |
 | The `-mem` breakdown | A row per named store of at least 1 KB, as a share of the peak, then an `unattributed` row: the peak less the sum of every store's high-water mark, floored at zero, so the rows reconcile to the peak | § Output Format, the notes; § Issue #356 Specification, S3 |
 | `-V benchmark-data`, `MEMORY` rows | `rss_peak` whenever `-V` is active; under `-mem` a row per store's high-water mark, then `MEMORY unattributed`, a reserved name in the row namespace | `features/memory-baseline-profiling.md` DD-03 |
-| `-V benchmark-data`, `MEMORY_FINAL` rows | Listed by hand in the benchmark block; to converge onto `named_structure_sizes()` when touched | § Issue #356 Specification, S5 |
+| `-V benchmark-data`, `MEMORY_FINAL` rows | Under `-mem`, one row per store of the map, measured through `named_structure_sizes()` as the block prints, in name order, under the `MEMORY` rows' names (#709 drop 4) | § Issue #356 Specification, S5 |
 | `-V memory-usage` | A `site` line per caller of the memory reading, with its count and time; a new reading site joins the list in its fixed order | § `-V memory-usage` section contract |
 | The aggregate export, `max_memory_used` | The MAXIMUM MEMORY USED string, as the run summary prints it | `features/503-yaml-aggregate-export.md` D19 |
 | The run index, `memory_used` | "Peak memory during processing (bytes)" on a selection entry; the index itself is removed by #710 (remove the run index) | `features/index-file.md` |
@@ -1079,6 +1079,53 @@ The set ran noisier than the first (the floor's range on 15 masked days was
 - *One residual is unexplained.* On 7 unmasked days the arm runs 4.1 s above
   the floor, while its walks take 2.0 s. Its range (23.40 to 25.27 s) does not
   reach the floor's (19.71 to 21.52 s).
+
+### Drop 4: the inventory stores join the map (2026-10-28)
+
+Delivered at `bb4511ac` on the issue branch: `named_structures()` maps 67
+stores by name to a reference, the 29 the map had and the 38 of § Store
+inventory; `named_structure_sizes()` walks it whole or for the names given;
+`MEMORY_FINAL` carries one row per store of the map.
+
+**Proven against the code before the change,** both captured with `-V`, on
+macOS:
+
+| Input | `MEMORY` rows | `MEMORY_FINAL` rows | New rows of 64 KB or more | `unattributed` |
+|---|---|---|---|---|
+| one-day web application access log, `-mem -V benchmark-data -hg -hgdm raw -h HTTP` | 32 → 70 | 8 → 67 | `histogram_values_hl` 71.4 MB | 142.4 → 79.3 MB |
+| the month server's first day, `-mem -V benchmark-data -bs 1440 -n 25 -g -m uuid` | 32 → 70 | 8 → 67 | `consolidation_key_checkpoint_count`, `consolidation_key_generation`, 1.1 MB each | 28.4 → 26.3 MB |
+| the network-latency CSV, `-mem -V benchmark-data -udm latency_ms` | 32 → 70 | 8 → 67 | none | 44.4 → 44.4 MB |
+
+- *The rows already mapped* moved by less than 1 %.
+- *Without `-mem`* the output is unchanged, with the figures masked.
+- *Under `-mem debug`* the decomposition records keep their shape, and their
+  `named_sum` now covers the 67 stores.
+- *No run's stderr carries* ` at <file> line <N>`.
+- *Criterion 9's size:* the highlighted raw values read 71.4 MB, against
+  "about 70 MB".
+
+**Asserted** by the `memory-map` scenario of `tests/validate-memory-usage.sh`
+(criteria 9 and 10):
+- every inventory store has a `MEMORY` row;
+- `MEMORY unattributed` is `rss_peak` less every other row, exactly;
+- `MEMORY_FINAL` carries the map's stores;
+- the breakdown lists only stores of the map, then `unattributed`, which is
+  MAXIMUM MEMORY USED less every store within the precision of the rendered
+  figures and the stores under 1 KB it hides.
+
+The breakdown prints after the benchmark block and after further walks, so
+its high-water marks can exceed the block's rows. It is checked against its own
+figures, not the block's. The two inventory checks fail on the code before the
+change, and the two `unattributed` checks each fail on a copy whose sum is
+sabotaged.
+
+Every other harness scenario that runs `-mem` or reads a `MEMORY` row passes:
+`validate-memory-usage.sh` whole (28), and the memory scenarios of
+`validate-byte-units.sh`, `validate-format-registry.sh`,
+`validate-histogram-bin-counters.sh`, `validate-read-path.sh`,
+`validate-runtime-config.sh`, `validate-statistics-demand.sh`,
+`validate-udm-counting.sh` and `validate-section-layout.sh`, and
+`validate-verbose-content-shape.sh`.
 
 ### Delivery plan
 
