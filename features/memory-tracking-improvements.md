@@ -159,7 +159,8 @@ directly on `release/0.20.0`. Filed 2026-10-12, found while reading the third
 `all`-tier benchmark round of 0.19.0. Locked so far (§ Decisions below): D1, the
 reported peak is the operating system's kept high-water mark; D2, macOS reads
 it from `getrusage` through `BSD::Resource`. Grouping's structure walks under
-`-mem` are chosen by prototype.
+`-mem` are chosen by prototype. The prototype plan was confirmed on
+2026-10-28; the delivery plan is drafted.
 
 ### Contract of the surfaces touched (confirmed by the architect, 2026-10-27)
 
@@ -697,10 +698,15 @@ criterion 11's bounds, unknown until measured). The arms:
 | every call | `ltl` as tracked, with `-mem`: a walk at every checkpoint and every final-pass window |
 | conditional | A walk at a checkpoint or window only when a cheap count of grouping's stores has grown past its highest by a margin. The count candidates (held keys, clusters) and two or three margins are tried |
 | boundaries only | No walk inside grouping; the phase-boundary walks only |
+| grouping's stores only | A walk at every checkpoint and window that covers only the stores `run_consolidation_checkpoint()` and `process_final_pass_window()` write (the `consolidation_*` stores, including the per-key maps the inventory adds, and `log_messages`); every store at the phase boundaries |
 
 Each arm also times its walks per routine, as § Issue #146's scratch probe did,
 so a combination (every checkpoint, the windows conditional or not walked)
-is read from the same runs without an arm of its own.
+is read from the same runs without an arm of its own. A walk inside grouping
+covers the whole of `named_structure_sizes()` today, 29 stores, so every arm's
+copy carries the 38 stores of § Store inventory in the map, as delivered: the
+map's size sets each walk's cost. The last arm was added on 2026-10-28, while
+laying out the delivery plan, when this came to light.
 
 - *Inputs, at staged scale:* the premise's server of the month folder, from
   2026-01-02: 1, 3, 7 and 15 days (34.4, 66.6, 327.2 and 801.9 MB); and the
@@ -727,8 +733,64 @@ instead. The release workflow builds the arm64 binary only, after
 `build/macos-setup.sh --package` installs the cpanfile's modules, so the
 cpanfile change of criterion 8 is what carries the module there.
 
-Both prototypes are on this host. P1's runs take about 40 to 60 minutes in the
-background.
+Both prototypes are on this host. P1's runs take about 50 to 70 minutes in the
+background. The architect confirmed this plan on 2026-10-28.
+
+### Delivery plan
+
+Drafted 2026-10-28. The stage starts only on the architect's direction. Each
+drop is committed and pushed on the issue branch before the next one starts.
+The issue's one PR follows the completion gate.
+
+**Start.**
+- The branch `709-memory-peak-and-unmeasured-stores` is cut from
+  `release/0.20.0`, in its own worktree beside the release worktree, so both
+  sides of the benchmark run from the same kind of checkout.
+- `$version_number` is set to `0.20.0-709`.
+- The `before` benchmark runs on the base commit: the four tests of criterion
+  13, three runs each. It runs before P1, never alongside it, because both are
+  timings.
+
+1. **The prototypes, P1 and P2.**
+   - The findings report goes beside them.
+   - The architect locks the choice of grouping's walks, and criterion 11's
+     bounds are written from it.
+   - Criterion 7 is shown, or its gap is recorded.
+2. **The kept peak (D1, D2), and the build that carries the module.**
+   - Each platform reads the kept peak at its own `-V memory-usage` site, and
+     the four consumers of the peak read it.
+   - On macOS, the fallback and its `memory-unreadable` notice.
+   - `BSD::Resource` joins the generator's Unix-only list, and both cpanfiles
+     are regenerated. The generator finds a module through `ltl`'s own
+     `require`, so the list and the reading change together. macOS setup
+     installs the module from the cpanfile. The Unix cpanfile also serves
+     Linux, which then installs a module it never loads.
+   - Criteria 1 to 4, 6 to 8, 12 and 14, on this drop's surfaces. Criterion 1's
+     Windows run is on the Windows development host, and its Linux run in a
+     container.
+3. **Readings between steps only under `-mem`, or in the fallback**
+   (criterion 5). This drop follows 2, so that no run is left without a peak.
+4. **The 38 stores join `named_structure_sizes()`, and `MEMORY_FINAL`
+   converges onto the map** (criteria 9 and 10). The consumption sites in
+   `docs/architecture-patterns.md` § Named-structure memory map are trued up.
+   This drop comes before 5 because the map's size sets a walk's cost.
+5. **Grouping's walks, as decided in drop 1** (criterion 11).
+6. **The `after` benchmark** (criterion 13), with the findings report under
+   Results. Then the completion gate per `docs/process/workflow.md` § 3, then
+   the PR.
+
+**Edges (the dependency-first test, 2026-10-28).** None blocks; no native edge.
+- **#710 (remove the run index).** Each of the two reaches a clean
+  implementation without the other. The index's `memory_used` is one of the
+  peak's four consumers. Whichever issue lands second either moves it to the
+  kept peak or removes it with the index.
+- **#354 (the message-statistics store under `-mdm bin`, on hold behind #2).**
+  It uses `-mem` as its instrument. Its two stores, `log_messages` and
+  `log_messages_counters`, are already in the map, and its peak comparison can
+  be read from the operating system's peak meanwhile.
+- **#2 (memory ceiling).** As recorded in § Records sweep. With no reading
+  between steps without `-mem` (following D1 and D2), the controller brings its
+  own reading cadence.
 
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
