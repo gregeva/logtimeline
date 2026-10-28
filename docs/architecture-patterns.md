@@ -777,10 +777,13 @@ walks it with `Devel::Size`, every store or the names given, and is the only
 place a store is measured. Under `-mem`, `measure_memory_structures()` keeps
 each store's high-water mark, which the `-mem` breakdown and the
 `-V benchmark-data` `MEMORY` rows report; the peak less their sum is
-`unattributed`. The `MEMORY_FINAL` rows measure every store of the map as the
-block prints, and `-mem debug` walks the map at each phase boundary. A store
-holding compiled code cannot be walked (the walk crashes); the
-`format_scan_subs` compile-boundary figure stands for it.
+`unattributed`. A phase-boundary walk covers every store; a walk at a grouping
+checkpoint or final-pass window covers only `grouping_structure_names()`,
+grouping's `consolidation_*` stores, which peak there. The `MEMORY_FINAL` rows
+measure every store of the map as the block prints, and `-mem debug` walks the
+map at each phase boundary. A store holding compiled code cannot be walked
+(the walk crashes); the `format_scan_subs` compile-boundary figure stands for
+it.
 
 **Intended uses.** A large data store, whether found during an investigation
 or added to the code, joins the map in the same change, under its own name.
@@ -794,11 +797,14 @@ grew. Grouping's transient structures (#171), the message-statistics counter
 store (#346) and the highlighted raw histogram values (#709) were each found
 missing that way. A walk costs time that grows with the stores it measures
 (`features/memory-tracking-improvements.md` § Issue #146, Drop 2), so walks
-run only under `-mem`.
+run only under `-mem`, and inside grouping they leave out the message store,
+whose walk at every checkpoint and window was most of `-mem`'s cost on keys
+that do not group (§ Issue #709, D3).
 
 **Consumption sites.**
 - `named_structure_sizes` :: `my %stores = named_structures();`
-- `measure_memory_structures` :: `my %current_sizes = named_structure_sizes();`
+- `measure_memory_structures` :: `my %current_sizes = named_structure_sizes( $site =~ /^grouping_/ ? grouping_structure_names() : () );`
+- `grouping_structure_names` :: `my %stores = named_structures();`
 - `memory_debug_decomposition` :: `my %sizes = named_structure_sizes();`
 - `run_consolidation_checkpoint` :: `measure_memory_structures('grouping_checkpoint');`
 - `process_final_pass_window` :: `measure_memory_structures('grouping_final_pass');`
@@ -809,9 +815,7 @@ run only under `-mem`.
 **Owning record.** `features/memory-tracking-improvements.md` (§ Issue #356
 Specification, S2 to S5, and § Issue #709).
 
-**Status.** Needs refinement: the walk at each grouping checkpoint and
-final-pass window, which § Issue #709's D3 narrows to grouping's
-`consolidation_*` stores.
+**Status.** Established (#709).
 
 ---
 

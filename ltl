@@ -14407,6 +14407,16 @@ sub named_structure_sizes {
     return map { $_ => Devel::Size::total_size($stores{$_}) } @names;
 }
 
+# The stores grouping's checkpoints and final-pass windows walk under -mem: its
+# consolidation_* stores, which peak there and are freed before the next phase
+# boundary. The phase-boundary walks cover every store, the message store among
+# them, whose walk at every checkpoint and window was the cost inside grouping
+# (features/memory-tracking-improvements.md § Issue #709, D3).
+sub grouping_structure_names {
+    my %stores = named_structures();
+    return grep { /^consolidation_/ } sort keys %stores;
+}
+
 # Issue #45: Measure all data structures and update high-water marks
 # Called after each major subroutine to capture peak memory usage; $site names
 # the caller for the -V memory-usage reading counts.
@@ -14421,7 +14431,7 @@ sub measure_memory_structures {
     # Only measure individual structures when -mem flag is used
     return unless $show_memory;
 
-    my %current_sizes = named_structure_sizes();
+    my %current_sizes = named_structure_sizes( $site =~ /^grouping_/ ? grouping_structure_names() : () );
 
     # D62: the generated scan subs are closures — a structure walk cannot
     # see their op trees or pads, so this category carries the accumulated

@@ -1,0 +1,14 @@
+capture (d5, against the every-call reference; stores of 1 MB or more):
+  appl             7 stores: all within 5 %
+  tc-g-d1          7 stores: all within 5 %
+  tc-g-d15         7 stores: all within 5 %
+  tc-g-d7          7 stores: all within 5 %
+  tc-mask-d1       8 stores: all within 5 %
+  tc-mask-d15      8 stores: all within 5 %
+  tc-mask-d7       8 stores: all within 5 %
+  wc-access-xqs    7 stores: all within 5 %
+cost (tc-g-d15, wall clock, median [range] of 3 rounds):
+  tracked  49.82 s [49.58-51.93]
+  d4       66.21 s [65.44-66.64]  +32.9 % against the floor
+  d5       54.43 s [53.15-54.82]  +9.3 % against the floor
+criterion 11: met
