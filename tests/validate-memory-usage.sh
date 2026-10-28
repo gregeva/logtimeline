@@ -40,6 +40,26 @@ C_SECTION="$DOC § -V memory-usage section contract; criterion 8"
 C_GATE="$DOC § -V memory-usage section contract (the activation flag); criteria 9 and 17"
 C_DEBUG="$DOC § Decisions D5, D6 and the section contract; criteria 10 and 11"
 C_BENCH="$DOC § -V memory-usage section contract (benchmark-data); criterion 12"
+C_MAP="$DOC § Issue #709 › Acceptance criteria 9 and 10, § Store inventory; § Issue #356 Specification S3 and S5; features/memory-baseline-profiling.md DD-03"
+
+# The stores § Issue #709 › Store inventory found growing with the input
+# outside the map, each under its variable's name.
+INVENTORY_STORES=(
+    histogram_values_hl histogram_buckets histogram_buckets_hl histogram_stats
+    histogram_stats_hl histogram_boundaries heatmap_percentiles
+    consolidation_cat_stats consolidation_category_unmatched_count
+    consolidation_pattern_generation consolidation_key_generation
+    consolidation_key_checkpoint_count consolidation_absorption_ema
+    consolidation_streaming_absorbed consolidation_final_pass_skipped
+    consolidation_cliff_edge
+    files_processed in_files_matched index_file_data index_preseed
+    index_aggregated format_detection format_detection_evidence
+    format_detection_sample timestamp_date_cache unregistered_levels
+    unregistered_levels_by_file
+    verbose_output verbose_section_buffer section_rows category_totals
+    progress_history notice_records memory_debug_records bin_counter_telemetry
+    stats_demand_telemetry udm_skipped_lines numeric_filter_no_metric
+)
 
 pass=0
 fail=0
@@ -311,13 +331,90 @@ scenario_benchmark_rows() {
         'is_contained() in tests/baseline/compare-results.sh' "$C_BENCH"
 }
 
+# ---------------------------------------------------------------------------
+# The memory map: under -mem a MEMORY row per store of the map, every store of
+# the inventory among them; unattributed is the peak less the sum of the rows;
+# MEMORY_FINAL carries one row per store of the map; the breakdown lists each
+# store of 1 KB or more, then unattributed. -bs 1440 -oe: no check reads the
+# time axis.
+# ---------------------------------------------------------------------------
+# rows <tag> <type>: the names of a run's benchmark-data rows of one type, one per line, sorted.
+rows() {
+    awk -F'\t' -v t="$2" '/^=== benchmark-data ===$/ { in_s = 1; next } /^=== END benchmark-data ===$/ { in_s = 0 }
+        in_s && $1 == t { print $2 }' "$TMP_DIR/$1.out" | LC_ALL=C sort
+}
+# breakdown <tag>: the -mem breakdown's rows beneath MAXIMUM MEMORY USED, "name<TAB>value unit".
+breakdown() {
+    awk '/MAXIMUM MEMORY USED/ { in_b = 1; next }
+         in_b && match($0, /^ +[a-z0-9_]+ +\( *[<0-9]+%\) +[0-9.]+ [A-Za-z]+ *$/) { n = split($0, f, " "); print f[1] "\t" f[n-1] " " f[n]; next }
+         in_b { exit }' "$TMP_DIR/$1.out"
+}
+scenario_memory_map() {
+    current_scenario="memory-map"
+    echo "[$current_scenario]"
+    run_ltl map -bs 1440 -oe -mem -V benchmark-data "$ACCESS_FIXTURE"
+    produced map $'^MEMORY\trss_peak\t' 'memory map rows' || return 0
+
+    local missing
+    missing=$(comm -23 <(printf '%s\n' "${INVENTORY_STORES[@]}" | LC_ALL=C sort) <(rows map MEMORY) | paste -sd, -)
+    check "every inventory store has a MEMORY row" "${missing:-none}" "none" \
+        'Under -mem, each store the inventory found growing with the input is in the named-structure map, so benchmark-data carries a MEMORY row for it' \
+        'named_structure_sizes() and print_verbose_output() in ltl' "$C_MAP"
+
+    local expected
+    expected=$(awk -F'\t' '/^=== benchmark-data ===$/ { in_s = 1; next } /^=== END benchmark-data ===$/ { in_s = 0 }
+        in_s && $1 == "MEMORY" && $2 == "rss_peak" { peak = $3; p = 1; next }
+        in_s && $1 == "MEMORY" && $2 != "unattributed" { sum += $3 }
+        END { if (p) { u = peak - sum; print (u < 0 ? 0 : u) } }' "$TMP_DIR/map.out")
+    check "unattributed is the peak less every row" "$(bench map MEMORY unattributed)" "$expected" \
+        'MEMORY unattributed equals rss_peak less the sum of every other MEMORY row, floored at zero' \
+        'print_verbose_output() in ltl' "$C_MAP"
+
+    check "MEMORY_FINAL carries the map's stores" "$(rows map MEMORY_FINAL | paste -sd, -)" \
+        "$(rows map MEMORY | grep -vxE 'rss_peak|unattributed|format_scan_subs' | paste -sd, -)" \
+        'MEMORY_FINAL has one row per store of the named-structure map, under the MEMORY rows names: every MEMORY row but rss_peak, unattributed and the format_scan_subs compile-boundary figure' \
+        'print_verbose_output() in ltl, through named_structure_sizes()' "$C_MAP"
+
+    # The breakdown prints after the benchmark block and after further walks, so
+    # its high-water marks can exceed the block's: it is checked against its own
+    # figures, not the block's rows.
+    local stray
+    stray=$(comm -23 <(breakdown map | cut -f1 | grep -vx unattributed | LC_ALL=C sort) <(rows map MEMORY) | paste -sd, -)
+    check "the breakdown lists stores of the map, then unattributed" "${stray:-none}|$(breakdown map | tail -1 | cut -f1)" "none|unattributed" \
+        'Every row of the -mem breakdown is a store of the named-structure map, and the last row is unattributed' \
+        'print_summary_table() in ltl' "$C_MAP"
+
+    # unattributed is MAXIMUM MEMORY USED less the full sum of high-water marks.
+    # The breakdown renders two or three significant figures and hides the stores
+    # under 1 KB, so the check holds within the precision of every figure it reads
+    # plus 1 KB for each store the breakdown does not list.
+    local verdict
+    verdict=$(breakdown map | awk -F'\t' -v peak="$(sed -nE 's/^ *MAXIMUM MEMORY USED +([0-9.]+ [A-Za-z]+) *$/\1/p' "$TMP_DIR/map.out" | head -1)" \
+                                         -v stores="$(rows map MEMORY | grep -cvxE 'rss_peak|unattributed' || true)" '
+        function unit(u) { return u == "B" ? 1 : u == "kB" ? 1e3 : u == "MB" ? 1e6 : u == "GB" ? 1e9 : -1 }
+        function bytes(t,   p) { split(t, p, " "); return unit(p[2]) < 0 ? -1 : p[1] * unit(p[2]) }
+        function step(t,   p, d) { split(t, p, " "); d = index(p[1], ".") ? length(p[1]) - index(p[1], ".") : 0
+            return unit(p[2]) * 0.5 * 10 ^ -d }
+        $1 == "unattributed" { row = $2; next }
+        { if (bytes($2) < 0) bad = $2; sum += bytes($2); slack += step($2); listed++ }
+        END { if (row == "" || peak == "" || bad != "" || bytes(row) < 0 || bytes(peak) < 0) { print "unreadable (row=" row ", peak=" peak ", figure=" bad ")"; exit }
+              want = bytes(peak) - sum; if (want < 0) want = 0
+              diff = bytes(row) - want; if (diff < 0) diff = -diff
+              slack += step(row) + step(peak) + 1024 * (stores - listed)
+              print (diff <= slack) ? "yes" : "no (unattributed " row ", peak " peak " less " sum " bytes listed, off by " diff ", allowed " slack ")" }')
+    check "the breakdown's unattributed is MAXIMUM MEMORY USED less every store" "$verdict" "yes" \
+        'The breakdown unattributed row equals MAXIMUM MEMORY USED less the sum of every store high-water mark, floored at zero, within the precision of the rendered figures and the stores under 1 KB it hides' \
+        'print_summary_table() in ltl' "$C_MAP"
+}
+
 scenario_register phase-boundary \
                   grouping \
                   compiles \
                   section-off \
                   debug \
                   debug-samples \
-                  benchmark-rows
+                  benchmark-rows \
+                  memory-map
 scenario_parse_args "$@"
 
 if [[ ! -x "$LTL" ]]; then
@@ -338,6 +435,7 @@ while read -r _scenario; do
         debug          ) scenario_debug ;;
         debug-samples  ) scenario_debug_samples ;;
         benchmark-rows ) scenario_benchmark_rows ;;
+        memory-map     ) scenario_memory_map ;;
     esac
 done < <(scenario_selected)
 

@@ -14319,42 +14319,92 @@ sub run_consolidation_checkpoint {
         if $message_grouping_section_wanted;
 }
 
-# Single resolution surface for the named-structure size map: every consumer
-# (the -mem high-water tracking and any diagnostic sampler) measures the same
-# set of structures through this sub.
-sub named_structure_sizes {
-    require Devel::Size;
+# The named-structure memory map: every store that grows with the input, under
+# the name its -mem rows carry. A store holding compiled code is not in it, as a
+# walk of one crashes; the format_scan_subs compile-boundary figure stands for
+# those.
+sub named_structures {
     return (
-        log_occurrences        => Devel::Size::total_size(\%log_occurrences),
-        bucket_outcomes        => Devel::Size::total_size(\%bucket_outcomes),
-        log_analysis           => Devel::Size::total_size(\%log_analysis),
-        log_messages           => Devel::Size::total_size(\%log_messages),
-        log_messages_counters  => Devel::Size::total_size(\%log_messages_counters),
-        message_key_order      => Devel::Size::total_size(\%message_key_order),
-        log_stats              => Devel::Size::total_size(\%log_stats),
-        log_threadpools        => Devel::Size::total_size(\%log_threadpools),
-        log_sessions           => Devel::Size::total_size(\%log_sessions),
-        log_users              => Devel::Size::total_size(\%log_users),
-        threadpool_activity    => Devel::Size::total_size(\%threadpool_activity),
-        udm_last_value         => Devel::Size::total_size(\%udm_last_value),
-        udm_distinct           => Devel::Size::total_size(\%udm_distinct),
-        heatmap_data           => Devel::Size::total_size(\%heatmap_data),
-        heatmap_data_hl        => Devel::Size::total_size(\%heatmap_data_hl),
-        heatmap_raw            => Devel::Size::total_size(\%heatmap_raw),
-        heatmap_raw_hl         => Devel::Size::total_size(\%heatmap_raw_hl),
-        heatmap_counters       => Devel::Size::total_size(\%heatmap_counters),
-        heatmap_counters_hl    => Devel::Size::total_size(\%heatmap_counters_hl),
-        bucket_stats_counters    => Devel::Size::total_size(\%bucket_stats_counters),
-        histogram_values       => Devel::Size::total_size(\%histogram_values),
-        histogram_counters     => Devel::Size::total_size(\%histogram_counters),
-        histogram_counters_hl  => Devel::Size::total_size(\%histogram_counters_hl),
-        consolidation_clusters => Devel::Size::total_size(\%consolidation_clusters),
-        consolidation_patterns => Devel::Size::total_size(\%consolidation_patterns),
-        consolidation_key_message => Devel::Size::total_size(\%consolidation_key_message),
-        consolidation_unmatched => Devel::Size::total_size(\%consolidation_unmatched),
-        consolidation_id_index => Devel::Size::total_size(\%consolidation_id_index),
-        consolidation_key_trigrams => Devel::Size::total_size(\%consolidation_key_trigrams),
+        log_occurrences                        => \%log_occurrences,
+        bucket_outcomes                        => \%bucket_outcomes,
+        log_analysis                           => \%log_analysis,
+        log_messages                           => \%log_messages,
+        log_messages_counters                  => \%log_messages_counters,
+        message_key_order                      => \%message_key_order,
+        log_stats                              => \%log_stats,
+        log_threadpools                        => \%log_threadpools,
+        log_sessions                           => \%log_sessions,
+        log_users                              => \%log_users,
+        threadpool_activity                    => \%threadpool_activity,
+        udm_last_value                         => \%udm_last_value,
+        udm_distinct                           => \%udm_distinct,
+        heatmap_data                           => \%heatmap_data,
+        heatmap_data_hl                        => \%heatmap_data_hl,
+        heatmap_raw                            => \%heatmap_raw,
+        heatmap_raw_hl                         => \%heatmap_raw_hl,
+        heatmap_counters                       => \%heatmap_counters,
+        heatmap_counters_hl                    => \%heatmap_counters_hl,
+        heatmap_percentiles                    => \%heatmap_percentiles,
+        bucket_stats_counters                  => \%bucket_stats_counters,
+        histogram_values                       => \%histogram_values,
+        histogram_values_hl                    => \%histogram_values_hl,
+        histogram_counters                     => \%histogram_counters,
+        histogram_counters_hl                  => \%histogram_counters_hl,
+        histogram_buckets                      => \%histogram_buckets,
+        histogram_buckets_hl                   => \%histogram_buckets_hl,
+        histogram_stats                        => \%histogram_stats,
+        histogram_stats_hl                     => \%histogram_stats_hl,
+        histogram_boundaries                   => \%histogram_boundaries,
+        consolidation_clusters                 => \%consolidation_clusters,
+        consolidation_patterns                 => \%consolidation_patterns,
+        consolidation_key_message              => \%consolidation_key_message,
+        consolidation_unmatched                => \%consolidation_unmatched,
+        consolidation_id_index                 => \%consolidation_id_index,
+        consolidation_key_trigrams             => \%consolidation_key_trigrams,
+        consolidation_cat_stats                => \%consolidation_cat_stats,
+        consolidation_category_unmatched_count => \%consolidation_category_unmatched_count,
+        consolidation_pattern_generation       => \%consolidation_pattern_generation,
+        consolidation_key_generation           => \%consolidation_key_generation,
+        consolidation_key_checkpoint_count     => \%consolidation_key_checkpoint_count,
+        consolidation_absorption_ema           => \%consolidation_absorption_ema,
+        consolidation_streaming_absorbed       => \%consolidation_streaming_absorbed,
+        consolidation_final_pass_skipped       => \%consolidation_final_pass_skipped,
+        consolidation_cliff_edge               => \%consolidation_cliff_edge,
+        files_processed                        => \@files_processed,
+        in_files_matched                       => \%in_files_matched,
+        index_file_data                        => \%index_file_data,
+        index_preseed                          => \%index_preseed,
+        index_aggregated                       => \%index_aggregated,
+        format_detection                       => \%format_detection,
+        format_detection_evidence              => \%format_detection_evidence,
+        format_detection_sample                => \%format_detection_sample,
+        timestamp_date_cache                   => \%timestamp_date_cache,
+        unregistered_levels                    => \%unregistered_levels,
+        unregistered_levels_by_file            => \%unregistered_levels_by_file,
+        verbose_output                         => \@verbose_output,
+        verbose_section_buffer                 => \%verbose_section_buffer,
+        section_rows                           => \%section_rows,
+        category_totals                        => \%category_totals,
+        progress_history                       => \@progress_history,
+        notice_records                         => \@notice_records,
+        memory_debug_records                   => \@memory_debug_records,
+        bin_counter_telemetry                  => \%bin_counter_telemetry,
+        stats_demand_telemetry                 => \%stats_demand_telemetry,
+        udm_skipped_lines                      => \%udm_skipped_lines,
+        numeric_filter_no_metric               => \%numeric_filter_no_metric,
     );
+}
+
+# Single resolution surface for the stores' sizes: the -mem high-water
+# tracking, the -mem debug sampler and the MEMORY_FINAL rows all measure
+# through this sub. Returns name => Devel::Size size, for every store of the
+# map, or for the names given.
+sub named_structure_sizes {
+    my @names = @_;
+    require Devel::Size;
+    my %stores = named_structures();
+    @names = keys %stores unless @names;
+    return map { $_ => Devel::Size::total_size($stores{$_}) } @names;
 }
 
 # Issue #45: Measure all data structures and update high-water marks
@@ -23855,17 +23905,11 @@ sub print_verbose_output {
         printf "MEMORY\tunattributed\t%d\n", $unattributed;
     }
 
-    # Final-state memory snapshot (only with -mem) — shows where memory ended up after consolidation
+    # Final-state memory snapshot (only with -mem): every store of the map as
+    # the block prints, where the high-water marks above show where it peaked
     if ($show_memory) {
-        require Devel::Size;
-        printf "MEMORY_FINAL\tlog_messages\t%d\n", Devel::Size::total_size(\%log_messages);
-        printf "MEMORY_FINAL\tlog_analysis\t%d\n", Devel::Size::total_size(\%log_analysis);
-        printf "MEMORY_FINAL\tconsolidation_clusters\t%d\n", Devel::Size::total_size(\%consolidation_clusters);
-        printf "MEMORY_FINAL\tconsolidation_patterns\t%d\n", Devel::Size::total_size(\%consolidation_patterns);
-        printf "MEMORY_FINAL\tconsolidation_key_message\t%d\n", Devel::Size::total_size(\%consolidation_key_message);
-        printf "MEMORY_FINAL\tconsolidation_unmatched\t%d\n", Devel::Size::total_size(\%consolidation_unmatched);
-        printf "MEMORY_FINAL\tconsolidation_id_index\t%d\n", Devel::Size::total_size(\%consolidation_id_index);
-        printf "MEMORY_FINAL\tconsolidation_key_trigrams\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams);
+        my %final_sizes = named_structure_sizes();
+        printf "MEMORY_FINAL\t%s\t%d\n", $_, $final_sizes{$_} for sort keys %final_sizes;
     }
 
     # Hash entry counts for key structures

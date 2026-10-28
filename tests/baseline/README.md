@@ -118,6 +118,13 @@ and no release baseline carries it. Name the test to run it:
 `run-benchmark.sh network-latency-csv-standard`. Its series starts with the captures of
 the change that added it, so there is nothing earlier to compare against.
 
+**The memory map carries 67 stores from release 0.20.0 (#709).** Every benchmark run
+passes `-mem`, so each test gains 38 `MEMORY` rows, among them `histogram_values_hl`,
+the highlighted raw histogram values, and the `MEMORY_FINAL` rows go from 8 to one per
+store of the map. **Expect `compare-results.sh` to list the new rows under New In This
+Version**, and `MEMORY unattributed` to fall by their sum across that boundary: memory
+that was counted there now has a row of its own.
+
 ## Results naming
 
 | kind | naming | what it is |
