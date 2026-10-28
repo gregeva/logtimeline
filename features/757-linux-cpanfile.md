@@ -6,8 +6,8 @@ Blocks: #709 (`-mem` misses stores and working memory), from its delivery plan
 drop 2 on.
 
 Status: specification stage, from 2026-10-28. The contracts of the surfaces
-touched are confirmed by the architect; the records sweep and the findings are
-recorded below.
+touched are confirmed by the architect; the records sweep, the findings, the
+architect's direction, the scope and the acceptance criteria are recorded below.
 
 ## What it is for
 
@@ -127,3 +127,81 @@ differs from `build/cpanfile`". The two files differ by `Win32::API` on every
 host today, and since #146 the Windows setup generates its file before
 installing from it. Once `build/cpanfile` is macOS's alone, it differs from the
 Windows file by `BSD::Resource` as well.
+
+## Direction (architect, 2026-10-28)
+
+Each platform has its own cpanfile: Linux, macOS and Windows. The generator
+detects the platform it runs on and writes that platform's file, and every
+consumer, the image builds included, reads its own platform's file. The
+cpanfiles are generated from the code, so a module enters a platform's file
+when `ltl` loads it on that platform; when that happens is not this issue's to
+schedule. This settles the finding "Nothing on macOS installs or packs
+`BSD::Resource` until `ltl` loads it", and the finding on
+`build/install-deps.sh`: it reads its host's file.
+
+## Scope: one generated file per platform
+
+| Platform | File | Written by `build/generate-cpanfile.sh` | Read by |
+|---|---|---|---|
+| macOS | `build/cpanfile.macos` | on a macOS host, or with `macos` | `build/macos-setup.sh` (and the CI macOS job); the environment check, conditions 3 and 4; the profiling preflight; `build/install-deps.sh` |
+| Linux | `build/cpanfile.linux` | on a Linux host, or with `linux` | `build/linux-setup.sh`; the environment check; the profiling preflight; `build/install-deps.sh`; `build/ubuntu-package.sh`'s container (and the CI Ubuntu job) |
+| Windows | `build/cpanfile.windows` | on a Windows host (Git Bash), or with `windows` | `build/windows-setup.ps1`; the environment check; the profiling preflight; `build/windows-package.sh`'s Docker and Wine build (and the CI Windows job) |
+
+Recorded with it, each the one sensible option:
+- With no platform argument the generator reads the host from `uname -s` and
+  writes that host's file alone. A platform argument (`macos`, `linux`,
+  `windows`, `all`) writes the named file whatever the host, for the packagers
+  that build for a platform other than the host's: Windows from a Linux runner
+  or a macOS host, the Ubuntu container from a macOS host. The `unix` argument
+  goes with the file it wrote.
+- `build/cpanfile` is removed and no reader names it.
+- Each packaging script generates its target platform's file before reading
+  it, as the three setups already do, so a build never reads a file written
+  for another host. The CI Windows job runs on `ubuntu-latest`, where the
+  generator alone would write the Linux file.
+- The generator's platform lists route a module loaded on some platforms only:
+  `Win32::API` to the Windows file alone, as today, and `BSD::Resource` to the
+  macOS file alone.
+- Every text naming `build/cpanfile` names the platform's file instead: the
+  environment check's Windows message and `docs/development-environment.md`'s
+  condition 3 row (both compare the Windows file with `build/cpanfile`),
+  `build/packaging-notes` and the packagers' header comments.
+
+## Acceptance criteria
+
+1. **With no platform argument, the generator writes the host's file alone.**
+   *Assertable.* Observable: on macOS only `build/cpanfile.macos` is written, on Linux only
+   `build/cpanfile.linux`, under Git Bash on Windows only
+   `build/cpanfile.windows`. Validation: run on the macOS development host, in
+   an Ubuntu container, and with a `uname` first on PATH that reports
+   `MINGW64_NT-10.0` as Git Bash does; the files written are listed after each.
+2. **With a platform argument, it writes that platform's file whatever the
+   host.** *Assertable.* Observable: `macos`, `linux` and `windows` each write that file
+   alone, `all` writes the three. Validation: each run on macOS.
+3. **The module lists are today's.** *Assertable.* Observable: `build/cpanfile.macos` and
+   `build/cpanfile.linux` equal today's `build/cpanfile` byte for byte,
+   `build/cpanfile.windows` is unchanged, and two runs are byte-identical.
+   Validation: `cmp` against `git show f72c2167:build/cpanfile` and
+   `git show f72c2167:build/cpanfile.windows`.
+4. **A module one platform loads is in that platform's file alone** (#709's
+   criterion 8, moved here). *Assertable.* Observable: run on a scratch copy of `ltl` carrying
+   a `require BSD::Resource` line, passed as the generator's script name, the
+   macOS file names `BSD::Resource` and the Linux and Windows files do not;
+   `Win32::API` is in the Windows file alone.
+5. **Every reader reads its platform's file, and none names `build/cpanfile`.**
+   *Assertable.* Observable: `git grep` for `build/cpanfile` not followed by a platform
+   suffix, outside `features/` and `releases/`, returns nothing; each reader
+   runs to its end on its host. Validation, each reader listed in the scope
+   table: on macOS `build/macos-setup.sh`, the environment check (conditions 3
+   and 4), the preflight with `LTL_PROFILING_INSTALL=0` and
+   `build/install-deps.sh`; in an Ubuntu container `build/linux-setup.sh`, the
+   check and the preflight; from macOS `build/ubuntu-package.sh amd64` and
+   `build/windows-package.sh`, each binary answering `--version`; the three CI
+   jobs by a `workflow_dispatch` run of the release workflow on the issue
+   branch.
+6. **The macOS binary carries the macOS file's modules** (#709's criterion 7,
+   moved here). *Assertable.* Observable: the scratch copy of `ltl` that requires
+   `BSD::Resource`, packed with `pp` as `build/macos-package.sh` invokes it,
+   with the module installed, lists `BSD/Resource.pm` under `unzip -l`. The
+   criterion's other half, the binary reporting the kept peak, reads #709's
+   reading and is checked on the binary built once that reading is in `ltl`.
