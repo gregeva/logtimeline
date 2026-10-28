@@ -165,10 +165,11 @@ macOS binary, and #709 keeps the reading and its fallback (the architect,
 found while reading the third `all`-tier benchmark round of 0.19.0.
 - Locked (§ Decisions): D1, the reported peak is the operating system's kept
   high-water mark; D2, macOS reads it from `getrusage` through
-  `BSD::Resource`.
-- The prototype chooses grouping's structure walks under `-mem`.
-- The acceptance criteria are agreed, and the prototype and delivery plans
-  confirmed.
+  `BSD::Resource`; D3, under `-mem` grouping's checkpoints and windows walk
+  only the `consolidation_*` stores.
+- The prototype stage is complete (2026-10-28).
+- The acceptance criteria are agreed, criterion 11's bounds written from P1,
+  and the delivery plan confirmed.
 
 ### Resuming
 
@@ -183,13 +184,12 @@ found while reading the third `all`-tier benchmark round of 0.19.0.
 - the prototype plan;
 - the delivery plan and its edges.
 
-**Done, the start of the prototype stage and P1 (2026-10-28):** the issue branch,
-the version stamp and the `before` benchmark; P1's instruments and its trace
-runs (§ P1 before the timed runs); the qualification of its inputs; its timed runs (§ P1 results).
+**Done, the prototype stage (2026-10-28):** the issue branch, the version
+stamp and the `before` benchmark; P1's instruments and its trace runs (§ P1
+before the timed runs); the qualification of its inputs; its timed runs and
+the transient-stores arm (§ P1 results); D3; criterion 11's bounds.
 
-**Next:** the
-architect's choice of grouping's walks from § P1 results, which ends the
-prototype stage. Drop 2 waits for #757.
+**Next:** delivery plan drop 2, which waits for #757.
 
 **Kept outside the repository, on the first macOS development host:**
 - `tests/baseline/results/709-before-1.tsv`, `-2.tsv` and `-3.tsv`, untracked,
@@ -660,20 +660,33 @@ the module loaded from the scratch library. One run each:
   The alternative, launching `footprint -p`, reports the physical footprint
   (0.3 to 1.0 % below the resident peak in three runs) and takes 25 to 38 ms
   per call, by parsing another tool's text output.
-- **Grouping's structure walks under `-mem` are chosen by prototype (the
-  architect, 2026-10-27).** No design is locked. A grouping checkpoint fires
-  each time a category holds 5,000 keys awaiting consolidation
-  (`$consolidation_trigger`), 43 times on the month, and the final pass walks
-  again at each of its 15 windows. The architect judges 43 checkpoint walks
-  acceptable; whether a walk at every window is too much is for the prototype
-  to show. The prototype stage implements each candidate and the choice
-  follows from the measured overall impact of each:
-  - a walk at every checkpoint and window, as today;
-  - a walk only when a cheap count of grouping's stores has grown past its
-    highest by a margin;
-  - walks at phase boundaries only.
+- **D3 (locked 2026-10-28): under `-mem`, each grouping checkpoint and
+  final-pass window walks only grouping's 15 `consolidation_*` stores, and the
+  phase-boundary walks cover every store.** The checkpoint walk sits in
+  `run_consolidation_checkpoint()` and the window walk in
+  `process_final_pass_window()`, where they are today; only what they walk
+  changes. Chosen from P1 (§ P1 results):
+  - *It captures every grouping store* of 1 MB or more within 5 % of a walk
+    of every store at every site, on the eight qualified inputs. The stores
+    that peak inside grouping are the transient ones: the ID index (up to
+    209.0 MB), the key trigrams (up to 96.7 MB), the clusters (up to
+    102.8 MB) and the per-key maps. The message store's high-water mark falls
+    at a boundary on all eight.
+  - *It removes the walks' cost inside grouping.* That cost was the message
+    store: on 15 days of one server's access logs grouped without the UUID
+    mask, the walks inside grouping took 13.67 s with every store, 0.13 s
+    with the transient stores. The run was 39.2 % above the floor with every
+    store, 9.1 % with the transient stores.
+  - *The alternatives measured:*
+    - a walk of grouping's 17 stores, the message store among them, saves
+      nothing where the cost is (+31.7 %);
+    - a walk only when the keys held or the clusters have grown misses the
+      general application log's ID index (111.0 MB read as 59.4 MB);
+    - boundary walks alone miss every transient store.
 
-  What is at stake, on the month `-bs 1440 -n 25 -g -m uuid` (`-mem debug`,
+  Before P1, the architect judged a walk at each of the month's 43
+  checkpoints acceptable, and left a walk at every window to the prototype.
+  What was at stake, measured before P1 on the month `-bs 1440 -n 25 -g -m uuid` (`-mem debug`,
   one run): grouping's stores peak where only the walks inside grouping see
   them. The consolidation clusters reach 221.0 MB against 140.5 MB at the
   after-read walk, the ID index 52.0 MB against under 1 MiB, the key trigrams
@@ -745,7 +758,7 @@ check covers every store all of the time (2026-10-27). It is recorded in
 | 8 | Moved to #757 by the architect, 2026-10-28: `build/generate-cpanfile.sh` names `BSD::Resource` for macOS only, in no Linux or Windows cpanfile | — | #757 |
 | 9 | Every store of § Store inventory is in `named_structure_sizes()`: under `-mem`, `-V benchmark-data` carries a `MEMORY` row for each of the 38, and on the one-day log with `-hg -hgdm raw -h HTTP` the highlighted raw values' row reads about 70 MB | assertable | The row names of one `-mem -V benchmark-data` run against the 38; the premise case for the size |
 | 10 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
-| 11 | Under `-mem`, grouping's stores' high-water marks and the cost of their walks meet the bounds the prototype sets | unknown | Prototype scope (§ Decisions, grouping's structure walks) |
+| 11 | Under `-mem`, each grouping checkpoint and final-pass window walks only the 15 `consolidation_*` stores (D3): every grouping store of 1 MB or more reports a `MEMORY` row within 5 % of the every-call reference, and the run on 15 unmasked days is at most 12 % slower in wall clock than the same run without `-mem` (P1: +9.1 %) | assertable (bounds from P1, 2026-10-28) | The eight P1 inputs (`prototype/709-memory-peak/candidates.txt`) with `-mem -V benchmark-data`, their rows against `prototype/709-memory-peak/results/p1-every-call-hwm.tsv`; 15 unmasked days (`-bs 1440 -g`) with and without `-mem`, three runs each under `/usr/bin/time -l`, medians |
 | 12 | `-V memory-usage` keeps its section contract, with the kept-peak site in its fixed order, and every consumer of the memory output still asserts | assertable | Each consumer listed above |
 | 13 | No benchmark test runs slower beyond run-to-run variation | assertable (a measurement, recorded under Results) | Before and after, three runs each, medians with ranges: `single-day-access-log-standard`, and the tests that reach grouping's walks, `single-day-access-log-top25-consolidate`, `single-day-access-log-heatmap-histogram-consolidate` and `humungous-log-uniqueness-top25-consolidate` (the most checkpoints) |
 | 14 | No ` at <file> line <N>` on stderr in any run above | assertable | Captured stderr grepped |
@@ -1102,7 +1115,7 @@ The issue's one PR follows the completion gate.
    converges onto the map** (criteria 9 and 10). The consumption sites in
    `docs/architecture-patterns.md` § Named-structure memory map are trued up.
    This drop comes before 5 because the map's size sets a walk's cost.
-5. **Grouping's walks, as decided in drop 1** (criterion 11).
+5. **Grouping's walks, per D3** (criterion 11).
 6. **The `after` benchmark** (criterion 13), with the findings report under
    Results. Then the completion gate per `docs/process/workflow.md` § 3, then
    the PR.
