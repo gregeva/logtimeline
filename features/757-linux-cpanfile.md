@@ -213,7 +213,9 @@ instead (architect, 2026-10-28).
    alone writes the Linux file. Validation, each reader in the scope table: on
    macOS `build/macos-setup.sh`, the environment check (conditions 3 and 4),
    the preflight with `LTL_PROFILING_INSTALL=0` and `build/install-deps.sh`; in
-   an Ubuntu container `build/linux-setup.sh`, the check and the preflight; the
+   GitHub's `ubuntu-latest` runner `build/linux-setup.sh`, the check and the
+   preflight, by a temporary job on the issue branch that runs on each push
+   there and is deleted before the PR (architect, 2026-10-28); the
    builds by a `workflow_dispatch` run of the release workflow on the issue
    branch, whose macOS, Ubuntu (amd64, arm64) and Windows jobs each produce a
    binary answering `--version`. Its Windows job runs on `ubuntu-latest`, the
@@ -233,3 +235,34 @@ stops with "Virtualization does not appear to be supported on your machine",
 and Apple's virtualization framework with "Virtualization is not available on
 this hardware"; Apple supports a virtual machine inside one only on M3 chips or
 later.
+
+## Delivery plan
+
+Branch `757-cpanfile-per-platform` off `release/0.20.0`, `$version_number`
+`0.20.0-757`. No hot path is touched, so no before benchmark.
+
+1. **Drop 1: one file per platform, and every reader on this host's side.**
+   `git mv build/cpanfile build/cpanfile.macos`; the generator detects the
+   host, takes `macos`, `linux`, `windows` or `all`, routes `BSD::Resource` to
+   the macOS file alone and writes `build/cpanfile.linux`; the three files
+   regenerated and committed. In the same commit, so no reader names a missing
+   file: `build/macos-setup.sh`, `build/linux-setup.sh`, the environment check's
+   conditions 3 and 4 and its Windows message, the profiling preflight,
+   `build/install-deps.sh`, `docs/development-environment.md`'s condition 3 row,
+   `build/packaging-notes`. Proven on this host: criteria 1 (macOS, and Git
+   Bash's `uname`), 2, 3 and 4, and criterion 5's macOS runs.
+2. **Drop 2: the packagers and CI.** `build/ubuntu-package.sh` and
+   `build/windows-package.sh` generate their target platform's file before
+   reading it; the CI jobs' separate generate steps go; the temporary Linux job
+   is added. Proven by its push run (criterion 5's Linux runs) and a
+   `workflow_dispatch` run of the release workflow on the issue branch
+   (criterion 1 on Linux, criterion 5's builds).
+3. **Criterion 6 on this host.** `BSD::Resource` installed into the
+   development Perl, the scratch copy of `ltl` packed as
+   `build/macos-package.sh` packs, `unzip -l` read. No commit.
+
+Completion gate: the temporary job deleted first. The diff touches no line of
+`ltl` and no harness, fixture or expectation, and no harness runs the changed
+scripts, so the before/after benchmark and the full suite are skipped and the
+skip is recorded in the completion comment (`docs/process/workflow.md` § 3,
+scope test). No release-notes bullet: nothing a user of `ltl` observes changes.
