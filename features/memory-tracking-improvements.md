@@ -758,7 +758,7 @@ check covers every store all of the time (2026-10-27). It is recorded in
 | 8 | Moved to #757 by the architect, 2026-10-28: `build/generate-cpanfile.sh` names `BSD::Resource` for macOS only, in no Linux or Windows cpanfile | — | #757 |
 | 9 | Every store of § Store inventory is in `named_structure_sizes()`: under `-mem`, `-V benchmark-data` carries a `MEMORY` row for each of the 38, and on the one-day log with `-hg -hgdm raw -h HTTP` the highlighted raw values' row reads about 70 MB | assertable | The row names of one `-mem -V benchmark-data` run against the 38; the premise case for the size |
 | 10 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
-| 11 | Under `-mem`, each grouping checkpoint and final-pass window walks only the 15 `consolidation_*` stores (D3): every grouping store of 1 MB or more reports a `MEMORY` row within 5 % of the every-call reference, and the run on 15 unmasked days is at most 12 % slower in wall clock than the same run without `-mem` (P1: +9.1 %) | assertable (bounds from P1, 2026-10-28) | The eight P1 inputs (`prototype/709-memory-peak/candidates.txt`) with `-mem -V benchmark-data`, their rows against `prototype/709-memory-peak/results/p1-every-call-hwm.tsv`; 15 unmasked days (`-bs 1440 -g`) with and without `-mem`, three runs each under `/usr/bin/time -l`, medians |
+| 11 | Under `-mem`, each grouping checkpoint and final-pass window walks only the 15 `consolidation_*` stores (D3): every grouping store of 1 MB or more reports a `MEMORY` row within 5 % of the every-call reference, and the run on 15 unmasked days is at most 12 % slower in wall clock than the same run without `-mem` (P1: +9.1 %) | assertable (bounds from P1, 2026-10-28) | `prototype/709-memory-peak/criterion-11.sh check <ltl>`: the eight P1 inputs (`candidates.txt`) with `-mem -V benchmark-data`, their rows against `results/criterion-11-reference.tsv`; 15 unmasked days (`-bs 1440 -g`) with and without `-mem`, three runs each under `/usr/bin/time -l`, medians. Every run, and the reference, hashes under one pinned `PERL_HASH_SEED` (the architect, 2026-10-28), since the message store's size follows the hash seed (§ Drop 5, the finding); the checker refuses a run that does not show it |
 | 12 | `-V memory-usage` keeps its section contract, with the kept-peak site in its fixed order, and every consumer of the memory output still asserts | assertable | Each consumer listed above |
 | 13 | No benchmark test runs slower beyond run-to-run variation | assertable (a measurement, recorded under Results) | Before and after, three runs each, medians with ranges: `single-day-access-log-standard`, and the tests that reach grouping's walks, `single-day-access-log-top25-consolidate`, `single-day-access-log-heatmap-histogram-consolidate` and `humungous-log-uniqueness-top25-consolidate` (the most checkpoints) |
 | 14 | No ` at <file> line <N>` on stderr in any run above | assertable | Captured stderr grepped |
@@ -1135,14 +1135,30 @@ Delivered at `68385228` on the issue branch. Under `-mem`,
 `grouping_final_pass` sites, and every store at the phase boundaries. The two
 grouping call sites are unchanged.
 
-**Criterion 11 met** (`prototype/709-memory-peak/check-criterion-11.py`,
-output in `results/d5-criterion-11.txt`, macOS, one run per input):
+**Criterion 11 met under one pinned hash seed** (the architect, 2026-10-28;
+`prototype/709-memory-peak/criterion-11.sh`, at `8cba52b3` on the issue
+branch, output in `results/criterion-11-d5.txt`, macOS):
 - *Capture:* on the eight P1 inputs every grouping store of 1 MB or more is
-  within 5 % of the every-call reference.
+  within 5 % of the reference, the message store included.
+  - 57 of the 60 stores are byte-equal.
+  - The other three are the message store, short by 240 bytes on 7 and
+    15 unmasked days and by 2,872 bytes on the general application log, the
+    little it peaks inside grouping.
 - *Cost:* on 15 days of one server's access logs grouped without the UUID
-  mask, the wall clock was 54.43 s [53.15–54.82] with `-mem` against
-  49.82 s [49.58–51.93] without, +9.3 % (bound 12 %). Drop 4's code took
-  66.21 s [65.44–66.64], +32.9 %.
+  mask, the wall clock was 54.30 s [54.04–55.71] with `-mem` against
+  49.83 s [49.24–49.97] without, +9.0 % (bound 12 %). Unpinned, drop 4's code
+  took +32.9 % on the same input (`results/d5-criterion-11.txt`).
+
+**The check is shown to discriminate** (`results/criterion-11-proof.txt`):
+- *Reference marks:* `results/criterion-11-reference.tsv` is regenerated
+  from drop 4's code, which walks every store at every site, under the pinned
+  seed.
+- *Known-good:* that same code, checked against its own reference, is
+  byte-equal on every store of every input, so pinned runs reproduce to the
+  byte.
+- *Known-bad:* P1's boundaries-only arm fails on all eight inputs.
+- *Refusal:* the checker refuses any run whose stderr does not show the
+  pinned seed.
 
 No run's stderr carries ` at <file> line <N>`, and
 `tests/validate-memory-usage.sh` passes whole (28).
