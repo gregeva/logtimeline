@@ -180,11 +180,11 @@ found while reading the third `all`-tier benchmark round of 0.19.0.
 - the prototype plan;
 - the delivery plan and its edges.
 
-**Done, the start of the prototype stage (2026-10-28):** the issue branch,
+**Done, the start of the prototype stage and P1 (2026-10-28):** the issue branch,
 the version stamp and the `before` benchmark; P1's instruments and its trace
-runs (§ P1 before the timed runs).
+runs (§ P1 before the timed runs); the qualification of its inputs; its timed runs (§ P1 results).
 
-**Next:** P1's timed runs, on the matrix the architect approved (§ Prototype plan), then P2, on the macOS
+**Next:** the choice of grouping's walks from § P1 results, then P2 (§ Prototype plan), on the macOS
 development host.
 
 **Kept outside the repository, on the first macOS development host:**
@@ -977,6 +977,70 @@ traces with `simulate.py`:
 The ID index and the trigrams grow with the trigrams of the keys held, not
 with their number: on the general application log a checkpoint holding 5,605
 keys built a 4.0 MB index, and the next, holding 5,406, a 111.0 MB one.
+
+### P1 results (2026-10-28)
+
+The approved matrix ran: eight inputs, five arms, three rounds, 120 runs in
+41 minutes on macOS. Every run exited 0, and no run's stderr carries ` at
+<file> line <N>`. The findings report, with the per-run figures, is
+`prototype/709-memory-peak/findings.md` on the issue branch (`c80a55b0`).
+
+**Cost is read from the wall clock.** `-V benchmark-data`'s `TIMING total`
+sums the stages, so it leaves out the phase-boundary walks, which run between
+them. On 15 unmasked days the floor's total is 49.6 s and its wall clock
+51.1 s; every call's are 60.5 s and 67.0 s.
+
+Wall clock, median of three, and its difference from the floor's (`ltl` as
+tracked, without `-mem`):
+
+| Input | Floor | Every call | Boundaries only | Grouping's stores only | Either count, +0 % |
+|---|---|---|---|---|---|
+| month server, `-bs 1440 -g -m uuid`, 1 day | 2.18 s [2.15–2.56] | +6.9 % | −4.6 % | +6.4 % | +2.3 % |
+| 7 days | 15.79 s [15.62–16.23] | +6.2 % | +0.6 % | +8.3 % | +2.7 % |
+| 15 days | 39.94 s [39.25–40.23] | +7.7 % | +1.2 % | +6.4 % | +4.8 % |
+| month server, `-bs 1440 -g`, 1 day | 3.90 s [3.88–3.93] | +19.7 % | +5.4 % | +24.1 % | +6.7 % |
+| 7 days | 20.86 s [20.51–24.88] | +31.0 % | +8.7 % | +23.2 % | +15.1 % |
+| 15 days | 51.06 s [50.64–51.82] | +31.3 % | +8.2 % | +31.7 % | +14.9 % |
+| PLM access log, `-du us -g -xqs` | 7.59 s [7.56–8.30] | +23.6 % | +9.0 % | +21.6 % | +18.7 % |
+| general application log, `-g` | 5.87 s [5.82–6.15] | +6.8 % | −3.7 % | +5.5 % | +2.6 % |
+
+On the 1-day inputs the ranges are as wide as the differences.
+
+**What each arm captures,** against the every-call arm's high-water marks:
+- *Grouping's stores only* captures every grouping store of 1 MB or more on
+  all eight inputs.
+- *Either count* captures every one on seven. On the general application log
+  it captures the ID index at 59.4 MB against 111.0 MB and the trigrams at
+  33.0 MB against 57.1 MB. It took exactly the readings `simulate.py` replayed
+  for it on all eight, and missed exactly what the replay said.
+- *Boundaries only* misses every transient store on all eight: the ID index
+  (up to 209.0 MB, read as 0.0), the trigrams (up to 96.7 MB, read as at most
+  33.0), and the clusters on the masked days (102.8 MB, read as 59.1).
+- The peak resident set does not depend on the arm: 1,415.5 to 1,415.6 MB
+  across the four `-mem` arms on 15 unmasked days, 1,401.2 MB for the floor.
+
+**The mechanism:**
+- *The cost is the message store, walked inside grouping.* On 15 unmasked
+  days it is 795.8 MB of a 934.8 MB walk. Each walk there takes 0.37 s, and
+  the 32 walks take 11.8 s.
+- *Walking only grouping's stores saves nothing where the cost is,* since the
+  message store is one of them: 11.35 s against 11.78 s on 15 unmasked days.
+- *The stores that peak inside grouping are the transient ones:* the ID
+  index, the key trigrams, the clusters and the per-key maps. The boundary
+  walks catch the message store's high-water mark on all eight inputs. On the
+  16 qualification candidates it peaked inside grouping on three, at 4.6 MB
+  at most.
+- *The boundary walks are a cost of their own:* 4.32 s on 15 unmasked days.
+  The boundaries-only arm runs 5.4 to 9.0 % above the floor on the unmasked
+  and `-xqs` inputs.
+- *The floor takes readings too.* `ltl` as tracked, without `-mem`, spends
+  0.10 to 0.47 s per run launching `ps` at every boundary, checkpoint and
+  window. Delivery plan drop 3 removes these readings.
+
+**Not measured:** an arm whose walk inside grouping covers only the
+`consolidation_*` stores, leaving the message store to the boundary walks.
+Its cost cannot be read from the traces: a walk's time follows the number of
+values it visits, not their bytes.
 
 ### Delivery plan
 
