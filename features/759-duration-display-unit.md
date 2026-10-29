@@ -6,8 +6,9 @@
 the specification is written here on the release branch, and the issue branch
 is cut from it when implementation starts. Phases 1 and 2 (the requirement
 and the surfaces, § 1 to § 3) are confirmed by the architect; phase 3 (the
-records, § 4) is written; phases 4 to 7 follow, each brought to the architect
-before the next.
+records, § 4) is written, with D1 locked; phase 4 (the design questions, § 5)
+is in progress; phases 5 to 7 follow, each brought to the architect before the
+next.
 
 | Phase | What it produces |
 |---|---|
@@ -260,9 +261,15 @@ updated when #759 delivers, phase 7); or *dismissed*, with the reason.
 
 ### 4.3 Finding: the thread-session access-log shape carries microsecond precision
 
-Measured on the first 200,000 lines of the thread-session shape specimen (the
-common-plus-duration-thread-session access log, durations in fractional
-milliseconds): 198,970 durations carry a fraction, 172,848 of them three
+The thread-session shape is the Tomcat access log whose lines end with the
+request's duration in milliseconds, the thread name and the session ID:
+
+```
+10.0.0.3 - alice [05/May/2025:00:00:02 +0000] "POST /Thingworx/WS HTTP/1.1" 200 2644 446.268 https-jsse-nio-8443-exec-111 -
+```
+
+`446.268` is 446 milliseconds and 268 microseconds. Measured on the first
+200,000 lines of the corpus's log of this shape: 198,970 durations carry a fraction, 172,848 of them three
 digits, 23,678 two and 2,444 one; trailing zeros are not written, so the
 precision is the most digits seen, not each value's own.
 
@@ -285,3 +292,52 @@ data's unit combined with its precision. Put to the architect with the
 alternative that 444 R17's fix (a zero in the resolved source unit, `0ms`)
 stands on this shape; the architect chose `0us`, and R17's fix gives way on
 this shape. Locked by the architect 2026-10-29; recorded on 444 R17.
+
+---
+
+## 5. Design decisions
+
+**The precision.** The raw data's precision is the smallest unit its durations
+reach: the unit they are read in, one ladder step finer for every three
+decimals written. It takes the place of the unit read in where the display's
+floor and rounding are set today (`resolve_value_kind()` hands it to
+`format_time()` as `floor` and `resolution`). A zero is shown in it, and
+nothing finer than it is shown. On a log whose durations carry no decimals it
+is the unit read in, and the display is unchanged. Confirmed by the architect
+2026-10-29:
+
+| Durations written as | Precision | A zero shows as |
+|---|---|---|
+| `446` (milliseconds, no decimals) | millisecond | `0ms` |
+| `446.268` (milliseconds, three decimals) | microsecond | `0us` |
+| `12` under `-du s` (whole seconds) | second | `0s` |
+| `0.123` under `-du s` (seconds, three decimals) | millisecond | `0ms` |
+
+- **D2 — A log's duration decimals are counted in the detection sample.**
+  `sample_file_for_detection()`, which reads three 8 KB parts of each file
+  (start, middle, end; the whole file under 24 KB) to recognise its format
+  before the first line is processed, counts the decimals of the duration on
+  each line it recognises, as it does for timestamps (`frac_digits`), and
+  keeps the most seen per format. The precision is the unit the durations are
+  read in (`-du`, else the format's `duration_unit`) descended by those
+  decimals. Nothing is added per line, so no prototype is needed (phase 5). A
+  file that cannot be sampled (standard input) carries no count and keeps the
+  unit read in. Rejected: counting on every line as it is read (exact, but a
+  cost on every line of every file); a precision written into each format's
+  definition (it cannot know the decimals of a log read under `-du`, which is
+  the reported case). The architect chose the sample 2026-10-29, the
+  mechanism he directed for timestamps on 2026-10-08
+  (`features/525-timestamp-precision-option.md` § 6.4). Locked by the
+  architect 2026-10-29.
+
+Settled by the records, taken without a question:
+
+- **A run over several files takes the finest precision any file carries**, as
+  the timestamp precision does (`features/525-timestamp-precision-option.md`
+  D4 as amended 2026-10-08): one file written with fewer decimals does not
+  lower the run.
+- **A computed value (a mean, an interpolated percentile) is rounded at the
+  precision.** The default decimals are the source's resolution on every
+  surface (`features/608-byte-unit-ladder.md` D9), now read from the precision
+  instead of the unit read in: a mean of 10.4 ms reads `10ms` on a log of
+  whole milliseconds and `10.4ms` on a log written to the microsecond.
