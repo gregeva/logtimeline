@@ -459,7 +459,9 @@ is added for the precision. Every scenario carries the runtime-warning check.
       out of the histogram, as #715 (a heatmap leaves out observed zero
       values) records for the heatmap, whose header likewise shows a zero
       only when every value is zero. The other surfaces are asserted by
-      `validate-value-display` `precision-zero`.
+      `validate-value-display` `precision-zero`. The dimensions line is an
+      exception to this criterion, accepted by the architect 2026-10-29: a
+      zero reaches it when #715 lands, through the same floor; noted on #715.
 - [ ] **AC3 — Nothing is shown below the precision** (§ 2). On whole
       milliseconds no duration reads in micro- or nanoseconds (the existing
       assertion, its contract re-pointed here); on seconds with three decimals
