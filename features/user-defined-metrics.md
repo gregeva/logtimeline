@@ -5,6 +5,8 @@
 - **Branch**: `22-user-defined-metrics`
 - **Phase**: Implementation
 
+**Since #759 (under -du s, a duration's millisecond precision is not rendered, 2026-10-30):** a time or byte metric's floor is its precision: its declared unit descended by the most decimals among the values it read, counted as each value is read (`udm_precision()`). A seconds metric over `0.25` reads `250ms`, a kilobyte metric's `0.5` reads `500 B`; over whole values the declared unit stays the floor. Record: `features/759-duration-precision-rendering.md` D5.
+
 **Since #617 (one width-to-format rule, 2026-10-04):** a user-defined metric renders through the one dispatch: `resolve_value_kind()` resolves its kind from its unit type and aggregation, its declared unit is the floor of every rendering, and a rate's STATS CSV cell belongs to the rate family (one decimal by default, as the built-in rates: 0.3 per second prints `0.3`). Record: `features/617-width-to-format-rule.md` D15, D16, D21.
 
 ## Overview

@@ -1317,7 +1317,8 @@ row's per-line `s`/`ms` flag (removed from the read loop) and the selection
 row's `-`. The pre-seed takes each matched row's own precision through
 `index_row_precision`, which reads the column, or for a `-` row the steps its
 stored fraction's digits complete (a fraction whose length is not a multiple of
-three covers only the steps its digits complete). `detect_index_drift` brings
+three covers only the steps its digits complete; since #759 D4, 2026-10-30, a
+part-group of digits steps down one unit as a full group does). `detect_index_drift` brings
 both timestamps to whole numbers of the coarser of the run's and the row's
 precision through `timestamp_ticks`, the rounding `format_timestamp` uses, and
 compares them as numbers; `parse_iso_date_to_epoch` keeps the fraction; the

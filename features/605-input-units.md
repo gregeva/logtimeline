@@ -663,7 +663,12 @@ All three read the resolved value and quote the text as entered (D18).
   compares the resolved values and quotes the entered ones:
   `Warning: -dmin 2s is greater than -dmax 500ms - the range is unsatisfiable,
   no log entries can match`.
-- **A duration bound finer than the log records (D22).** The unit the log's
+- **A duration bound finer than the log records (D22).** *Since #759
+  (2026-10-30): what the log records is the precision its durations carry,
+  the unit they are read in descended by the decimals they are written with,
+  on every format, the one naming its unit on each line included; the note
+  names it (`... which are recorded to the millisecond`) (`features/759-duration-precision-rendering.md` § 5).
+  The text below is the design this issue delivered.* The unit the log's
   durations are recorded in is the one already declared: `-du` when given,
   otherwise the `duration_unit` of each file's detected format (every format
   that carries a duration declares `ms` today); a format with no duration

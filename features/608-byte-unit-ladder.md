@@ -358,7 +358,7 @@ Implementation detail the architect did not decide is marked **(proposed)**.
 | Help, time lists | `print_help` rows for `-bs`, `-du`, `-ru`, `-udm unit` | literals | interpolate the time ladder's list (D8; § 5.6) |
 | Help, byte list | `print_help` :: `Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T.` | literal, names `KB` as a unit | interpolates the byte ladder's list (D4, D8) |
 | Display decimals | file scope before `format_duration` :: `my %duration_display_decimals = ( ns => 6, us => 3, ms => 0, s => 0 );` | four tokens, others 0 | removed; `format_duration` rounds to the step's `decimals` (D9, D18) |
-| CSV decimals | `adapt_to_command_line_options` :: `my %decimals_by_unit = ( ns => 9, us => 6, ms => 0, s => 0 );` | four tokens, three more than display | removed; the duration and percentile families read the step's `decimals` (D9, D18) |
+| CSV decimals | `adapt_to_command_line_options` :: `my %decimals_by_unit = ( ns => 9, us => 6, ms => 0, s => 0 );` | four tokens, three more than display | removed; the duration and percentile families read the step's `decimals` (D9, D18): since #759, the step of the precision the durations carry, resolved after the read |
 | Unknown unit warning | `parse_udm_configs` :: `print STDERR "Warning: Unknown unit '$unit' in -udm '$raw_arg', treating as raw number\n";` | names no vocabulary | lists the time and byte ladders' lists (proposed) |
 | Per-metric formatter field | `parse_udm_configs` :: `formatter   => $formatter,` | stored, never read | removed (proposed) |
 

@@ -492,6 +492,11 @@ is added for the precision. Every scenario carries the runtime-warning check.
       whose values carry a decimal renders `0.5` in bytes, not `0.5kB`.
       *Assertable:* the user-defined assertions of `zero-duration` and
       `floor-unit` inverted, and a byte case added.
+      *Found at drop 5 (2026-10-30):* under `max`, the fixture's 10:01
+      bucket holds `0.25` and `2`, so its timeline cell reads `2 sec`;
+      `0.25` reads `250ms` on the heatmap labels and the dimensions line
+      (`min=250ms max=2s`). The dimensions line reads no zero for the
+      reason of AC2's accepted exception (zeros are not binned, #715).
 - [ ] **AC8 — The CSV duration and percentile decimals follow the precision**
       (608 D9). `-V csv-output` `decimals_duration` and `decimals_percentile`
       read `3` on milliseconds written with three decimals, `0` on whole
@@ -533,6 +538,17 @@ is added for the precision. Every scenario carries the runtime-warning check.
       duration -hg duration`: the legends, axes and messages table read in the
       precision. *Unassertable by a harness on corpus data:* inspected before
       delivery and recorded here.
+      *Inspected 2026-10-30* (`-bs 60 -n 15 --terminal-width 200 -hm
+      duration -hg duration -V histogram-bin-counters`, base 0.20.0 against
+      the issue branch). The reproduction pair renders the same text read in
+      milliseconds and in seconds with three decimals (`P50: 30ms`, axis
+      `1ms 2ms 4ms ...`, zeros `0ms`). On the corpus's thread-session access
+      log (517,344 durations): the messages table's Min reads the measured
+      minimum where it read `0ms` (`378us`, `214us`, `266us`), P50 and P99.9
+      carry tenths of a millisecond (`23.2ms`, `461.2ms`), the histogram axis
+      opens `56us 214us 818us 3.1ms` where it read `0ms 0ms 1ms 3ms`, the
+      legend reads `P1: 1.7ms P10: 15.3ms`, and the dimensions line
+      `min=56us`. Values of a second and more read as before.
 
 ---
 
@@ -594,3 +610,20 @@ completion gate runs: the `after` benchmark of § 6 first, then the full suite.
   stated unit).
 - The comments of `resolve_value_kind()`, `format_time()`,
   `note_finer_duration_bounds()` and the CSV decimals resolution in `ltl`.
+
+### Delivery progress
+
+On `759-duration-precision-rendering`, each drop run before and after on the
+inputs it changes, its harness assertions shown to fail against the base:
+
+| Drop | Commit | Delivered |
+|---|---|---|
+| 1 | 76a7cf17 | `fraction_precision()` steps a part-group of digits down one unit (`fraction_steps()`); the timestamp harness's part-group assertions rewritten, an older index row's precision asserted |
+| 2 | 2e80d5ce | `sample_file_for_detection()` counts each recognised line's duration decimals (`duration_digits`); `resolve_duration_precision()`, after the read, gives the run's precision to `resolve_value_kind()`; six `validate-value-display` scenarios, a committed seconds copy of the duration-spread fixture |
+| 3 | 1a169730 | the CSV duration and percentile decimals take the precision's step decimals after the read; the `-cp` row of `--help` and `docs/usage.md` |
+| 4 | b80814cd | `note_finer_duration_bounds()` compares against the precision on every format and names it; `finest_time_unit()` and `time_unit_singular()` replace two closures; `docs/usage.md`'s bound sentence |
+| 5 | 4501aa9c | the read loop counts each metric value's decimals (`%udm_decimals`); `udm_precision()` on the time and byte ladders |
+| records | 3215e0d8 | `docs/architecture-patterns.md`: the width-to-format floor and the timestamp-precision rule |
+
+Count metrics declared with a multiplier (`K`, `M`) keep their declared floor:
+D5 names time and byte metrics.

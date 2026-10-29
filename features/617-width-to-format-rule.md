@@ -680,7 +680,7 @@ where the *Changes* column says otherwise.
 | latency cell | timeline P50, P95, P99, P99.9; messages-table Min, P50, P99.9 (**proposed**: the messages-table duration cells name the latency row) | short | tight | the cell's own width | decimals by the width, up to the tier's maximum | D9 | the rounding carry at a unit boundary (D19); otherwise as today: `P50:99ms`, `P50:500ns` under `-du ns` |
 | CV cell | timeline and messages-table CV | long (a unitless kind: the tier sets only the decimals ceiling) | none | 4 | decimals by the width | D9 | the strip (D3): `0.5`, `3`, `0` |
 | axis tick | histogram y-axis count ticks | medium | tight | the y-axis label field | decimals by the width | D9 | `1.2k` where `1k` today (correction 6) |
-| chart label | heatmap header and footer, histogram x-axis labels, percentile legend | duration short, count and unitless medium, bytes short | duration, count, unitless tight; bytes loose | none | the tier's maximum | D9 | the floor (D16) and the zero rule (D4) |
+| chart label | heatmap header and footer, histogram x-axis labels, percentile legend | duration short, count and unitless medium, bytes short | duration, count, unitless tight; bytes loose | none | the tier's maximum | D9 | the floor (D16) and the zero rule (D4); since #759, the floor is the precision the raw data carries |
 | dimensions line | the `-V` display-dimensions lines of `histogram-array` and `histogram-bin-counters` | as the chart label | tight for every kind | none | the tier's maximum | the seam with `validate-histogram-bin-counters` | a bytes line loses its space (`min=16.8kB`; `min=16.4KiB` under `-bn iec`) |
 | legend total | legend category totals | short | tight | none | the tier's maximum; exact under `-pv` | 501 D2 and D4, D17 | none |
 | legend rate | legend rates and the legend's width pass | medium | tight | none | the tier's maximum | 501 D2 | none |
@@ -766,8 +766,14 @@ one rule, so it applies to every kind with a ladder (D12): 59,960 ms reads
 
 ### The floor and the zero rule (D4, D16)
 
-*D16 is reversed (2026-10-29, #759): the floor below is the delivered design,
-which #759 replaces (D4 as amended, D16's reversal).*
+*D16 is reversed (2026-10-29, #759: under -du s, a duration's millisecond
+precision is not rendered). Since #759 delivered, the floor is the precision
+the raw data carries: the unit the values are read in descended by the
+decimals they are written with, from `resolve_duration_precision()` for the
+built-in duration and `udm_precision()` for a user-defined time or byte
+metric. A zero renders in it and nothing renders finer; a value above it
+renders in the unit its magnitude reaches (`features/759-duration-precision-rendering.md` § 5). The text
+below is the design #617 delivered.*
 
 The duration and byte arms never render a value in a unit smaller than the
 floor: the source's resolved unit for the built-in duration and bytes, the
@@ -1030,14 +1036,14 @@ harness and the fixture shape. The new render-invariant harness is
       decimals than the cell affords, the cell is the CSV value rounded to the
       cell.
       *Assertable:* `validate-value-display`, scenario *cv-agreement*, `-o -bs 1`.
-- [ ] **AC8** (D4, D16). Two access-log lines with a duration of zero, `-hm
+- [ ] **AC8** (D4, D16). *Replaced by #759's AC2 and AC7, 2026-10-30.* Two access-log lines with a duration of zero, `-hm
       duration -bs 1`: the heatmap header's minimum and maximum read `0` followed
       by the resolved source unit, which the harness reads from `-V csv-output`
       `duration_unit_resolved`; `0ns` appears nowhere in the capture. A
       seconds-declared user-defined metric of zero reads `0s` on its heatmap
       header and its timeline column.
       *Assertable:* `validate-value-display`, scenario *zero-duration*.
-- [ ] **AC9** (D16). No value renders below its floor: a seconds-declared
+- [ ] **AC9** (D16). *Replaced by #759's AC3 and AC7, 2026-10-30.* No value renders below its floor: a seconds-declared
       user-defined metric carrying 0.25 and 2 reads in seconds (`0.3s` or its
       tier's spelling) on the timeline column, the heatmap labels and the
       display-dimensions line, never in milliseconds; on a millisecond-source

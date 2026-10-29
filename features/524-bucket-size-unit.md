@@ -28,6 +28,8 @@ The conversion is the one the user-defined-metric unit slot already uses, so one
 place owns the vocabulary and the multipliers on both surfaces. `--help` and
 `docs/usage.md` document the accepted forms in the same change.
 
+**Since #759 (under -du s, a duration's millisecond precision is not rendered, 2026-10-30):** a zero duration reads in the precision the raw data carries, not the resolved unit alone (`0us` on milliseconds written with three decimals). Record: `features/759-duration-precision-rendering.md` D2.
+
 **Since #617 (one width-to-format rule, 2026-10-04):** the note below that a zero duration renders `0ns` no longer describes any surface: a value never renders below its floor unit, so a zero reads in the source's resolved unit. Record: `features/617-width-to-format-rule.md` D4, D16.
 
 ## What exists today (audited on the base commit of this branch)

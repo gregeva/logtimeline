@@ -7,6 +7,8 @@
 - **Record:** this file. The issue body is its snapshot. Findings from the 2026-09-03 investigation (four audits, each independently verified) are in § Findings; the raw captures live in the session scratchpad and are not committed.
 - **Governing records:** `features/log-format-registry.md` § Drop 1.5 (variant groups D44–D53, weights I1, ordering F1, mechanism N1–N10) and its two `-V` section contracts; `features/58-format-registry-staged-detection.md` (load-time gates D24, pinned-closure ordering D26, guards D28, one generated scan sub D39/D40); `features/user-defined-metrics.md` (counting aggregations, the sessions oracle); `features/503-yaml-aggregate-export.md` (export keys); `features/column-layout-refactor.md` (dynamic columns); `tests/HARNESS-DESIGN.md`.
 
+**Since #759 (under -du s, a duration's millisecond precision is not rendered, 2026-10-30):** a zero renders in the precision the raw data carries, the resolved unit descended by the decimals the durations are written with: `0us` on this family's thread-and-session shape, whose durations carry three decimals of a millisecond (R17 as amended). Record: `features/759-duration-precision-rendering.md` D1, D2.
+
 **Since #617 (one width-to-format rule, 2026-10-04):** R17's zero rule holds on every surface through the one dispatch: `format_time()` climbs from the floor step (the source's resolved unit, or a user-defined metric's declared unit), so a zero renders in it on the timeline, the latency cells, the heatmap header, the histogram labels and the dimensions lines. Record: `features/617-width-to-format-rule.md` D4, D16.
 
 ## Motivating consumer

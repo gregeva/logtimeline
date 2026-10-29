@@ -458,7 +458,9 @@ issue body.
       `format_duration_total` in the row being written, and the `duration` cell
       beside it is the same number through `format_csv_value`; the
       messages-table cell is rendered by the same formatter at its own emit
-      site. A zero renders in the source unit.
+      site. A zero renders in the source unit. *Since #759 (2026-10-30), the
+      precision the raw data carries: the `0 msec` this criterion asserts on
+      whole milliseconds stands (`features/759-duration-precision-rendering.md` D2).*
       *Method: the diff shows both `print_message_summary` sites calling the
       totals formatter; criterion 5 proves the strings unchanged; the sort
       scenario of criterion 4 also asserts that each row whose `duration` is
