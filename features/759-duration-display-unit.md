@@ -1,4 +1,4 @@
-# Durations read in seconds lose their milliseconds on display (Issue #759)
+# Under -du s, a duration's millisecond precision is not rendered (Issue #759)
 
 ## Status
 
@@ -30,7 +30,7 @@ tagged `v0.19.0`.
 **The analyst reading a log whose durations are recorded in seconds.** A web
 application access log can carry execution time in seconds with three
 decimals, read with `-du s`. Those durations carry millisecond precision, yet
-every surface holds them to seconds: requests of 6, 8 and 10 ms all read
+every surface renders them in seconds: requests of 6, 8 and 10 ms all read
 `0s` in the messages table, a P50 of 30 ms reads `0s` in the percentile legend,
 and the heatmap axis opens `0s 0s`. Read from the same requests recorded in
 milliseconds, the same surfaces separate them.
@@ -48,11 +48,17 @@ From the issue body and the architect's explanations of 2026-10-29, organised
 in this document's words. The examples illustrate the aim; they are not the
 specification.
 
-**The defect.** A duration's display is held to the unit it is read in:
-nothing renders below that unit. Read in seconds, 0.01 s is 10 ms, yet it
-renders `0s`. The unit a value is displayed in and the unit it is read in have
-no relationship; the rendering already adapts the unit to each value's
-magnitude, and this hold overrides it.
+**The defect.** Under `-du s`, a duration's millisecond precision is not
+rendered. An nginx access log storing durations in seconds with three decimals
+is read with `-du s`; the three decimals are the millisecond precision of the
+seconds unit, so 0.123 should render as 123 ms and 0.010 as 10 ms. The tool
+renders 0.010 as `0s`.
+
+**Reading and rendering are separate.** Reading gives a value its unit, so it
+converts to any other unit, and its precision, and stores it in the standard
+raw data model. Rendering formats from that model into a unit relevant to the
+user that fits the interface: a large value read in milliseconds renders in a
+larger time unit. The rendered unit is not the unit read in.
 
 **Where the raw data's unit and precision matter.** In only a couple of places,
 and always combined, so that what is displayed is relevant to the raw data:
@@ -84,12 +90,12 @@ cross-checked against the other precision decisions and requirements in
 phase 3.
 
 **Not in scope.** How values are rendered: the rendering already adapts the
-unit to each value's magnitude. The defect is the hold that overrides it, and
-the notice.
+unit to each value's magnitude. The defect is that the precision a duration
+carries is not rendered under `-du s`, and the notice.
 
-**Done when** (the issue body): a duration's display is no longer held to the
-unit it is read in, and no notice states a precision the raw data does not
-carry.
+**Done when** (the issue body): under `-du s`, a duration's millisecond
+precision is rendered (0.010 s reads `10ms`, 0.123 s reads `123ms`), and no
+notice states a precision the raw data does not carry.
 
 ### Reproduction
 

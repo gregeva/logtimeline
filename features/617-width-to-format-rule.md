@@ -262,8 +262,8 @@ issue body; they are restated here, not reinterpreted.
   surface** (`features/444-access-log-format-family-and-user-surface.md` R17 and
   D16 applied to the heatmap header), never the scaler's lowest step. An absent
   value is #616's empty cell, never a zero (locked by the architect 2026-09-27,
-  stage 7). **Amended by the architect 2026-10-29 (#759, durations read in
-  seconds lose their milliseconds on display):** the unit that follows a zero
+  stage 7). **Amended by the architect 2026-10-29 (#759, under -du s a
+  duration's millisecond precision is not rendered):** the unit that follows a zero
   is the raw data's unit (from the format registry, or `-du`) combined with the
   precision the raw data carries, so that what is displayed is relevant to the
   raw data (D16's reversal).
@@ -347,8 +347,8 @@ issue body; they are restated here, not reinterpreted.
   zero renders in its own declared unit (`0s` for a seconds metric). The
   architect: "sure, noting the rule that the unit can never be smaller than the
   stated unit." Locked by the architect 2026-09-28.
-  **Reversed by the architect 2026-10-29 (#759, durations read in seconds lose
-  their milliseconds on display):** the unit a value is displayed in and the
+  **Reversed by the architect 2026-10-29 (#759, under -du s a duration's
+  millisecond precision is not rendered):** the unit a value is displayed in and the
   unit it is read in have no relationship. The rendering already adapts the
   unit to each value's magnitude; D16's floor held the display to the unit read
   in and overrode it (read in seconds, 0.01 s is 10 ms, yet it rendered `0s`).
@@ -767,8 +767,7 @@ one rule, so it applies to every kind with a ladder (D12): 59,960 ms reads
 ### The floor and the zero rule (D4, D16)
 
 *D16 is reversed (2026-10-29, #759): the floor below is the delivered design,
-which #759 replaces: a duration's display is no longer held to the unit it is
-read in (D4 as amended, D16's reversal).*
+which #759 replaces (D4 as amended, D16's reversal).*
 
 The duration and byte arms never render a value in a unit smaller than the
 floor: the source's resolved unit for the built-in duration and bytes, the
