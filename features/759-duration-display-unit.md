@@ -92,7 +92,9 @@ phase 3.
 
 **Not in scope.** How values are rendered: the rendering already adapts the
 unit to each value's magnitude. The defect is that the precision a duration
-carries is not rendered under `-du s`, and the notice.
+carries is not rendered under `-du s`, and the notice. Widened by D4 (§ 5):
+the timestamp precision reads a part-group of fractional digits by the same
+rule as a duration's decimals.
 
 **Done when** (the issue body): under `-du s`, a duration's millisecond
 precision is rendered (0.010 s reads `10ms`, 0.123 s reads `123ms`), and no
@@ -207,6 +209,18 @@ visible. The detection sample (`sample_file_for_detection()`) already records,
 per format, the most fractional digits among its sampled timestamps
 (`frac_digits`, read by `resolve_timestamp_precision()`); nothing records them
 for durations.
+
+### 3.6 Timestamp precision read from a fraction's digits (D4)
+
+Added by D4: the surfaces that turn a timestamp's fractional digits into a
+precision through `fraction_precision()`, whose reading of a part-group of
+digits changes.
+
+| Surface | Sub | Record behind the current contract | Today |
+|---|---|---|---|
+| The `-tp` clamp, its note and the `-V runtime-config` `timestamp_precision` row | `resolve_timestamp_precision` | `features/525-timestamp-precision-option.md` § 6.4 (a fraction covers only the steps its digits complete, proposed and implemented) | two digits resolve to the second; four to the millisecond |
+| A run-index row's precision when its precision column is empty | `index_row_precision` | 525, the run-index read-back (the stored fraction's digits) | as the clamp |
+| `validate-timestamp-precision.sh`, the scenario asserting that a two-digit fraction resolves to the second | | 525 | asserts the rule D4 replaces |
 
 ---
 
@@ -339,6 +353,22 @@ is the unit read in, and the display is unchanged. Confirmed by the architect
   group of three (`fraction_precision()` as timestamps use it today), which
   shows `0.01` s as `0s`, the reported defect, and drops the `.3` of `12.3`
   ms. Locked by the architect 2026-10-29.
+- **D4 — Timestamps follow D3: one rule in `fraction_precision()` for
+  timestamps and durations alike, delivered by #759.** A part-group of
+  decimals steps down one unit wherever decimals are turned into a precision:
+  the `-tp` clamp and its note (`resolve_timestamp_precision()`), a run-index
+  row's precision when its precision column is empty
+  (`index_row_precision()`), and the durations' precision (D2). `-tp ms` on a
+  log whose timestamps read `12:00:00.23` shows the millisecond with no note,
+  where today it clamps to the second and the note says the timestamps "carry
+  whole seconds"; `-tp us` on `12:00:00.9996` shows the microsecond. The
+  timestamp rule it replaces (a fraction covers only the steps its digits
+  complete) was proposed and implemented under #525 (timestamp precision
+  option) and never decided by the architect
+  (`features/525-timestamp-precision-option.md` § 6.4, amended in the same
+  action). Rejected: a parameter keeping the two readings apart, two readings
+  of the same digits in one sub. The scope of #759 widens to this timestamp
+  change; § 3.6 lists its surfaces. Locked by the architect 2026-10-29.
 
 Settled by the records, taken without a question:
 
