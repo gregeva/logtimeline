@@ -8,8 +8,8 @@ the specification is written here on the release branch, and the issue branch,
 and the surfaces, § 1 to § 3) are confirmed by the architect; phase 3 (the
 records, § 4) is written, with D1 locked; phase 4 (the design questions, § 5)
 is settled, D2 to D5 locked; phase 5 (§ 6) needs no prototype; phase 6 (the
-acceptance criteria) is proposed for the architect's confirmation; phase 7
-follows.
+acceptance criteria) is confirmed; phase 7 (the delivery plan, § 7) is
+proposed for the architect's confirmation.
 
 | Phase | What it produces |
 |---|---|
@@ -430,7 +430,7 @@ test that reads a user-defined metric (`-udm latency_ms`).
 
 ## Acceptance criteria
 
-**Proposed, for the architect's confirmation.** Each criterion names its input
+**Confirmed by the architect 2026-10-29.** Each criterion names its input
 by its characteristics, its outcome, and where it is asserted. Assertions read
 the rendered output against what each input's known decimals give; no `-V` key
 is added for the precision. Every scenario carries the runtime-warning check.
@@ -524,3 +524,64 @@ is added for the precision. Every scenario carries the runtime-warning check.
       duration -hg duration`: the legends, axes and messages table read in the
       precision. *Unassertable by a harness on corpus data:* inspected before
       delivery and recorded here.
+
+---
+
+## 7. Delivery plan
+
+**Proposed, for the architect's confirmation.**
+
+**Before the first line of code.** The issue branch
+`759-duration-precision-rendering` is cut from `release/0.20.0`,
+`$version_number` set to `0.20.0-759`, and the `before` benchmark captured on
+the base commit: `single-day-access-log-standard` and `network-latency-csv`
+(§ 6).
+
+**The drops**, one at a time, each run before and after on the inputs it
+changes, then committed and pushed on the issue branch with its harness
+assertions:
+
+| Drop | What changes | What a user sees | Criteria |
+|---|---|---|---|
+| 1. One rule for a part-group of decimals | `fraction_precision()` steps a part-group of decimals down one unit (D3, D4) | `-tp ms` on timestamps written with two-digit fractions shows the millisecond, with no note; an older run-index row's precision likewise | AC10 |
+| 2. The duration precision, counted and applied | the detection sample counts the decimals of each recognised line's duration, the format writing its unit on each line included (D2); after the read, one resolution beside the timestamp precision gives the run's precision, the finest any file carries, or the unit read in where nothing was counted; `resolve_value_kind()` hands it to `format_time()` as floor and resolution | the reported defect fixed: under `-du s`, `0.010` reads `10ms`; on milliseconds written with three decimals, a zero reads `0us` and 0.5 ms reads `500us` | AC1 to AC6, AC11 |
+| 3. The CSV decimals | the duration and percentile families' decimals resolved after the read from the precision, and reported so by `-V csv-output` | three decimals in those CSV columns on a log written to the microsecond | AC8 |
+| 4. The finer-bound notice | `note_finer_duration_bounds()` compares against the precision, every format included; the wording names the precision | `-dmin 50ms` on seconds with three decimals prints no note; the note reads `recorded to the millisecond` | AC9 |
+| 5. A user-defined metric's precision | the read loop counts the decimals of each value a metric reads (D5); `resolve_value_kind()` hands the metric's precision to its arm | a seconds metric's `0.25` reads `250ms` | AC7 |
+
+Then AC12 is looked at and recorded, the records below are updated, and the
+completion gate runs: the `after` benchmark of § 6 first, then the full suite.
+
+**User-facing text.**
+
+- `docs/usage.md` § quantity bounds: "a unit finer than the one the log's
+  durations are recorded in" names the precision the durations carry.
+- `docs/usage.md` and `--help`, the `-cp` row: "per-family decimals derived
+  from the source's duration unit" names the precision the durations carry.
+- The `-du` and `-tp` rows stand.
+- `releases/v0.20.0.md`: the release-notes decision is taken at close-out.
+
+**Records to update at delivery** (§ 4's *describes the delivered code*):
+
+- `features/617-width-to-format-rule.md`: § 5 *The floor and the zero rule*,
+  the budget table's chart-label row, the *User surface changes* rows for a
+  zero and for a value below its floor, and AC8 and AC9 marked replaced by
+  this issue's criteria.
+- `features/444-access-log-format-family-and-user-surface.md`, the *Since
+  #617* line.
+- `features/user-defined-metrics.md` and `features/524-bucket-size-unit.md`,
+  their *Since #617* lines; `features/273-store-precise-duration-totals.md`,
+  criterion 3's "a zero renders in the source unit" (its `0 msec` assertion on
+  whole milliseconds stands).
+- `features/525-timestamp-precision-option.md`, the run-index read-back's
+  statement of the part-group rule.
+- `features/605-input-units.md` § 5, the notice's definition of what the log
+  records; `features/412-notice-surfaces.md` notice row 24 ("finer than the
+  log's recorded unit").
+- `features/608-byte-unit-ladder.md`, the *CSV decimals* table row (the step
+  of the precision, not of the unit read in).
+- `docs/architecture-patterns.md`: *Width-to-format rule* ("with its floor"),
+  and *Timestamp precision* rule 4 (the rule a value never renders below its
+  stated unit).
+- The comments of `resolve_value_kind()`, `format_time()`,
+  `note_finer_duration_bounds()` and the CSV decimals resolution in `ltl`.
