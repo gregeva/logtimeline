@@ -624,6 +624,27 @@ inputs it changes, its harness assertions shown to fail against the base:
 | 4 | b80814cd | `note_finer_duration_bounds()` compares against the precision on every format and names it; `finest_time_unit()` and `time_unit_singular()` replace two closures; `docs/usage.md`'s bound sentence |
 | 5 | 4501aa9c | the read loop counts each metric value's decimals (`%udm_decimals`); `udm_precision()` on the time and byte ladders |
 | records | 3215e0d8 | `docs/architecture-patterns.md`: the width-to-format floor and the timestamp-precision rule |
+| 5, cost | f9f19517, a3c30a4f | the count runs only for a time or byte metric, compiles out of the generated read loop otherwise (`#@and $udm_counts_decimals`), and stops once a metric's decimals reach the ladder's finest step (`decimals_full`); `validate-read-path` gains a time-metric shape |
+
+**Measured** (this machine, 2026-10-30; the base is `release/0.20.0`'s `ltl`;
+runs interleaved, medians with ranges):
+
+| Case | Base | #759 | Change |
+|---|---|---|---|
+| `single-day-access-log-standard`, total (3 runs a side) | 5.065 s [4.923..5.875] | 5.030 s [4.991..5.274] | −0.7% |
+| the same, peak memory | 106.8 MB | 106.9 MB | +0.1% |
+| `network-latency-csv` (`-udm latency_ms`, no unit), `parse/read_files`, 7 a side | 1.241 s [1.232..1.262] | 1.243 s [1.216..1.254] | +0.2% |
+| the same file read as a time metric (`-udm latency_ms:ms`), 9 a side | 1.311 s [1.297..1.330] | 1.347 s [1.327..1.359] | +2.7% |
+| the same, the count's block removed | 1.311 s | 1.319 s [1.311..1.326] | +0.6% |
+
+Attribution, by bisection over the drops on the unit-less metric (6 a side):
+drops 1 to 4 +0.2% to +0.4%; drop 5 as first written +4.5% (a per-value
+count and a hash keyed by name), +2.5% with the count kept on the metric's
+config and skipped for a metric with no unit, +1.4% once compiled out. On a
+time metric every line of which carries a value, the count stops after the
+first value here (six decimals of a millisecond reach the nanosecond); the
++2.1% that remains is the per-value test of the metric's count flag. An
+array of flags in its place measured the same (+3.4% against +3.0%).
 
 Count metrics declared with a multiplier (`K`, `M`) keep their declared floor:
 D5 names time and byte metrics.
