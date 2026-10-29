@@ -329,6 +329,16 @@ is the unit read in, and the display is unchanged. Confirmed by the architect
   mechanism he directed for timestamps on 2026-10-08
   (`features/525-timestamp-precision-option.md` § 6.4). Locked by the
   architect 2026-10-29.
+- **D3 — A duration written with one or two decimals steps down one unit, as
+  three do.** A partial group of decimals is a full group whose trailing zeros
+  are not written. The architect: "the situation that you are describing here
+  is also equal to writing 12.300. The fact that those two units, those two
+  zeros, aren't there, they are still milliseconds." So `12.3` ms carries
+  microsecond precision and reads `12.3ms`, `0.4` ms reads `400us`, and `0.05`
+  s under `-du s` reads `50ms`. Rejected: stepping down only for a complete
+  group of three (`fraction_precision()` as timestamps use it today), which
+  shows `0.01` s as `0s`, the reported defect, and drops the `.3` of `12.3`
+  ms. Locked by the architect 2026-10-29.
 
 Settled by the records, taken without a question:
 
