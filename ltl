@@ -767,7 +767,6 @@ my ( @udm_configs, @udm_raw_args, %udm_last_value );
 my %udm_distinct;                           # Per-bucket distinct value sets for counting aggregations (Issue #313), freed after counting like %log_sessions
 my @udm_rejected_specs;                     # -udm arguments skipped at parse time: { spec, reason } (Issue #443), reported on -V udm-specs
 my %udm_production;                         # Run-wide per-metric production derived from the bucket accumulators after the read loop (Issue #443)
-my %udm_decimals;                           # metric name => the most decimals among the values it read, across the run: its precision (udm_precision())
 my %udm_skipped_lines;                      # Per /regex/ metric: retained lines whose capture its numeric aggregation could not use; a key exists only once one is skipped (Issue #638)
 my @udm_sources;                            # Per config index: the sources the metric was read from ('line', 'csv:<column>', 'csv:unbound'), noted once per file as it binds (Issue #638)
 my @udm_csv_unbound_files;                  # Per config index: CSV files whose rows matched and whose header has no column for the metric (Issue #640)
@@ -12131,6 +12130,10 @@ sub parse_udm_configs {
             patterns    => \@patterns,
             unit_type   => $unit_type,
             converter   => $converter,
+            # A time or byte metric's precision is its declared unit descended
+            # by the decimals its values are written with: the read loop keeps
+            # the most of them under decimals (udm_precision()).
+            counts_decimals => ( $unit_type eq 'time' || $unit_type eq 'bytes' ) ? 1 : 0,
         };
     }
 
@@ -16599,7 +16602,7 @@ sub resolve_value_kind {
 # when none carried a decimal.
 sub udm_precision {
     my ($config) = @_;
-    my $digits = $udm_decimals{ $config->{name} };
+    my $digits = $config->{decimals};
     return fraction_precision( $config->{unit}, $digits ) if $config->{unit_type} eq 'time';
     my $steps = fraction_steps($digits) or return $config->{unit};
     my $prefix = uc substr( $config->{unit}, 0, 1 );
@@ -19346,13 +19349,13 @@ sub read_and_process_logs {
                         next;
                     }
 
-                    # The decimals the value is written with: the metric's
-                    # precision is its declared unit descended by the most of
-                    # them (udm_precision()).
-                    my $dot = index($matched_value, '.');
-                    if ($dot >= 0) {
-                        my $decimals = length($matched_value) - $dot - 1;
-                        $udm_decimals{$name} = $decimals if $decimals > ($udm_decimals{$name} // 0);
+                    # The decimals a time or byte metric's value is written
+                    # with: its precision is its declared unit descended by
+                    # the most of them (udm_precision()).
+                    if ($config->{counts_decimals}) {
+                        my $decimals = length($matched_value) - index($matched_value, '.') - 1;
+                        $config->{decimals} = $decimals
+                            if $decimals < length($matched_value) && $decimals > ($config->{decimals} // 0);
                     }
 
                     my $raw_value = $matched_value + 0;
