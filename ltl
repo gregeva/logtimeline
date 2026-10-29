@@ -2476,14 +2476,15 @@ sub parse_iso_date_to_epoch {
     return $parts->[0] + $parts->[1] / 1_000_000_000;
 }
 
-# The precision a timestamp carries: the ladder step of the unit its field
-# states, descended one step for every three fractional digits, so a clock
-# time (which states the second) with three digits is a millisecond and with
-# six a microsecond. A fraction whose length is not a multiple of three covers
-# only the steps its digits complete.
+# The precision a value written with fractional digits carries: the ladder
+# step of the unit it states, descended one step for every three fractional
+# digits, so a clock time (which states the second) with three digits is a
+# millisecond and with six a microsecond. A part-group of digits is a full
+# group whose trailing zeros are not written, so it descends one step too:
+# .23 is .230, a millisecond, and .9996 a microsecond.
 sub fraction_precision {
     my ($stated, $digits) = @_;
-    my $steps = int(($digits // 0) / 3);
+    my $steps = int((($digits // 0) + 2) / 3);
     return $stated unless $steps;
     my @finer = map { $_->{token} } grep { $_->{ms} < $time_unit_step{$stated}{ms} } reverse @time_unit_ladder;
     return $finer[ $steps > @finer ? $#finer : $steps - 1 ];
