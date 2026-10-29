@@ -343,6 +343,18 @@ issue body; they are restated here, not reinterpreted.
   zero renders in its own declared unit (`0s` for a seconds metric). The
   architect: "sure, noting the rule that the unit can never be smaller than the
   stated unit." Locked by the architect 2026-09-28.
+  **Reversed by the architect 2026-10-29 (#759, a duration's display unit
+  follows the unit it is read in):** the stated unit does not govern the display;
+  the precision available in what is read does. The rule was asked for because
+  files rendered `0 microseconds` or `0 nanoseconds` where that precision did not
+  exist, and its scope was misunderstood: the stated unit was taken for the
+  precision. A value in seconds written with three decimals carries millisecond
+  precision and renders in milliseconds when small enough to be observed there
+  (0.01 s reads `10ms`, where under D16 it read `0s`); it carries no microsecond
+  or nanosecond precision and never renders in `us` or `ns`. The architect:
+  "what I am able to see on the screen and what the unit of measure is for a
+  value are decorrelated." The floor described in § 5 *The floor and the zero
+  rule* is what #759 replaces.
 - **D17 — Lock 5's switch is `-pv` (precise values: no conversion or shortening
   of the numbers).** `--omit-values` and `--rate-unit` relate to the legend but
   are not that switch. The stage 7 row's `-ov` was a transcription error,
@@ -737,6 +749,9 @@ one rule, so it applies to every kind with a ladder (D12): 59,960 ms reads
 `1 min`, not `60 sec`.
 
 ### The floor and the zero rule (D4, D16)
+
+*D16 is reversed (2026-10-29, #759): the floor below is the delivered design,
+which #759 replaces with the precision available in what is read.*
 
 The duration and byte arms never render a value in a unit smaller than the
 floor: the source's resolved unit for the built-in duration and bytes, the
