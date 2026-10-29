@@ -9,7 +9,7 @@ and the surfaces, § 1 to § 3) are confirmed by the architect; phase 3 (the
 records, § 4) is written, with D1 locked; phase 4 (the design questions, § 5)
 is settled, D2 to D5 locked; phase 5 (§ 6) needs no prototype; phase 6 (the
 acceptance criteria) is confirmed; phase 7 (the delivery plan, § 7) is
-proposed for the architect's confirmation.
+confirmed. Implementation runs on `759-duration-precision-rendering`.
 
 | Phase | What it produces |
 |---|---|
@@ -529,7 +529,7 @@ is added for the precision. Every scenario carries the runtime-warning check.
 
 ## 7. Delivery plan
 
-**Proposed, for the architect's confirmation.**
+**Confirmed by the architect 2026-10-29.**
 
 **Before the first line of code.** The issue branch
 `759-duration-precision-rendering` is cut from `release/0.20.0`,
