@@ -473,7 +473,11 @@ separate issue". Its parts:
   without `-du`: the line's own unit wins, and `-du` is not applied to such a
   format. No message about a format's unit is printed per line. *Locked by the
   architect 2026-10-06; `-du` included in the fix on the architect's direction
-  the same day.*
+  the same day.* *Amended by the architect 2026-10-29 (#759: under -du s a
+  duration's millisecond precision is not rendered):* "Precision is not about
+  the line. It is about the metrics which have been read from it." D22's note
+  compares a bound against the precision of the durations read, on every log,
+  this format included (`features/759-duration-precision-rendering.md` § 5).
 - **D31 — A notice about the unit or layout a format was read in prints once
   per run.** Not per line, not per file: one message after the read, naming
   every file it concerns. This holds for the producer-ambiguity note (a file

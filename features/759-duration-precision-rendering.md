@@ -403,3 +403,11 @@ Settled by the records, taken without a question:
   seconds with three decimals they stay whole milliseconds. The decimals are
   resolved today at option settlement (`%csv_family_decimals`), before any
   file is sampled, so they move after the read.
+- **The finer-bound notice compares a bound against the precision of the
+  durations read, on every log.** The architect, 2026-10-29: "Precision is not
+  about the line. It is about the metrics which have been read from it." No
+  format is a special case: the format whose lines write each duration's unit
+  beside it gets its precision from the durations read from it, as every
+  other format does, and the notice fires on it like any other log. The
+  exclusion `features/605-input-units.md` D30 gave that format falls; the
+  wording names the precision (`which are recorded to the millisecond`).
