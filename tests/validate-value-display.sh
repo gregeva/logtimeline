@@ -213,7 +213,8 @@ scenario_fixed_budget_sweep() {
 # zero-duration (AC8): a real zero renders in the precision its raw data
 # carries on the heatmap header (the fixture writes whole milliseconds, so the
 # unit read in), never the ladder's lowest step; a seconds-declared metric's
-# zero renders in seconds on its timeline column.
+# zero renders in its precision on its timeline column: the millisecond for
+# values written with two decimals (0.25), the second for whole seconds.
 # ---------------------------------------------------------------------------
 scenario_zero_duration() {
     current_scenario="zero-duration"
@@ -228,6 +229,8 @@ scenario_zero_duration() {
     fi
     render zd-heatmap "$ZERO_DURATION" -bs 1 -n 0 --terminal-width 160 -hm duration || return 0
     render zd-udm "$SECONDS_UDM" -bs 1 -n 0 --terminal-width 160 --debug-layout -udm 'elapsed:s:max' || return 0
+    sed -E 's/elapsed=0\.25/elapsed=1/' "$SECONDS_UDM" > "$TMP_DIR/seconds-udm-whole.txt"
+    render zd-udm-whole "$TMP_DIR/seconds-udm-whole.txt" -bs 1 -n 0 --terminal-width 160 --debug-layout -udm 'elapsed:s:max' || return 0
 
     assert_command \
         command     "check tokens --file '$TMP_DIR/zd-heatmap.txt' --line 'heatmap \\[duration\\]' --each '0$unit' --min 2" \
@@ -242,18 +245,20 @@ scenario_zero_duration() {
         produced_by 'format_time() in ltl, the floor of the climb' \
         contract    "$CONTRACT D4"
     assert_command \
-        command     "cell_text zd-udm '^ 2026-01-26 10:00' udm_elapsed | grep -qE '^0 ?(s|sec|seconds)\$'" \
-        label       "a seconds-declared metric's zero reads 0 seconds on its timeline column" \
-        asserts     'A user-defined time metric renders zero in its own declared unit, never the built-in duration unit' \
-        produced_by 'print_bar_graph() in ltl, the user-defined time column, format_time() with the metric unit as floor' \
-        contract    "$CONTRACT D16"
+        command     "cell_text zd-udm '^ 2026-01-26 10:00' udm_elapsed | grep -qE '^0 ?(ms|msec|milliseconds)\$' && cell_text zd-udm-whole '^ 2026-01-26 10:00' udm_elapsed | grep -qE '^0 ?(s|sec|seconds)\$'" \
+        label       "a seconds-declared metric's zero reads 0 milliseconds over values written with two decimals, 0 seconds over whole seconds" \
+        asserts     "A user-defined time metric renders zero in its declared unit combined with the precision its values carry, never the built-in duration's" \
+        produced_by 'print_bar_graph() in ltl, the user-defined time column; udm_precision() gives format_time() its floor' \
+        contract    "features/759-duration-precision-rendering.md D5, AC7"
 }
 
 # ---------------------------------------------------------------------------
-# floor-unit (AC9): no value renders below its floor. A seconds-declared
-# metric carrying 0, 0, 0.25 and 2 reads in seconds on its timeline column,
-# its heatmap labels and its dimensions line; on a millisecond-source access
-# log no duration on any surface reads in micro- or nanoseconds.
+# floor-unit (AC9): no value renders below its floor, the precision its raw
+# data carries. A seconds-declared metric carrying 0, 0, 0.25 and 2 (two
+# decimals, so the millisecond) reads 2 seconds on its timeline column and
+# 250ms at the low end of its heatmap labels and its dimensions line; a
+# kilobyte metric carrying 0.5 and 1.5 reads 500 B; on a millisecond-source
+# access log no duration on any surface reads in micro- or nanoseconds.
 # ---------------------------------------------------------------------------
 scenario_floor_unit() {
     current_scenario="floor-unit"
@@ -261,27 +266,35 @@ scenario_floor_unit() {
     render fu-timeline "$SECONDS_UDM" -bs 1 -n 0 --terminal-width 160 --debug-layout -udm 'elapsed:s:max' || return 0
     render fu-heatmap "$SECONDS_UDM" -bs 1 -n 0 --terminal-width 160 -udm 'elapsed:s:max' -hm elapsed || return 0
     render fu-dims "$SECONDS_UDM" -bs 1 -n 0 --terminal-width 160 -udm 'elapsed:s:max' -hg elapsed -V histogram-bin-counters || return 0
+    sed -E 's/elapsed=0\.25/size=0.5/; s/elapsed=2$/size=1.5/; s/elapsed=/size=/' "$SECONDS_UDM" > "$TMP_DIR/kilobyte-udm.txt"
+    render fu-bytes "$TMP_DIR/kilobyte-udm.txt" -bs 1 -n 0 --terminal-width 160 -udm 'size:kB:max' -hm size || return 0
     render fu-ms "$DURATION_SPREAD" -bs 60 -n 5 --terminal-width 160 -hm duration -hg duration || return 0
     render fu-ms-zero "$ZERO_DURATION" -bs 1 -n 5 --terminal-width 160 -hm duration || return 0
 
     assert_command \
         command     "cell_text fu-timeline '^ 2026-01-26 10:01' udm_elapsed | grep -qE '^2 ?(s|sec|seconds)\$'" \
         label       'the timeline column reads 2 seconds' \
-        asserts     'A seconds-declared metric renders in seconds on its timeline column' \
+        asserts     'A seconds-declared metric value of two seconds renders in seconds: the unit its magnitude reaches' \
         produced_by 'print_bar_graph() in ltl, the user-defined time column' \
-        contract    "$CONTRACT D16"
+        contract    "features/759-duration-precision-rendering.md D5, AC7"
     assert_command \
-        command     "check tokens --file '$TMP_DIR/fu-heatmap.txt' --line 'heatmap \\[elapsed\\]' --each '[0-9.]+s' --min 2" \
-        label       'the heatmap labels read in seconds' \
-        asserts     'A seconds-declared metric value below one second renders in seconds (0.2s), never in milliseconds (250ms)' \
-        produced_by 'get_heatmap_column_header() in ltl, through value_text(): resolve_value_kind() gives the declared unit as the floor' \
-        contract    "$CONTRACT D15, D16"
+        command     "grep -E 'heatmap \\[elapsed\\]' '$TMP_DIR/fu-heatmap.txt' | grep -qE '(^| )250ms .*heatmap \\[elapsed\\] +2s *\$'" \
+        label       'the heatmap labels read 250ms and 2s' \
+        asserts     'A seconds-declared metric whose values are written with two decimals carries the millisecond: 0.25 renders 250ms, never 0.2s or 0.3s' \
+        produced_by 'get_heatmap_column_header() in ltl, through value_text(): resolve_value_kind() gives udm_precision() as the floor' \
+        contract    "$CONTRACT D15; features/759-duration-precision-rendering.md D5, AC7"
     assert_command \
-        command     "grep -qE '^  metric: elapsed .* min=[0-9.]+s max=[0-9.]+s ' '$TMP_DIR/fu-dims.txt'" \
-        label       'the dimensions line reads min and max in seconds' \
-        asserts     'The histogram display-dimensions line renders a seconds-declared metric in seconds' \
+        command     "grep -qE '^  metric: elapsed .* min=250ms max=2s ' '$TMP_DIR/fu-dims.txt'" \
+        label       'the dimensions line reads min=250ms max=2s' \
+        asserts     'The histogram display-dimensions line renders a seconds-declared metric at the precision its values carry (zeros are not binned: the AC2 exception)' \
         produced_by 'format_histogram_dimensions_line() in ltl, through value_text() and the dimensions line budget row' \
-        contract    "$CONTRACT D16"
+        contract    "features/759-duration-precision-rendering.md D5, AC7"
+    assert_command \
+        command     "grep -E 'heatmap \\[size\\]' '$TMP_DIR/fu-bytes.txt' | grep -qE '(^| )500 ?B .*heatmap \\[size\\] +1\\.5 ?kB *\$'" \
+        label       'a kilobyte metric carrying 0.5 and 1.5 reads 500 B and 1.5 kB on its heatmap labels' \
+        asserts     'A byte metric takes the same count: kilobytes written with one decimal reach the byte, so 0.5 kB renders in bytes' \
+        produced_by 'get_heatmap_column_header() in ltl, through value_text(): resolve_value_kind() gives udm_precision() as the floor of format_bytes()' \
+        contract    "features/759-duration-precision-rendering.md D5, AC7"
     assert_command \
         command     "check absent --file '$TMP_DIR/fu-ms.txt' --regex '(?<![\\w.])[0-9.]+ ?(us|ns|usec|nsec|microseconds?|nanoseconds?)\\b' && check absent --file '$TMP_DIR/fu-ms-zero.txt' --regex '(?<![\\w.])[0-9.]+ ?(us|ns|usec|nsec|microseconds?|nanoseconds?)\\b'" \
         label       'no duration on a millisecond source reads in us or ns' \

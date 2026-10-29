@@ -767,6 +767,7 @@ my ( @udm_configs, @udm_raw_args, %udm_last_value );
 my %udm_distinct;                           # Per-bucket distinct value sets for counting aggregations (Issue #313), freed after counting like %log_sessions
 my @udm_rejected_specs;                     # -udm arguments skipped at parse time: { spec, reason } (Issue #443), reported on -V udm-specs
 my %udm_production;                         # Run-wide per-metric production derived from the bucket accumulators after the read loop (Issue #443)
+my %udm_decimals;                           # metric name => the most decimals among the values it read, across the run: its precision (udm_precision())
 my %udm_skipped_lines;                      # Per /regex/ metric: retained lines whose capture its numeric aggregation could not use; a key exists only once one is skipped (Issue #638)
 my @udm_sources;                            # Per config index: the sources the metric was read from ('line', 'csv:<column>', 'csv:unbound'), noted once per file as it binds (Issue #638)
 my @udm_csv_unbound_files;                  # Per config index: CSV files whose rows matched and whose header has no column for the metric (Issue #640)
@@ -2477,15 +2478,22 @@ sub parse_iso_date_to_epoch {
     return $parts->[0] + $parts->[1] / 1_000_000_000;
 }
 
-# The precision a value written with fractional digits carries: the ladder
-# step of the unit it states, descended one step for every three fractional
-# digits, so a clock time (which states the second) with three digits is a
-# millisecond and with six a microsecond. A part-group of digits is a full
+# The ladder steps a value written with fractional digits descends below the
+# unit it states: one for every three digits. A part-group of digits is a full
 # group whose trailing zeros are not written, so it descends one step too:
-# .23 is .230, a millisecond, and .9996 a microsecond.
+# .23 is .230.
+sub fraction_steps {
+    my ($digits) = @_;
+    return int((($digits // 0) + 2) / 3);
+}
+
+# The precision a value written with fractional digits carries: the time
+# ladder step of the unit it states, descended by its fraction_steps(), so a
+# clock time (which states the second) with three digits is a millisecond, with
+# six a microsecond, with two a millisecond and with four a microsecond.
 sub fraction_precision {
     my ($stated, $digits) = @_;
-    my $steps = int((($digits // 0) + 2) / 3);
+    my $steps = fraction_steps($digits);
     return $stated unless $steps;
     my @finer = map { $_->{token} } grep { $_->{ms} < $time_unit_step{$stated}{ms} } reverse @time_unit_ladder;
     return $finer[ $steps > @finer ? $#finer : $steps - 1 ];
@@ -16565,11 +16573,11 @@ sub significant_decimals {
 # (a built-in metric, a user-defined metric, a thread-pool or session column);
 # one that holds a value of its own names the kind, which states no source
 # unit and so has no floor (the tool's own timings, a coefficient of
-# variation, a percentage). The floor of the built-in duration is the
-# precision its raw data carries (resolve_duration_precision()): a zero
-# renders in it and nothing renders finer, while a value above it renders in
-# the unit its magnitude reaches. The one resolution of a metric's kind for
-# display.
+# variation, a percentage). The floor of the built-in duration, and of a
+# user-defined time or byte metric, is the precision its raw data carries
+# (resolve_duration_precision(), udm_precision()): a zero renders in it and
+# nothing renders finer, while a value above it renders in the unit its
+# magnitude reaches. The one resolution of a metric's kind for display.
 sub resolve_value_kind {
     my (%p) = @_;
     return { kind => $p{kind} } if defined $p{kind};
@@ -16580,9 +16588,24 @@ sub resolve_value_kind {
     }
     my $config = udm_config_by_name($metric) or return { kind => 'count' };
     return { kind => 'rate' } if $config->{aggregation} =~ /^(?:rate|drate)$/;
-    return { kind => 'duration', floor => $config->{unit} } if $config->{unit_type} eq 'time';
-    return { kind => 'bytes',    floor => $config->{unit} } if $config->{unit_type} eq 'bytes';
+    return { kind => 'duration', floor => udm_precision($config) } if $config->{unit_type} eq 'time';
+    return { kind => 'bytes',    floor => udm_precision($config) } if $config->{unit_type} eq 'bytes';
     return { kind => 'count',    floor => $config->{unit_type} eq 'number' ? $config->{converter}->(1) : undef };
+}
+
+# A user-defined time or byte metric's precision: its declared unit descended
+# by the fraction_steps() of the most decimals among the values it read, on
+# the time ladder or the byte ladder (never below the byte); the declared unit
+# when none carried a decimal.
+sub udm_precision {
+    my ($config) = @_;
+    my $digits = $udm_decimals{ $config->{name} };
+    return fraction_precision( $config->{unit}, $digits ) if $config->{unit_type} eq 'time';
+    my $steps = fraction_steps($digits) or return $config->{unit};
+    my $prefix = uc substr( $config->{unit}, 0, 1 );
+    my ($at) = grep { uc substr( $byte_unit_ladder[$_]{iec}{token}, 0, 1 ) eq $prefix } 0 .. $#byte_unit_ladder;
+    return $config->{unit} unless defined $at;
+    return $byte_unit_ladder[ $at > $steps ? $at - $steps : 0 ]{si}{token};
 }
 
 # The arm that renders each kind, given the value, its input unit, the tier,
@@ -19321,6 +19344,15 @@ sub read_and_process_logs {
                     unless (($matched_value =~ tr/0-9.eE+\-//c) == 0 && looks_like_number($matched_value)) {
                         push @$udm_skipped, $name unless $match_type == 13;
                         next;
+                    }
+
+                    # The decimals the value is written with: the metric's
+                    # precision is its declared unit descended by the most of
+                    # them (udm_precision()).
+                    my $dot = index($matched_value, '.');
+                    if ($dot >= 0) {
+                        my $decimals = length($matched_value) - $dot - 1;
+                        $udm_decimals{$name} = $decimals if $decimals > ($udm_decimals{$name} // 0);
                     }
 
                     my $raw_value = $matched_value + 0;
