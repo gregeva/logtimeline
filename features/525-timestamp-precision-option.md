@@ -822,7 +822,7 @@ duration's millisecond precision is not rendered):* a part-group of digits
 steps down one unit, as a full group does, because a partial group is a full
 group whose trailing zeros are not written: `.23` is `.230`, the millisecond,
 and `.9996` the microsecond. The same rule reads a duration's decimals.
-Delivered by #759 (`features/759-duration-display-unit.md` § 5).
+Delivered by #759 (`features/759-duration-precision-rendering.md` § 5).
 
 **A run over several files.** Settled by D4 as amended 2026-10-08: the run
 takes the finest precision any processed file carries, never the coarsest, so

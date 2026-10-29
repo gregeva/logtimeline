@@ -3,8 +3,8 @@
 ## Status
 
 **Specification in progress.** Work started 2026-10-29 on `release/0.20.0`;
-the specification is written here on the release branch, and the issue branch
-is cut from it when implementation starts. Phases 1 and 2 (the requirement
+the specification is written here on the release branch, and the issue branch,
+`759-duration-precision-rendering`, is cut from it when implementation starts. Phases 1 and 2 (the requirement
 and the surfaces, § 1 to § 3) are confirmed by the architect; phase 3 (the
 records, § 4) is written, with D1 locked; phase 4 (the design questions, § 5)
 is in progress; phases 5 to 7 follow, each brought to the architect before the
