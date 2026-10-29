@@ -348,20 +348,20 @@ issue body; they are restated here, not reinterpreted.
   architect: "sure, noting the rule that the unit can never be smaller than the
   stated unit." Locked by the architect 2026-09-28.
   **Reversed by the architect 2026-10-29 (#759, a duration's display unit
-  follows the unit it is read in):** how a value is rendered is not related to
-  the unit it is read in. A non-zero value carries its magnitude: read in
-  seconds, 1 is one second and 0.001 is one millisecond, and the rendering
-  chooses the unit from that magnitude (0.01 s reads `10ms`, where under D16 it
-  read `0s`). The source unit and the precision read matter in two rules only:
-  - **A zero** is followed by the unit of the data: the format registry's
-    duration unit (or `-du`) together with the precision detected in what is
-    read. Seconds read `0s`, milliseconds `0ms`; an nginx access log storing
-    durations in seconds with three decimals reads `0ms` (millisecond precision
-    read in the file, though the format registry or `-du` gives seconds). This
-    amends D4.
+  follows the unit it is read in):** a non-zero value carries its own
+  magnitude: read in seconds, 1 is one second and 0.001 is one millisecond. The
+  rendering chooses the unit from that magnitude, whatever unit the value is
+  read in (0.01 s reads `10ms`, where under D16 it read `0s`). The source unit
+  and the precision read in the file matter in two rules only:
+  - **A zero** has no magnitude, so it is followed by the unit of the data: the
+    format registry's duration unit (or `-du`) together with the precision
+    detected in what is read. Durations in whole seconds read `0s`, durations in
+    milliseconds `0ms`; an nginx access log storing durations in seconds with
+    three decimals reads `0ms` (millisecond precision read in the file, though
+    the format registry or `-du` gives seconds). This amends D4.
   - **No unit inaccessible for lack of precision is rendered.** A source
     measured in seconds with three digits after the decimal has millisecond
-    precision, and nothing below a millisecond is rendered.
+    precision: nothing below a millisecond is rendered, never `us` or `ns`.
 
   The rule was asked for because files rendered `0 microseconds` or
   `0 nanoseconds` where that precision did not exist; its scope was
