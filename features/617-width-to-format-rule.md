@@ -262,10 +262,11 @@ issue body; they are restated here, not reinterpreted.
   surface** (`features/444-access-log-format-family-and-user-surface.md` R17 and
   D16 applied to the heatmap header), never the scaler's lowest step. An absent
   value is #616's empty cell, never a zero (locked by the architect 2026-09-27,
-  stage 7). **Amended by the architect 2026-10-29 (#759, a duration's display
-  unit follows the unit it is read in):** the unit that follows a zero reflects
-  the data: the duration unit the format registry (or `-du`) gives, together
-  with the precision detected in what is read (D16's reversal).
+  stage 7). **Amended by the architect 2026-10-29 (#759, durations read in
+  seconds lose their milliseconds on display):** the unit that follows a zero
+  is the raw data's unit (from the format registry, or `-du`) combined with the
+  precision the raw data carries, so that what is displayed is relevant to the
+  raw data (D16's reversal).
 - **D5 — Tables and the summary print exact occurrence counts**; the legend
   keeps its tier with the precise-values switch. Recorded as the rule (locked by
   the architect 2026-09-27, stage 7).
@@ -346,19 +347,20 @@ issue body; they are restated here, not reinterpreted.
   zero renders in its own declared unit (`0s` for a seconds metric). The
   architect: "sure, noting the rule that the unit can never be smaller than the
   stated unit." Locked by the architect 2026-09-28.
-  **Reversed by the architect 2026-10-29 (#759, a duration's display unit
-  follows the unit it is read in):** the display unit and the unit a duration
-  is read in are decorrelated. The rendering already adapts the unit to the
-  value it shows; D16's floor at the unit read in is what overrides it (read in
-  seconds, 0.01 s is 10 ms, yet it rendered `0s`). The source unit and the
-  precision available in what is read matter in only a couple of places:
+  **Reversed by the architect 2026-10-29 (#759, durations read in seconds lose
+  their milliseconds on display):** the unit a value is displayed in and the
+  unit it is read in have no relationship. The rendering already adapts the
+  unit to each value's magnitude; D16's floor held the display to the unit read
+  in and overrode it (read in seconds, 0.01 s is 10 ms, yet it rendered `0s`).
+  The raw data's unit and precision matter in only a couple of places, and
+  always combined, so that what is displayed is relevant to the raw data:
   - **A zero** carries no magnitude for the rendering to adapt to, so the unit
-    that follows it reflects the data: the duration unit the format registry
-    (or `-du`) gives, together with the precision detected in what is read. For
-    example, an nginx access log storing durations in seconds with three
-    decimals carries millisecond precision, so its zero is expressed in
-    milliseconds rather than seconds. This amends D4.
-  - **A unit the data's precision cannot reach is never rendered**, since
+    that follows it is the raw data's unit (from the format registry, or
+    `-du`) combined with the precision the raw data carries. For example, an
+    nginx access log storing durations in seconds with three decimals carries
+    millisecond precision, so its zero is expressed in milliseconds rather than
+    seconds. This amends D4.
+  - **A unit the raw data's precision cannot reach is never rendered**, since
     choosing it implies a precision the data does not have. For example,
     durations in seconds with three decimals carry millisecond precision, so
     nothing below a millisecond is rendered.
@@ -765,8 +767,8 @@ one rule, so it applies to every kind with a ladder (D12): 59,960 ms reads
 ### The floor and the zero rule (D4, D16)
 
 *D16 is reversed (2026-10-29, #759): the floor below is the delivered design,
-which #759 replaces: the display unit is no longer pegged to the unit a
-duration is read in (D4 as amended, D16's reversal).*
+which #759 replaces: a duration's display is no longer held to the unit it is
+read in (D4 as amended, D16's reversal).*
 
 The duration and byte arms never render a value in a unit smaller than the
 floor: the source's resolved unit for the built-in duration and bytes, the

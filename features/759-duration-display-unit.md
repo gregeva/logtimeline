@@ -1,4 +1,4 @@
-# A duration's display unit is pegged to the unit it is read in (Issue #759)
+# Durations read in seconds lose their milliseconds on display (Issue #759)
 
 ## Status
 
@@ -15,7 +15,7 @@ before the next.
 | 2. Surface inventory and contracts | every place a duration is rendered or its precision is stated, each with the record line behind its current contract, for the architect to confirm |
 | 3. Record reconciliation | each related record read or dismissed with its reason; each locked decision the reversal touches marked as standing, amended or falling |
 | 4. Design questions | asked one at a time |
-| 5. Prototype decision | settled by how the precision of what is read is detected |
+| 5. Prototype decision | settled by how the precision the raw data carries is detected |
 | 6. Acceptance criteria | derived from the requirement, validated on every surface of phase 2 |
 | 7. Delivery plan | the drops, the user-facing changes and the records to update at delivery |
 
@@ -30,7 +30,7 @@ tagged `v0.19.0`.
 **The analyst reading a log whose durations are recorded in seconds.** A web
 application access log can carry execution time in seconds with three
 decimals, read with `-du s`. Those durations carry millisecond precision, yet
-every surface shows them pegged to seconds: requests of 6, 8 and 10 ms all read
+every surface holds them to seconds: requests of 6, 8 and 10 ms all read
 `0s` in the messages table, a P50 of 30 ms reads `0s` in the percentile legend,
 and the heatmap axis opens `0s 0s`. Read from the same requests recorded in
 milliseconds, the same surfaces separate them.
@@ -48,28 +48,30 @@ From the issue body and the architect's explanations of 2026-10-29, organised
 in this document's words. The examples illustrate the aim; they are not the
 specification.
 
-**The defect.** The unit a duration is displayed in is pegged to the unit it is
-read in. The two have no relationship: what is seen on screen and the unit of
-measure a value is recorded in are decorrelated. The rendering already adapts
-the unit to the value it shows; the pegging is what overrides it. Read in
-seconds, 0.01 s is 10 ms, yet it renders `0s`.
+**The defect.** A duration's display is held to the unit it is read in:
+nothing renders below that unit. Read in seconds, 0.01 s is 10 ms, yet it
+renders `0s`. The unit a value is displayed in and the unit it is read in have
+no relationship; the rendering already adapts the unit to each value's
+magnitude, and this hold overrides it.
 
-**Where the source unit and the precision matter.** In only a couple of places:
+**Where the raw data's unit and precision matter.** In only a couple of places,
+and always combined, so that what is displayed is relevant to the raw data:
 
 - **A zero** carries no magnitude for the rendering to adapt to, so the unit
-  that follows it reflects the data: the duration unit the format registry (or
-  `-du`) gives, together with the precision detected in what is read. For
-  example, an nginx access log storing durations in seconds with three
-  decimals carries millisecond precision, so its zero is expressed in
-  milliseconds rather than seconds.
-- **A unit the data's precision cannot reach is never rendered**, since
+  that follows it is the raw data's unit (from the format registry, or `-du`)
+  combined with the precision the raw data carries. For example, an nginx
+  access log storing durations in seconds with three decimals carries
+  millisecond precision, so its zero is expressed in milliseconds rather than
+  seconds.
+- **A unit the raw data's precision cannot reach is never rendered**, since
   choosing it implies a precision the data does not have. For example,
   durations in seconds with three decimals carry millisecond precision, so
   nothing below a millisecond is rendered.
 
-**The finer-bound notice.** It states a precision the log does not carry,
+**The finer-bound notice.** It states a precision the raw data does not carry,
 naming the stated unit as the unit the durations are recorded in. It is
-corrected to fit the same position.
+corrected to the same position: it never states a precision the raw data does
+not carry.
 
 **Why the current behaviour exists.** #617 (one width-to-format rule) locked
 D16: "a value is never rendered in a unit smaller than its stated unit". It was
@@ -82,10 +84,11 @@ cross-checked against the other precision decisions and requirements in
 phase 3.
 
 **Not in scope.** How values are rendered: the rendering already adapts the
-unit to the value. The defect is the pegging that overrides it, and the notice.
+unit to each value's magnitude. The defect is the hold that overrides it, and
+the notice.
 
-**Done when** (the issue body): a duration's display unit is no longer pegged
-to the unit it is read in, and no notice states a precision the log does not
+**Done when** (the issue body): a duration's display is no longer held to the
+unit it is read in, and no notice states a precision the raw data does not
 carry.
 
 ### Reproduction
@@ -192,7 +195,7 @@ export's population duration read `14.4 hours` on both inputs.
 
 `read_and_process_logs()` converts each duration to milliseconds at the
 include point (503 F14); once held, a value no longer shows how many decimals
-it was written with. The read is where the precision of what is read is
+it was written with. The read is where the precision the raw data carries is
 visible. The detection sample (`sample_file_for_detection()`) already records,
 per format, the most fractional digits among its sampled timestamps
 (`frac_digits`, read by `resolve_timestamp_precision()`); nothing records them
@@ -216,17 +219,17 @@ updated when #759 delivers, phase 7); or *dismissed*, with the reason.
 | Record | What it says | Disposition |
 |---|---|---|
 | 617 D16 | the stated unit is the floor of every rendering, a user-defined metric's declared unit included | reversed 2026-10-29 (recorded in the 617 doc) |
-| 617 D4 | a real zero duration renders in the source's resolved unit on every surface | amended 2026-10-29: the unit that follows a zero reflects the data, the format registry's (or `-du`'s) unit together with the precision detected in what is read |
+| 617 D4 | a real zero duration renders in the source's resolved unit on every surface | amended 2026-10-29: the unit that follows a zero is the raw data's unit (from the format registry, or `-du`) combined with the precision the raw data carries |
 | `features/444-access-log-format-family-and-user-surface.md` R17 and D16 | the mixed `0us` / `ms` rendering on the thread-session shape is fixed at its cause: `format_duration_total()` renders a zero total in the resolved source unit | amended with D4; § 4.3 measures what the amendment means on that shape |
 | 617 D19, `features/608-byte-unit-ladder.md` D18 and D9 | a value is rounded to the floor step's resolution first and no rendered digit is finer than it; that resolution is the step's decimals field relative to the millisecond storage unit (`ns` 6, `us` 3, `ms` and every longer token 0); one default decimals rule from the step on every surface, the CSV's duration and percentile families included | touched: each reads the stated unit's step. Which precision they read once the floor is gone, and so how a computed value (a mean, an interpolated percentile) finer than the detected precision is rounded, is a phase 4 question |
-| `features/605-input-units.md` D22 and § 5 | a duration bound finer than the unit the log's durations are recorded in gets a note; that unit is `-du` when given, otherwise each file's format `duration_unit` | D22 stands (a bound finer than the log records gets a note); § 5's definition of what the log records is amended to the precision detected in what is read, as the architect directed for the notice (§ 2) |
-| 605 D30 | a format whose lines name their own unit (`[150us]`) declares `line`, contributes no unit to anything that compares against the log's unit, and D22's note does not fire on it | touched: such a log still carries a precision in what is read; whether the note compares against it is a phase 4 question |
+| `features/605-input-units.md` D22 and § 5 | a duration bound finer than the unit the log's durations are recorded in gets a note; that unit is `-du` when given, otherwise each file's format `duration_unit` | D22 stands (a bound finer than the log records gets a note); § 5's definition of what the log records is amended to the raw data's unit combined with the precision it carries, as the architect directed for the notice (§ 2) |
+| 605 D30 | a format whose lines name their own unit (`[150us]`) declares `line`, contributes no unit to anything that compares against the log's unit, and D22's note does not fire on it | touched: such a log's raw data still carries a precision; whether the note compares against it is a phase 4 question |
 | 617 D9, D10, D18 | the latency cells' budget; tier and fit once per timeline column; the messages-table total walked by its width | stand: they govern the rendering, which is out of scope |
 | 617 D22 | the tool's own timings take their unit from their magnitude and have no floor | stands |
 | 617 AC8, AC9; § 3 correction 7; § 5 *The budget table*, chart label, *Changes* ("the floor (D16) and the zero rule (D4)") | assert or describe the floor | fall with D16 and change with D4; `validate-value-display` scenarios `zero-duration` and `floor-unit`, which assert them, are rewritten under #759's criteria (phase 6) |
 | `features/503-yaml-aggregate-export.md` F14, D20 | every stored duration is milliseconds; provenance names the source unit once | stand |
 | 617 § 5 *The budget table*, summary timing and export duration rows | the tool's own timings and the population duration: no floor | stand |
-| `features/525-timestamp-precision-option.md` D4 (as amended 2026-10-08) and D10 | timestamps are never shown finer than the files carry; the true precision is the unit the timestamp field states with the fractional digits it carries, through the ladder; the request gives way only to the finest precision any processed file carries | stand; the existing reading of "the precision detected in what is read", for timestamps, which phase 4 weighs for durations |
+| `features/525-timestamp-precision-option.md` D4 (as amended 2026-10-08) and D10 | timestamps are never shown finer than the files carry; the true precision is the unit the timestamp field states with the fractional digits it carries, through the ladder; the request gives way only to the finest precision any processed file carries | stand; the existing reading, for timestamps, of a unit combined with the precision the raw data carries, which phase 4 weighs for durations |
 | `features/58-format-registry-staged-detection.md` § S7 unit-ambiguity note (D18) | a format whose producers differ in their duration unit, read without `-du`, gets a note that durations are assumed to be milliseconds | stands: it names the unit a value is read in |
 
 ### 4.2 Other records
@@ -260,8 +263,8 @@ precision is the most digits seen, not each value's own.
 Read as § 2 reads seconds with three decimals, milliseconds with three
 decimals carry microsecond precision. On this shape:
 
-- the unit that follows a zero, reflecting the detected precision, is the
-  microsecond: the `0us` that 444 R17 recorded as a defect, and fixed by
+- the unit that follows a zero, the raw data's unit combined with its
+  precision, is the microsecond: the `0us` that 444 R17 recorded as a defect, and fixed by
   rendering a zero in the resolved source unit (`0ms`). 444's finding traced
   that `0us` to the scaler climbing from its lowest step, not to the file's
   precision;
@@ -269,9 +272,10 @@ decimals carry microsecond precision. On this shape:
   rounds to a whole millisecond today, is within the precision the file
   carries (the phase 4 question of § 4.1).
 
-**D1 — On the thread-session shape a zero follows the detected precision:
-`0us`.** Put to the architect with the alternative that 444 R17's fix (a zero
-in the resolved source unit, `0ms`) stands on this shape; the architect chose
-the detected precision. R17's fix gives way on this shape and holds where the
-data carries no finer precision than the millisecond. Locked by the architect
-2026-10-29; recorded on 444 R17.
+**D1 — On the thread-session shape a zero is followed by the microsecond:
+`0us`.** The shape's raw data is milliseconds written with three decimals, so
+it carries microsecond precision, and the unit that follows a zero is the raw
+data's unit combined with its precision. Put to the architect with the
+alternative that 444 R17's fix (a zero in the resolved source unit, `0ms`)
+stands on this shape; the architect chose `0us`, and R17's fix gives way on
+this shape. Locked by the architect 2026-10-29; recorded on 444 R17.
