@@ -369,6 +369,20 @@ is the unit read in, and the display is unchanged. Confirmed by the architect
   action). Rejected: a parameter keeping the two readings apart, two readings
   of the same digits in one sub. The scope of #759 widens to this timestamp
   change; § 3.6 lists its surfaces. Locked by the architect 2026-10-29.
+- **D5 — A user-defined metric's decimals are counted on each value as the
+  metric reads it.** In `read_and_process_logs()`, after a captured value
+  passes the number test and before it is converted, its decimals are
+  counted; the metric's precision is its declared unit descended by the most
+  decimals seen (D3's rule), and it replaces the declared unit as the floor
+  and rounding of every display of the metric. `-udm
+  pause:s:max:/pause=([\d.]+)/` over `pause=0.012` reads `12ms`, where the
+  declared-unit floor reads `0s` today; a byte metric takes the same count
+  (`size=1.5` declared in `kB` reaches the byte). The cost is one count per
+  matched value, only in runs with `-udm`: a before/after benchmark with a
+  `-udm` run, no prototype. Rejected: counting in the detection sample's lines,
+  which a `-udm` run keeps (no per-line cost, but a metric on lines too rare
+  to appear in 24 KB, such as GC pauses, falls back to its declared unit and
+  shows the reported defect). Locked by the architect 2026-10-29.
 
 Settled by the records, taken without a question:
 
@@ -381,3 +395,11 @@ Settled by the records, taken without a question:
   surface (`features/608-byte-unit-ladder.md` D9), now read from the precision
   instead of the unit read in: a mean of 10.4 ms reads `10ms` on a log of
   whole milliseconds and `10.4ms` on a log written to the microsecond.
+- **The CSV duration and percentile decimals follow the precision.** The
+  default decimals are the same on every surface, the CSV's duration and
+  percentile families included (`features/608-byte-unit-ladder.md` D9; `-cp`
+  is the knob for more). On the thread-session shape, written to the
+  microsecond, those columns go from `446` to `446.268`; under `-du s` on
+  seconds with three decimals they stay whole milliseconds. The decimals are
+  resolved today at option settlement (`%csv_family_decimals`), before any
+  file is sampled, so they move after the read.
