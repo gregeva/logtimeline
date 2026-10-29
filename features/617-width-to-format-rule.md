@@ -262,7 +262,11 @@ issue body; they are restated here, not reinterpreted.
   surface** (`features/444-access-log-format-family-and-user-surface.md` R17 and
   D16 applied to the heatmap header), never the scaler's lowest step. An absent
   value is #616's empty cell, never a zero (locked by the architect 2026-09-27,
-  stage 7).
+  stage 7). **Amended by the architect 2026-10-29 (#759, a duration's display
+  unit follows the unit it is read in):** the unit that follows a zero is the
+  format registry's duration unit (or `-du`) together with the precision
+  detected in what is read, so seconds written with three decimals read `0ms`
+  (D16's reversal).
 - **D5 — Tables and the summary print exact occurrence counts**; the legend
   keeps its tier with the precise-values switch. Recorded as the rule (locked by
   the architect 2026-09-27, stage 7).
@@ -344,19 +348,25 @@ issue body; they are restated here, not reinterpreted.
   architect: "sure, noting the rule that the unit can never be smaller than the
   stated unit." Locked by the architect 2026-09-28.
   **Reversed by the architect 2026-10-29 (#759, a duration's display unit
-  follows the unit it is read in):** what is seen on screen is decorrelated from
-  the unit a value is read in and from the precision of the data; the unit a
-  value is shown in follows the value itself. The architect: "what I am able to see on the screen and what the unit
-  of measure is for a value are decorrelated." The rule was asked for because
-  files rendered `0 microseconds` or `0 nanoseconds` where that precision did not
-  exist. Its concern was precision, never the stated unit, and its scope was
-  misunderstood: the stated unit was made the floor of the display. No value is
-  shown in a unit implying a precision the data does not carry. A value in seconds written with three
-  decimals carries millisecond precision and renders in milliseconds when small
-  enough to be observed there (0.01 s reads `10ms`, where under D16 it read
-  `0s`); it carries no microsecond or nanosecond precision and never renders in
-  `us` or `ns`. The floor described in § 5 *The floor and the zero rule* is what
-  #759 replaces.
+  follows the unit it is read in):** how a value is rendered is not related to
+  the unit it is read in. A non-zero value carries its magnitude: read in
+  seconds, 1 is one second and 0.001 is one millisecond, and the rendering
+  chooses the unit from that magnitude (0.01 s reads `10ms`, where under D16 it
+  read `0s`). The source unit and the precision read matter in two rules only:
+  - **A zero** is followed by the unit of the data: the format registry's
+    duration unit (or `-du`) together with the precision detected in what is
+    read. Seconds read `0s`, milliseconds `0ms`; an nginx access log storing
+    durations in seconds with three decimals reads `0ms` (millisecond precision
+    read in the file, though the format registry or `-du` gives seconds). This
+    amends D4.
+  - **No unit inaccessible for lack of precision is rendered.** A source
+    measured in seconds with three digits after the decimal has millisecond
+    precision, and nothing below a millisecond is rendered.
+
+  The rule was asked for because files rendered `0 microseconds` or
+  `0 nanoseconds` where that precision did not exist; its scope was
+  misunderstood, and the stated unit was made the floor of the display. The
+  floor described in § 5 *The floor and the zero rule* is what #759 replaces.
 - **D17 — Lock 5's switch is `-pv` (precise values: no conversion or shortening
   of the numbers).** `--omit-values` and `--rate-unit` relate to the legend but
   are not that switch. The stage 7 row's `-ov` was a transcription error,
@@ -753,9 +763,10 @@ one rule, so it applies to every kind with a ladder (D12): 59,960 ms reads
 ### The floor and the zero rule (D4, D16)
 
 *D16 is reversed (2026-10-29, #759): the floor below is the delivered design,
-which #759 replaces. The unit shown follows the value, decorrelated from the
-unit it is read in and from the precision of the data, and never implies a
-precision the data does not carry.*
+which #759 replaces. A non-zero value renders by its magnitude; a zero is
+followed by the format registry's duration unit (or `-du`) together with the
+precision detected in what is read; no unit finer than that precision renders
+(D4 as amended, D16's reversal).*
 
 The duration and byte arms never render a value in a unit smaller than the
 floor: the source's resolved unit for the built-in duration and bytes, the
