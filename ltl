@@ -11510,7 +11510,7 @@ sub print_help {
     $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10). 0 keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (-g), the message statistics data model (-mdm) and the message ranking (-so) then have nothing to act on and are ignored, with a note saying so. " . quantity_unit_sentence($quantity_option_by_long{'top-messages'}));
     $out .= help_opt("-mt,  --message-truncation <position>", "Where a message too long for the messages table is cut, marked with an ellipsis: right cuts its end (default), left cuts its start so the end of the message stays visible, center cuts its middle so its start and end stay visible. The log level, thread and object at the start of the message are always kept. One of $message_truncation_list, or l, c, r.");
     $out .= help_opt("-o,   --output-csv",            "Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content. The YAML file's name carries no argument text; which blocks it holds follows the run's options (-hg for population-wide percentiles, -hm for per-bucket heatmap percentiles)");
-    $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from the source's duration unit), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
+    $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from the precision the log's durations carry), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
     $out .= help_opt("-hi,  --hide <column>",         "Hide a timeline column: " . visibility_column_list() . ", or a -udm metric by its column heading; values are the numbers on the bars and rate the rates in the legend; a comma-separated list, or the option repeated");
     $out .= help_opt("-hi,  --hide <section>",        "Hide a section of the output: title, progress, timeline (tl), histogram (hg), options (opt), messages (msg), threadpools (tp) or summary (sum); sections and columns mix in one list");
@@ -14511,7 +14511,8 @@ sub resolve_timestamp_precision {
 # line for a format that names it there) descended by the most decimals the
 # sample saw on them, and the finest of these across the run, so a file
 # written with fewer decimals never lowers it. Where no duration was sampled,
-# the unit read in. A zero renders in it and nothing renders finer.
+# the unit read in. A zero renders in it and nothing renders finer, and the
+# CSV's time-valued families take its decimals in the default precision mode.
 sub resolve_duration_precision {
     my @found;
     for my $file (@in_files) {
@@ -14529,6 +14530,8 @@ sub resolve_duration_precision {
     }
     ($duration_precision) = sort { $time_unit_step{$a}{ms} <=> $time_unit_step{$b}{ms} } @found;
     $duration_precision //= $duration_unit_resolved;
+    @csv_family_decimals{qw(duration percentile)} = ( $time_unit_step{$duration_precision}{decimals} ) x 2
+        if $csv_precision eq 'default';
     return;
 }
 
@@ -18160,8 +18163,9 @@ sub adapt_to_command_line_options {
     }
 
     # Resolve per-family decimal counts (Issue #268).
-    # - default mode: time-valued families take the resolved duration unit's
-    #   ladder-step decimals (the source's resolution);
+    # - default mode: time-valued families take the ladder-step decimals of
+    #   the precision the durations carry (the source's resolution), the unit
+    #   read in until resolve_duration_precision() resolves it after the read;
     #   shape is fixed at 3 (unitless); meta and bytes are integer.
     # - full mode: all families read 'n/a' (the emit path bypasses formatting).
     # - N mode: every family uses N decimals.
