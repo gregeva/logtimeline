@@ -4,9 +4,10 @@
 
 **Specification in progress.** Work started 2026-10-29 on `release/0.20.0`;
 the specification is written here on the release branch, and the issue branch
-is cut from it when implementation starts. Phase 1 (the requirement, § 1 and
-§ 2) is confirmed by the architect; phase 2 (the surfaces, § 3) is written;
-phases 3 to 7 follow, each brought to the architect before the next.
+is cut from it when implementation starts. Phases 1 and 2 (the requirement
+and the surfaces, § 1 to § 3) are confirmed by the architect; phase 3 (the
+records, § 4) is written; phases 4 to 7 follow, each brought to the architect
+before the next.
 
 | Phase | What it produces |
 |---|---|
@@ -177,7 +178,7 @@ neither a display unit nor a precision.
 |---|---|---|---|
 | `-V csv-output` `duration_unit_resolved` | the `csv-output` emitter | 617 § *Verification surface* reads it as the expected floor (AC2, AC8, AC9, AC11) | `ms (default)` → `s (-du s)` |
 | YAML export `duration_unit_resolved`, `duration_unit_source` | `write_aggregate_export` | `features/503-yaml-aggregate-export.md` F14: "`duration_unit_resolved` names the source unit"; D20: "the duration unit is stated once in provenance" | `ms`, `default` → `s`, `-du s` |
-| The notice that a format's producers differ in their duration unit ("assumed ms"), and the notice that `-du` is not applied to a format whose lines name their own unit | `format_variant_ambiguity_note` | none found | code path |
+| The notice that a format's producers differ in their duration unit ("assumed ms"), and the notice that `-du` is not applied to a format whose lines name their own unit | `format_variant_ambiguity_note`, `defer_format_unit_notes` | `features/58-format-registry-staged-detection.md` § S7 unit-ambiguity note (D18); `features/412-notice-surfaces.md` notice row 16 | code path |
 
 ### 3.4 Durations rendered with no floor
 
@@ -196,3 +197,74 @@ visible. The detection sample (`sample_file_for_detection()`) already records,
 per format, the most fractional digits among its sampled timestamps
 (`frac_digits`, read by `resolve_timestamp_precision()`); nothing records them
 for durations.
+
+---
+
+## 4. Records reconciled
+
+Every record the search returned (`./process/find-records.sh --issues` over
+`-du`, `--duration-unit`, `duration_unit_resolved`, `resolve_value_kind`,
+`format_time`, `value_text`, `note_finer_duration_bounds`, the notice's text,
+*stated unit*, *declared unit*, *source unit*, *source precision* and
+*resolution*), read and given a disposition against § 2's two points: *stands*;
+*reversed* or *amended* (by the architect, recorded in the owning doc);
+*touched* (a question for phase 4); *describes the delivered code* (true today,
+updated when #759 delivers, phase 7); or *dismissed*, with the reason.
+
+### 4.1 Locked decisions
+
+| Record | What it says | Disposition |
+|---|---|---|
+| 617 D16 | the stated unit is the floor of every rendering, a user-defined metric's declared unit included | reversed 2026-10-29 (recorded in the 617 doc) |
+| 617 D4 | a real zero duration renders in the source's resolved unit on every surface | amended 2026-10-29: the unit that follows a zero reflects the data, the format registry's (or `-du`'s) unit together with the precision detected in what is read |
+| `features/444-access-log-format-family-and-user-surface.md` R17 and D16 | the mixed `0us` / `ms` rendering on the thread-session shape is fixed at its cause: `format_duration_total()` renders a zero total in the resolved source unit | amended with D4; § 4.3 measures what the amendment means on that shape |
+| 617 D19, `features/608-byte-unit-ladder.md` D18 and D9 | a value is rounded to the floor step's resolution first and no rendered digit is finer than it; that resolution is the step's decimals field relative to the millisecond storage unit (`ns` 6, `us` 3, `ms` and every longer token 0); one default decimals rule from the step on every surface, the CSV's duration and percentile families included | touched: each reads the stated unit's step. Which precision they read once the floor is gone, and so how a computed value (a mean, an interpolated percentile) finer than the detected precision is rounded, is a phase 4 question |
+| `features/605-input-units.md` D22 and § 5 | a duration bound finer than the unit the log's durations are recorded in gets a note; that unit is `-du` when given, otherwise each file's format `duration_unit` | D22 stands (a bound finer than the log records gets a note); § 5's definition of what the log records is amended to the precision detected in what is read, as the architect directed for the notice (§ 2) |
+| 605 D30 | a format whose lines name their own unit (`[150us]`) declares `line`, contributes no unit to anything that compares against the log's unit, and D22's note does not fire on it | touched: such a log still carries a precision in what is read; whether the note compares against it is a phase 4 question |
+| 617 D9, D10, D18 | the latency cells' budget; tier and fit once per timeline column; the messages-table total walked by its width | stand: they govern the rendering, which is out of scope |
+| 617 D22 | the tool's own timings take their unit from their magnitude and have no floor | stands |
+| 617 AC8, AC9; § 3 correction 7; § 5 *The budget table*, chart label, *Changes* ("the floor (D16) and the zero rule (D4)") | assert or describe the floor | fall with D16 and change with D4; `validate-value-display` scenarios `zero-duration` and `floor-unit`, which assert them, are rewritten under #759's criteria (phase 6) |
+| `features/503-yaml-aggregate-export.md` F14, D20 | every stored duration is milliseconds; provenance names the source unit once | stand |
+| 617 § 5 *The budget table*, summary timing and export duration rows | the tool's own timings and the population duration: no floor | stand |
+| `features/525-timestamp-precision-option.md` D4 (as amended 2026-10-08) and D10 | timestamps are never shown finer than the files carry; the true precision is the unit the timestamp field states with the fractional digits it carries, through the ladder; the request gives way only to the finest precision any processed file carries | stand; the existing reading of "the precision detected in what is read", for timestamps, which phase 4 weighs for durations |
+| `features/58-format-registry-staged-detection.md` § S7 unit-ambiguity note (D18) | a format whose producers differ in their duration unit, read without `-du`, gets a note that durations are assumed to be milliseconds | stands: it names the unit a value is read in |
+
+### 4.2 Other records
+
+| Record | What it says | Disposition |
+|---|---|---|
+| #292 (closed; no feature doc) | a millisecond source no longer shows synthesized sub-millisecond digits (`58ms`, not `58.2ms`); the fix added a source-unit floor and `0ms` for zero | its intent is § 2's second point; what it built is carried by 617 D19 and 608 D18 above; the closed thread is history |
+| `features/460-bin-model-percentile-source.md` | percentiles were computed from the re-projected display partition | dismissed: the bin partition's resolution, not the source's unit or precision |
+| #491 (closed) | an evidence-selected microsecond format and `-du us` render at different precisions | dismissed: closed as filed in error, no defect |
+| #17 (open), `features/duration-unit-autodetection.md` | detect the duration unit from sampled values | relates: the detection sample hands its lines forward for unit sampling; #759 needs the precision of the same values, #17 their unit; neither waits for the other |
+| #386 (open) | per-format analysis precision for timestamps | dismissed: timestamps' analysis precision |
+| `features/log-format-registry.md` § 1 *Duration unit*, § 4 *Duration Unit Handling*, the unit-system scope boundary (D18) | each format declares `duration_unit` (a ladder token, or `line`); `-du` takes precedence; unit auto-detection by sampling values is #17's, not the #23 rewrite's | stand: the unit in § 2's first point is this field, with `-du` over it |
+| 58, the per-line conversion chain | `-du` wins, else the entry's duration unit, through `convert_duration_to_ms()` | stands: the unit a value is read in |
+| `features/412-notice-surfaces.md`, notice rows 16 and 24 | `-du` not applied to a format naming the unit per line; a duration bound finer than the log's recorded unit | row 16 stands; row 24's trigger changes with 605 § 5 above |
+| `features/user-defined-metrics.md` § *Since #617*; `docs/architecture-patterns.md` *Width-to-format rule* ("with its floor") and the timestamp-precision entry ("the timestamp instance of the rule that a value never renders in a unit smaller than its stated unit"); `features/524-bucket-size-unit.md` § *Since #617*; `features/273-store-precise-duration-totals.md` (a zero in the source unit; `duration_nice` `0 msec`) | the floor and the zero in the source unit | describe the delivered code; updated when #759 delivers |
+| `docs/usage.md`, the `-du` row; `--help` | the unit the log is read in | stand: no user-facing statement of the floor was found |
+| `releases/v0.19.0.md` | "never below the log's own unit (#617)" | shipped release notes, not edited; 0.20.0's notes carry #759's fix |
+| `features/342-redundant-logic-surfaces-audit-report.md` F2.1, F2.5 | the zero and the per-source-unit decimals, as audit findings | dismissed: the audit points at 444, 524, 617 and 608, read above |
+| `docs/explain/statistics.md` *impact*; `features/616-gated-mean-derivation.md` D20 | impact's duration term is floored at one unit | dismissed: a numeric floor in a computation, not a rendering |
+| `features/224-validate-statistics-test-harness.md`, `features/528-record-lexical-retained-representation.md`, `features/747-harness-checks-on-a-failed-run.md` | `-du us` and `-du ns` as the input unit of harness and memory runs; the `duration_unit_resolved` row a harness needs | dismissed: they read a file's unit |
+| Records matching only on *resolution* | the word in another sense: the histogram's bin resolution, a timestamp's, a measurement's | dismissed |
+
+### 4.3 Finding: the thread-session access-log shape carries microsecond precision
+
+Measured on the first 200,000 lines of the thread-session shape specimen (the
+common-plus-duration-thread-session access log, durations in fractional
+milliseconds): 198,970 durations carry a fraction, 172,848 of them three
+digits, 23,678 two and 2,444 one; trailing zeros are not written, so the
+precision is the most digits seen, not each value's own.
+
+Read as § 2 reads seconds with three decimals, milliseconds with three
+decimals carry microsecond precision. On this shape:
+
+- the unit that follows a zero, reflecting the detected precision, is the
+  microsecond: the `0us` that 444 R17 recorded as a defect, and fixed by
+  rendering a zero in the resolved source unit (`0ms`). 444's finding traced
+  that `0us` to the scaler climbing from its lowest step, not to the file's
+  precision;
+- a value below a millisecond, which 617 D19's ceiling at the millisecond step
+  rounds to a whole millisecond today, is within the precision the file
+  carries (the phase 4 question of § 4.1).
