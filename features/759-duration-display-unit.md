@@ -268,3 +268,10 @@ decimals carry microsecond precision. On this shape:
 - a value below a millisecond, which 617 D19's ceiling at the millisecond step
   rounds to a whole millisecond today, is within the precision the file
   carries (the phase 4 question of § 4.1).
+
+**D1 — On the thread-session shape a zero follows the detected precision:
+`0us`.** Put to the architect with the alternative that 444 R17's fix (a zero
+in the resolved source unit, `0ms`) stands on this shape; the architect chose
+the detected precision. R17's fix gives way on this shape and holds where the
+data carries no finer precision than the millisecond. Locked by the architect
+2026-10-29; recorded on 444 R17.
