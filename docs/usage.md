@@ -120,7 +120,7 @@ An option that takes a count, a byte size or a duration accepts a bare number, o
 | Byte size | `-bmin`, `-bmax`, `-hbmin`, `-hbmax` | bytes | SI, powers of 1000: `B`, `kB`, `MB`, `GB`, `TB`, also `bytes`, `kilobytes`, `megabytes`, `gigabytes`, `terabytes`; IEC, powers of 1024: `KiB`, `MiB`, `GiB`, `TiB`, also `kibibytes`, `mebibytes`, `gibibytes`, `tebibytes`. Each word is accepted in the singular too (`kilobyte`). A bare multiplier is not a byte size: `-bmin 1M` is refused |
 | Count | `-cmin`, `-cmax`, `-hcmin`, `-hcmax`, `-n`, `-gc` | a count | `k`, `M`, `B`, `T` (a thousand to a trillion), also `kil`, `Mil`, `Bil`, `G`, `Tril` and `thousand`, `million`, `billion`, `trillion` |
 
-A filter or highlight bound accepts a fraction and applies it as written: `-dmin 0.2` and `-dmin 200us` keep entries of 0.2 ms and more, and `-bmin 1.5kB` is 1500 bytes. A bound cannot be negative. A count the tool acts on (`-n`, `-gc`) must come to a whole number: `-n 1.5k` is 1500, while `-n 2.5` is refused. A duration bound written in a unit finer than the one the log's durations are recorded in is applied as written, with a note saying so.
+A filter or highlight bound accepts a fraction and applies it as written: `-dmin 0.2` and `-dmin 200us` keep entries of 0.2 ms and more, and `-bmin 1.5kB` is 1500 bytes. A bound cannot be negative. A count the tool acts on (`-n`, `-gc`) must come to a whole number: `-n 1.5k` is 1500, while `-n 2.5` is refused. A duration bound written in a unit finer than the precision the log's durations carry is applied as written, with a note saying so: seconds written with three decimals carry the millisecond.
 
 ### Recording & Processing
 

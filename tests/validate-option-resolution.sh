@@ -42,6 +42,7 @@ CONTRACT_DECL='features/605-input-units.md § 4 D1 (one declaration of the bound
 CONTRACT_NEG='features/605-input-units.md § 4 D2 (a negative bound is a usage error, checked at settlement beside the inverted-range check) and § 5.5'
 
 SUBMS_FIXTURE="$REPO_DIR/tests/fixtures/access-bracketed-sub-millisecond.txt"
+SPREAD_SECONDS_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread-seconds.txt"
 
 CONTRACT_UNITS='features/605-input-units.md section 2.2 and section 5.3 (one parse for a quantity: a bare number as it stands, a unit read in the option'"'"'s kind only)'
 CONTRACT_SECTION='features/605-input-units.md section 5.6 (the -V option-resolution section) and section 4 D17'
@@ -495,35 +496,55 @@ scenario_inverted_range_quotes() {
 }
 
 # ---------------------------------------------------------------------------
-# AC13: a duration bound typed in a unit finer than the log's declared one
-# gets a note; a bare number or a unit no finer does not; the bound applies
-# either way. The boundary fixture's format declares milliseconds.
+# AC13: a duration bound typed in a unit finer than the precision the log's
+# durations carry gets a note naming that precision; a bare number or a unit
+# no finer does not; the bound applies either way. The precision is the unit
+# the durations are read in descended by the decimals they are written with,
+# on every format (features/759-duration-precision-rendering.md AC9): the
+# boundary fixture writes whole milliseconds; the seconds fixture, read with
+# -du s, seconds with three decimals (the millisecond); the bracketed fixture
+# writes [150us] on each line (the microsecond).
 # ---------------------------------------------------------------------------
 scenario_finer_bound_note() {
     current_scenario="finer-bound-note"
     echo "[$current_scenario]"
-    local note='-dmin 200us | is finer than the log'"'"'s durations, which are recorded in milliseconds'
+    local contract='features/605-input-units.md section 4 D22, section 6 AC13; features/759-duration-precision-rendering.md AC9'
+    local note='-dmin 200us | is finer than the log'"'"'s durations, which are recorded to the millisecond'
     run_ltl finer-us -ni -bs 1440 -oe -n 1 -V filter-summary,notices -dmin 200us "$BOUNDARY_FIXTURE"
     local got
     got="$(notice_field "$TMP_DIR/finer-us.out" bound-finer-than-log focus) | $(notice_field "$TMP_DIR/finer-us.out" bound-finer-than-log statement)"
-    if [[ "$got" == "$note" ]]; then pass_with "-dmin 200us notes the finer unit"; else
-        fail_with "-dmin 200us notes the finer unit" 'A duration bound typed in a unit finer than the log records gets a note quoting it as typed and naming the log unit' \
-            'note_finer_duration_bounds() in ltl' 'features/605-input-units.md section 4 D22, section 6 AC13' "expected: $note" "record:   $got"
+    if [[ "$got" == "$note" ]]; then pass_with "-dmin 200us on whole milliseconds notes the finer bound"; else
+        fail_with "-dmin 200us on whole milliseconds notes the finer bound" 'A duration bound typed in a unit finer than the precision the log carries gets a note quoting it as typed and naming that precision' \
+            'note_finer_duration_bounds() in ltl' "$contract" "expected: $note" "record:   $got"
     fi
     local value
     for value in 2ms 0.2; do
         run_ltl "finer-$value" -ni -bs 1440 -oe -n 1 -V filter-summary,notices -dmin "$value" "$BOUNDARY_FIXTURE"
         check "-dmin $value prints no note" "$(notice_kind_count "$TMP_DIR/finer-$value.out" bound-finer-than-log)" 0 \
-            'A bare number, or a unit no finer than the log records, gets no note' 'note_finer_duration_bounds() in ltl' 'features/605-input-units.md section 4 D22, section 6 AC13'
+            'A bare number, or a unit no finer than the precision the log carries, gets no note' 'note_finer_duration_bounds() in ltl' "$contract"
     done
     check "-dmin 200us applies as -dmin 0.2" "$(line_value finer-us excluded_numeric)" "$(line_value finer-0.2 excluded_numeric)" \
         'The note clamps nothing: the bound applies as written' 'note_finer_duration_bounds() and read_and_process_logs() in ltl' 'features/605-input-units.md section 4 D22'
-    # A format whose lines each name their unit ([150us]) declares 'line', not a
-    # unit: there is no declared unit to be finer than, so no note.
+    # Seconds written with three decimals carry the millisecond: a millisecond
+    # bound is not finer, a microsecond one is.
+    run_ltl finer-s-ms -ni -bs 1440 -oe -n 1 -V filter-summary,notices -du s -dmin 50ms "$SPREAD_SECONDS_FIXTURE"
+    check "-du s -dmin 50ms on seconds with three decimals prints no note" "$(notice_kind_count "$TMP_DIR/finer-s-ms.out" bound-finer-than-log)" 0 \
+        'Seconds written with three decimals carry the millisecond, so a bound in milliseconds is not finer than the log records' 'note_finer_duration_bounds() in ltl; resolve_duration_precision()' "$contract"
+    run_ltl finer-s-us -ni -bs 1440 -oe -n 1 -V filter-summary,notices -du s -dmin 200us "$SPREAD_SECONDS_FIXTURE"
+    check "-du s -dmin 200us on seconds with three decimals names the millisecond" "$(notice_field "$TMP_DIR/finer-s-us.out" bound-finer-than-log statement)" \
+        "is finer than the log's durations, which are recorded to the millisecond" \
+        'The note names the precision the durations carry, never the unit they are read in' 'note_finer_duration_bounds() in ltl; resolve_duration_precision()' "$contract"
+    # A format whose lines each name their unit ([150us]) gets its precision
+    # from the durations read from it, as every other format does.
     run_ltl finer-line -ni -bs 1440 -oe -n 1 -V filter-summary,notices -dmin 200us "$SUBMS_FIXTURE"
-    check "-dmin 200us on a log naming its unit per line prints no note" "$(notice_kind_count "$TMP_DIR/finer-line.out" bound-finer-than-log)" 0 \
-        'A log whose lines each name their own duration unit declares no unit to compare a bound with, so a sub-millisecond bound gets no note' \
-        'note_finer_duration_bounds() in ltl (a declaration of line contributes no unit)' 'features/605-input-units.md section 4 D22 and D30'
+    check "-dmin 200us on a log naming its unit per line ([150us]) prints no note" "$(notice_kind_count "$TMP_DIR/finer-line.out" bound-finer-than-log)" 0 \
+        'Durations written [150us] carry the microsecond, so a bound in microseconds is not finer' \
+        'note_finer_duration_bounds() in ltl; resolve_duration_precision() (the unit written on the line)' "$contract"
+    run_ltl finer-line-ns -ni -bs 1440 -oe -n 1 -V filter-summary,notices -dmin 200ns "$SUBMS_FIXTURE"
+    check "-dmin 200ns on a log naming its unit per line names the microsecond" "$(notice_field "$TMP_DIR/finer-line-ns.out" bound-finer-than-log statement)" \
+        "is finer than the log's durations, which are recorded to the microsecond" \
+        'A log whose lines each name their own duration unit is compared like any other: by the precision of the durations read from it' \
+        'note_finer_duration_bounds() in ltl; resolve_duration_precision() (the unit written on the line)' "$contract"
 }
 
 # ---------------------------------------------------------------------------

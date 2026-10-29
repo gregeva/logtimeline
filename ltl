@@ -2491,6 +2491,17 @@ sub fraction_precision {
     return $finer[ $steps > @finer ? $#finer : $steps - 1 ];
 }
 
+# The finest of some time-ladder tokens (undef for none), and a token's name
+# in the singular (the millisecond, the second) for a sentence.
+sub finest_time_unit {
+    return ( sort { $time_unit_step{$a}{ms} <=> $time_unit_step{$b}{ms} } @_ )[0];
+}
+
+sub time_unit_singular {
+    ( my $name = $time_unit_step{ $_[0] }{long} ) =~ s/s$//;
+    return $name;
+}
+
 # The precision an index row's timestamps were written at: its ts_precision
 # column when that names a precision step, otherwise (a row written before the
 # column was filled, carrying -) the precision its stored fraction's digits
@@ -14464,8 +14475,6 @@ sub gc_heap_size_bytes {
 # annotation.
 sub resolve_timestamp_precision {
     my $coarsest = sub { (sort { $time_unit_step{$b}{ms} <=> $time_unit_step{$a}{ms} } @_)[0] };
-    my $finest   = sub { (sort { $time_unit_step{$a}{ms} <=> $time_unit_step{$b}{ms} } @_)[0] };
-    my $name     = sub { (my $n = $time_unit_step{ $_[0] }{long}) =~ s/s$//; $n };
     my $asked    = $timestamp_precision;
     my %file_precision;
     for my $file (@in_files) {
@@ -14481,7 +14490,7 @@ sub resolve_timestamp_precision {
         }
         $file_precision{$file} = $coarsest->(@found) if @found;
     }
-    my $limit = %file_precision ? $finest->(values %file_precision) : undef;
+    my $limit = %file_precision ? finest_time_unit(values %file_precision) : undef;
     return if !defined $limit || $time_unit_step{$timestamp_precision}{ms} >= $time_unit_step{$limit}{ms};
 
     my $carry = sub { $_[0] eq 's' ? 'whole seconds' : $time_unit_step{ $_[0] }{long} };
@@ -14490,10 +14499,10 @@ sub resolve_timestamp_precision {
         ? (keys %file_precision == 1 ? "the log's timestamps carry " : "the logs' timestamps carry ") . $carry->($limit)
         : "the logs' timestamps carry " . join(', ', map { $carry->($file_precision{$_}) . " in $_" } grep { exists $file_precision{$_} } @in_files);
     my $narrower = $bucket_size_seconds < $time_unit_step{$limit}{ms} / 1000
-        ? "; at a bucket width below a " . $name->($limit) . ", only the buckets that start on a whole " . $name->($limit) . " can hold a line"
+        ? "; at a bucket width below a " . time_unit_singular($limit) . ", only the buckets that start on a whole " . time_unit_singular($limit) . " can hold a line"
         : '';
     notice( kind => 'timestamp-precision-coarser', category => 'decision_taken_for_you',
-            statement => 'timestamps are shown to the ' . $name->($limit) . ': ' . $name->($asked) . " precision was asked for, and $what$narrower" );
+            statement => 'timestamps are shown to the ' . time_unit_singular($limit) . ': ' . time_unit_singular($asked) . " precision was asked for, and $what$narrower" );
 
     $timestamp_precision = $limit;
     $option_overrides{'timestamp-precision'}{clamped_from} = $asked;
@@ -14528,34 +14537,26 @@ sub resolve_duration_precision {
             }
         }
     }
-    ($duration_precision) = sort { $time_unit_step{$a}{ms} <=> $time_unit_step{$b}{ms} } @found;
-    $duration_precision //= $duration_unit_resolved;
+    $duration_precision = finest_time_unit(@found) // $duration_unit_resolved;
     @csv_family_decimals{qw(duration percentile)} = ( $time_unit_step{$duration_precision}{decimals} ) x 2
         if $csv_precision eq 'default';
     return;
 }
 
-# A duration bound typed in a unit finer than the one the log's durations are
-# recorded in gets a note, once, after the read; the bound is applied as
-# written. The log's unit is the declared one: -du when given, else the
-# duration unit each file's format declares (the finest of them when they
-# differ); a bare number is in milliseconds and is never finer. A format whose
-# lines each name their own unit ('line') declares no unit to compare with.
+# A duration bound typed in a unit finer than the precision the log's
+# durations carry gets a note, once, after the read; the bound is applied as
+# written. The precision is the one resolve_duration_precision() resolves, on
+# every format, the one whose lines name their own unit included; a run whose
+# formats carry no duration has none to compare with, and a bare number is in
+# milliseconds and is never finer.
 sub note_finer_duration_bounds {
-    my @declared = map {
-        my $declared = $format_detection{$_} ? $format_detection{$_}{duration_unit} : undef;
-        ( defined $declared && $declared eq 'line' ) ? ()
-            : defined $duration_unit_override ? time_unit_canonical($duration_unit_override)
-            : $declared
-    } @in_files;
-    @declared = grep { defined && exists $time_unit_step{$_} } @declared;
-    return unless @declared;
-    my ($finest) = sort { $time_unit_step{$a}{ms} <=> $time_unit_step{$b}{ms} } @declared;
+    return unless grep { $format_detection{$_} && defined $format_detection{$_}{duration_unit} } @in_files;
+    my $precision = $duration_precision // return;
     for my $row (grep { $_->{kind} eq 'duration' } @quantity_options) {
         my $unit = $quantity_unit_entered{ $row->{long} } // next;
-        next unless $time_unit_step{$unit}{ms} < $time_unit_step{$finest}{ms};
+        next unless $time_unit_step{$unit}{ms} < $time_unit_step{$precision}{ms};
         notice( kind => 'bound-finer-than-log', category => 'your_options', focus => quantity_option_flag($row) . " $quantity_entered{ $row->{long} }",
-                statement => "is finer than the log's durations, which are recorded in $time_unit_step{$finest}{long}" );
+                statement => "is finer than the log's durations, which are recorded to the " . time_unit_singular($precision) );
     }
     return;
 }
