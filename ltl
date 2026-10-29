@@ -1496,6 +1496,7 @@ my $csv_precision                  = 'default';      # 'default' | 'full' | inte
 my $csv_precision_source           = 'default';      # 'default' | '-cp <value>' | 'LTL_CONFIG'
 my $duration_unit_resolved         = undef;          # final resolved unit, a canonical ladder token
 my $duration_unit_source           = 'default';      # 'default' | '-du <value>' | 'auto-detected from <file>'
+my $duration_precision;                              # the finest unit the run's durations reach, a canonical ladder token: resolve_duration_precision(), after the read
 my %csv_family_decimals;                             # populated during option resolution: family => N decimals
 
 # Issue #266: explicit per-surface statistical data-model selectors. The five
@@ -6367,6 +6368,9 @@ sub format_registry_classify {
 #   formats        => { entry name => count } across all parts
 #   frac_digits    => { entry name => the most fractional digits among that
 #                       format's sampled timestamps, 0 when none carries one }
+#   duration_digits => { entry name => { unit token written on the line, ''
+#                       for a format that declares its unit => the most
+#                       decimals among that format's sampled durations } }
 #   elapsed_us     => wall time of the whole sample
 #
 # The sample also knows the file's size and observes its average line
@@ -6384,16 +6388,19 @@ sub sample_file_for_detection {
     my $bytes = FORMAT_SAMPLE_BYTES;
     my $whole = $size <= $parts * $bytes ? 1 : 0;
 
-    # Timestamp capture ordinal per entry, from the declarative field map.
-    my %ts_ordinal;
+    # Timestamp, duration and duration-unit capture ordinals per entry, from
+    # the declarative field map.
+    my (%ts_ordinal, %duration_ordinal, %unit_token_ordinal);
     for my $e (@format_registry) {
-        my ($pair) = grep { $_->[1] eq 'timestamp_str' } @{ $format_registry_spec{ $e->[FR_NAME] }{field_map} };
-        $ts_ordinal{ $e->[FR_NAME] } = $pair ? $pair->[0] - 1 : undef;
+        my %ordinal = map { $_->[1] => $_->[0] - 1 } @{ $format_registry_spec{ $e->[FR_NAME] }{field_map} };
+        $ts_ordinal{ $e->[FR_NAME] }         = $ordinal{timestamp_str};
+        $duration_ordinal{ $e->[FR_NAME] }   = $ordinal{duration};
+        $unit_token_ordinal{ $e->[FR_NAME] } = $ordinal{duration_unit_token};
     }
 
     my @offsets = $whole ? (0)
                 : map { $_ == $parts - 1 ? $size - $bytes : int($_ * ($size - $bytes) / ($parts - 1)) } 0 .. $parts - 1;
-    my (@lines, @part_obs, %formats, %frac_digits);
+    my (@lines, @part_obs, %formats, %frac_digits, %duration_digits);
     for my $offset (@offsets) {
         seek $sfh, $offset, 0;
         my $buf = '';
@@ -6425,6 +6432,14 @@ sub sample_file_for_detection {
                     $frac_digits{ $e->[FR_NAME] } = $digits
                         if !defined $frac_digits{ $e->[FR_NAME] } || $digits > $frac_digits{ $e->[FR_NAME] };
                 }
+                my $d = $duration_ordinal{ $e->[FR_NAME] };
+                if (defined $d && defined $c[$d]) {
+                    my $u = $unit_token_ordinal{ $e->[FR_NAME] };
+                    my $token = defined $u ? $c[$u] // '' : '';
+                    my $digits = $c[$d] =~ /\.(\d+)/ ? length $1 : 0;
+                    my $seen = \$duration_digits{ $e->[FR_NAME] }{$token};
+                    $$seen = $digits if !defined $$seen || $digits > $$seen;
+                }
             }
         }
         $obs->{avg_line} = $obs->{lines} ? int($line_bytes / $obs->{lines} + 0.5) : 0;
@@ -6434,6 +6449,7 @@ sub sample_file_for_detection {
     return {
         size => $size, parts => scalar(@offsets), bytes_per_part => $bytes, whole => $whole,
         lines => \@lines, part_obs => \@part_obs, formats => \%formats, frac_digits => \%frac_digits,
+        duration_digits => \%duration_digits,
         elapsed_us => tv_interval($t0) * 1e6,
     };
 }
@@ -14489,6 +14505,33 @@ sub resolve_timestamp_precision {
     return;
 }
 
+# The precision the run's durations carry, once, after the read: for each
+# format the detection sample recognised in each file, the unit its durations
+# are read in (-du, else the format's duration_unit; the unit written on the
+# line for a format that names it there) descended by the most decimals the
+# sample saw on them, and the finest of these across the run, so a file
+# written with fewer decimals never lowers it. Where no duration was sampled,
+# the unit read in. A zero renders in it and nothing renders finer.
+sub resolve_duration_precision {
+    my @found;
+    for my $file (@in_files) {
+        my $sample = $format_detection_sample{$file} or next;
+        for my $name (keys %{ $sample->{duration_digits} // {} }) {
+            my $declared = $format_registry_spec{$name} && $format_registry_spec{$name}{duration_unit} // next;
+            for my $token (keys %{ $sample->{duration_digits}{$name} }) {
+                my $unit = $declared eq 'line'                  ? time_unit_canonical($token)
+                         : defined $duration_unit_override      ? $duration_unit_resolved
+                         :                                        $declared;
+                push @found, fraction_precision($unit, $sample->{duration_digits}{$name}{$token})
+                    if defined $unit && exists $time_unit_step{$unit};
+            }
+        }
+    }
+    ($duration_precision) = sort { $time_unit_step{$a}{ms} <=> $time_unit_step{$b}{ms} } @found;
+    $duration_precision //= $duration_unit_resolved;
+    return;
+}
+
 # A duration bound typed in a unit finer than the one the log's durations are
 # recorded in gets a note, once, after the read; the bound is applied as
 # written. The log's unit is the declared one: -du when given, else the
@@ -16518,14 +16561,18 @@ sub significant_decimals {
 # (a built-in metric, a user-defined metric, a thread-pool or session column);
 # one that holds a value of its own names the kind, which states no source
 # unit and so has no floor (the tool's own timings, a coefficient of
-# variation, a percentage). The one resolution of a metric's kind for display.
+# variation, a percentage). The floor of the built-in duration is the
+# precision its raw data carries (resolve_duration_precision()): a zero
+# renders in it and nothing renders finer, while a value above it renders in
+# the unit its magnitude reaches. The one resolution of a metric's kind for
+# display.
 sub resolve_value_kind {
     my (%p) = @_;
     return { kind => $p{kind} } if defined $p{kind};
     my $metric = $p{metric};
     if ( my $builtin = $builtin_metric{$metric} ) {
         my $family = $builtin->{family};
-        return { kind => $family, floor => $family eq 'duration' ? ( $duration_unit_resolved // 'ms' ) : undef };
+        return { kind => $family, floor => $family eq 'duration' ? ( $duration_precision // $duration_unit_resolved // 'ms' ) : undef };
     }
     my $config = udm_config_by_name($metric) or return { kind => 'count' };
     return { kind => 'rate' } if $config->{aggregation} =~ /^(?:rate|drate)$/;
@@ -16716,11 +16763,11 @@ sub value_column {
 
 # A duration climbed up the time-unit ladder and spelled at the tier. An arm
 # of value_text(). Options: floor, the smallest step the value may render in
-# (a source's resolved unit or a metric's declared unit: zero and a value
-# below one unit of it render in it); resolution, the step whose precision
-# bounds the value (a source cannot resolve finer than its own unit: the
-# value is rounded to it before it climbs, and no rendered digit is finer
-# than it); significant, a count of significant digits in place of decimals;
+# (the precision the source's raw data carries, or a metric's: zero and a
+# value below one unit of it render in it); resolution, the step whose
+# precision bounds the value (a source cannot resolve finer than its raw
+# data: the value is rounded to it before it climbs, and no rendered digit is
+# finer than it); significant, a count of significant digits in place of decimals;
 # plain, the value at the floor step, unclimbed. A value that rounds up to the next step's size renders at that step
 # (59,960 ms reads 1 min, not 60 sec).
 sub format_time {
@@ -25701,6 +25748,7 @@ sub pipeline_parse {
     $elapsed_parse_read_files = tv_interval($start_time, $end_time);
     resolve_byte_notation();
     resolve_timestamp_precision();
+    resolve_duration_precision();
     note_finer_duration_bounds();
     measure_memory_structures('phase_boundary');
     memory_debug_decomposition("after_read");
