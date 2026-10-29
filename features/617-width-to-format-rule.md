@@ -345,14 +345,13 @@ issue body; they are restated here, not reinterpreted.
   stated unit." Locked by the architect 2026-09-28.
   **Reversed by the architect 2026-10-29 (#759, a duration's display unit
   follows the unit it is read in):** what is seen on screen is decorrelated from
-  the unit a value is read in; the unit a value is shown in follows the value
-  itself. The architect: "what I am able to see on the screen and what the unit
+  the unit a value is read in and from the precision of the data; the unit a
+  value is shown in follows the value itself. The architect: "what I am able to see on the screen and what the unit
   of measure is for a value are decorrelated." The rule was asked for because
   files rendered `0 microseconds` or `0 nanoseconds` where that precision did not
   exist. Its concern was precision, never the stated unit, and its scope was
-  misunderstood: the stated unit was made the floor of the display. Precision is
-  a limit, never what chooses the unit: no value is shown in a unit implying a
-  precision the data does not carry. A value in seconds written with three
+  misunderstood: the stated unit was made the floor of the display. No value is
+  shown in a unit implying a precision the data does not carry. A value in seconds written with three
   decimals carries millisecond precision and renders in milliseconds when small
   enough to be observed there (0.01 s reads `10ms`, where under D16 it read
   `0s`); it carries no microsecond or nanosecond precision and never renders in
@@ -755,7 +754,8 @@ one rule, so it applies to every kind with a ladder (D12): 59,960 ms reads
 
 *D16 is reversed (2026-10-29, #759): the floor below is the delivered design,
 which #759 replaces. The unit shown follows the value, decorrelated from the
-unit it is read in, and never implies a precision the data does not carry.*
+unit it is read in and from the precision of the data, and never implies a
+precision the data does not carry.*
 
 The duration and byte arms never render a value in a unit smaller than the
 floor: the source's resolved unit for the built-in duration and bytes, the
