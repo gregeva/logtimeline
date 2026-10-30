@@ -238,14 +238,27 @@ criterion 13, three rounds, from a worktree checked out at 6dadde32 beside
 the issue worktree. Drop 2 onward proceed meanwhile, and no other `ltl` runs
 while it is captured. The `after` at drop 6 is compared with it.
 
+**Captured 2026-10-30,** on the architect's word that the machine was quiet:
+`709-before-6dadde32-quiet-1.tsv` to `-3.tsv`, from
+`.claude/worktrees/709-base-6dadde32`, interleaved rounds, the load average
+1.2 to 1.8, no other `ltl` running. Each test's total, median and range:
+
+| Test | Median | Range |
+|---|---|---|
+| `single-day-access-log-standard` | 5.105 s | 5.088 to 5.194 s |
+| `single-day-access-log-top25-consolidate` | 6.723 s | 6.623 to 6.806 s |
+| `single-day-access-log-heatmap-histogram-consolidate` | 9.355 s | 9.159 to 9.625 s |
+| `humungous-log-uniqueness-top25-consolidate` | 3.550 s | 3.409 to 3.878 s |
+
+The rounds' reading stages came within 3.1 % of each other; round 1 of the
+last test alone ran 9 % above its median.
+
 **Done, delivery plan drop 2 (2026-10-30),** on the issue branch
 (§ Drop 2, `83f88bce`): the kept peak at each reporting moment, the macOS
 fallback and its notice, `build/cpanfile.macos` requiring `BSD::Resource`;
 criteria 3, 4, 6, 12 and 14 met, and criterion 1 on macOS.
 
 **Next:**
-- The `before` benchmark at 6dadde32, on the architect's word that the
-  machine is quiet (§ Done, the rebase).
 - Drop 2's runs that cannot be made on this host (§ Drop 2, *Not run on this
   host*): criterion 1 on the Windows development host and on Linux, and
   criterion 7's other half, the packaged macOS binary reporting the kept
@@ -260,8 +273,9 @@ criteria 3, 4, 6, 12 and 14 met, and criterion 1 on macOS.
   5f6c9f9c:ltl`).
 - Then drop 6:
   - restore `$version_number` to `0.20.0`;
-  - run the `after` benchmark (criterion 13) from the issue worktree,
-    against the `before` captured at 6dadde32 (§ Done, the rebase);
+  - run the `after` benchmark (criterion 13) from the issue worktree, three
+    interleaved rounds on a quiet machine, against the `before` captured at
+    6dadde32 (§ Done, the rebase);
   - run the completion gate;
   - open the one PR.
 
@@ -272,6 +286,9 @@ criteria 3, 4, 6, 12 and 14 met, and criterion 1 on macOS.
   (`.claude/worktrees/release-0.20.0`): the evidence of § Done, the rebase,
   superseded by the capture at 6dadde32 on a quiet machine, and deleted at
   close-out.
+- The `before`: `tests/baseline/results/709-before-6dadde32-quiet-1.tsv` to
+  `-3.tsv`, untracked, in `.claude/worktrees/709-base-6dadde32`, a detached
+  worktree at 6dadde32 kept until close-out.
 - The issue worktree, `.claude/worktrees/709-memory-peak-and-unmeasured-stores`.
 
 **Where it can block or move hosts:**
