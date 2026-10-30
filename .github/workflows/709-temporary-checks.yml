@@ -26,21 +26,31 @@ jobs:
           perl -e 'local $/; my $lines = <STDIN>; print $lines x 25000' \
             < tests/fixtures/format-detection/access-combined.txt > /tmp/generated.txt
           wc -l /tmp/generated.txt
+          uname -r
           status=0
-          for mem in "" "-mem"; do
-            /usr/bin/time -v ./ltl --disable-progress -ni -bs 1440 -oe $mem -hg bytes -hgdm raw -h HTTP \
-              -V benchmark-data,memory-usage,notices /tmp/generated.txt > /tmp/run.out 2> /tmp/run.err
-            peak=$(awk -F'\t' '$1 == "MEMORY" && $2 == "rss_peak" { print $3 }' /tmp/run.out)
-            os=$(awk -F': ' '/Maximum resident set size/ { print $2 * 1024 }' /tmp/run.err)
-            echo "options: ${mem:-without -mem}; rss_peak $peak; time -v $os"
-            grep -E '^site: ' /tmp/run.out
-            if grep -E ' at .* line [0-9]+' /tmp/run.err; then echo "::error::runtime warning on stderr"; status=1; fi
-            verdict=$(awk -v p="${peak:-0}" -v o="${os:-0}" 'BEGIN { print (p > 0 && o > 0 && p <= o && p >= 0.99 * o) ? "yes" : "no" }')
-            echo "not above it, and within 1 % below: $verdict"
-            [ "$verdict" = yes ] || { echo "::error::rss_peak $peak against $os (${mem:-without -mem})"; status=1; }
-            grep -q '^site: kept_peak ' /tmp/run.out || { echo "::error::no kept_peak reading (${mem:-without -mem})"; status=1; }
+          for round in 1 2 3 4 5; do
+            for mem in "" "-mem"; do
+              /usr/bin/time -v ./ltl --disable-progress -ni -bs 1440 -oe $mem -hg bytes -hgdm raw -h HTTP \
+                -V benchmark-data,memory-usage,notices /tmp/generated.txt > /tmp/run.out 2> /tmp/run.err
+              peak=$(awk -F'\t' '$1 == "MEMORY" && $2 == "rss_peak" { print $3 }' /tmp/run.out)
+              os=$(awk -F': ' '/Maximum resident set size/ { print $2 * 1024 }' /tmp/run.err)
+              if grep -E ' at .* line [0-9]+' /tmp/run.err; then echo "::error::runtime warning on stderr"; status=1; fi
+              verdict=$(awk -v p="${peak:-0}" -v o="${os:-0}" 'BEGIN { print (p > 0 && o > 0 && p <= o && p >= 0.99 * o) ? "yes" : "no" }')
+              echo "round $round, ${mem:-without -mem}: rss_peak $peak; time -v $os; difference $(( ${peak:-0} - ${os:-0} )); not above it and within 1 % below: $verdict; $(grep -E '^site: kept_peak ' /tmp/run.out)"
+              [ "$verdict" = yes ] || { echo "::error::rss_peak $peak against $os (${mem:-without -mem})"; status=1; }
+              grep -q '^site: kept_peak ' /tmp/run.out || { echo "::error::no kept_peak reading (${mem:-without -mem})"; status=1; }
+            done
           done
           exit $status
 
       - name: "Criteria 3, 4, 6 and 12: the memory harness"
+        if: always()
         run: ./tests/validate-memory-usage.sh
+
+      - name: "The benchmark-rows scenario on the base code, 6dadde32"
+        if: always()
+        run: |
+          git fetch --no-tags --depth=1 origin 6dadde3273b83028ee3e3e589d0257e2cd286221
+          git show 6dadde3273b83028ee3e3e589d0257e2cd286221:ltl > /tmp/ltl-base
+          chmod +x /tmp/ltl-base
+          LTL=/tmp/ltl-base ./tests/validate-memory-usage.sh --scenario benchmark-rows
