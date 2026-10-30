@@ -14495,10 +14495,12 @@ sub grouping_structure_names {
 
 # Issue #45: Measure all data structures and update high-water marks
 # Called after each major subroutine to capture peak memory usage; $site names
-# the caller for the -V memory-usage reading counts.
+# the caller for the -V memory-usage reading counts. Without -mem the kept
+# peak serves every peak reported, so no reading is taken here, unless the
+# kept peak cannot be read and these readings are the run's peak.
 sub measure_memory_structures {
     my ($site) = @_;
-    # Always capture RSS high-water mark
+    return unless $show_memory || !$kept_peak_readable;
     $current_memory_usage = get_memory_usage($site);
     if ($current_memory_usage > $max_memory_usage) {
         $max_memory_usage = $current_memory_usage;

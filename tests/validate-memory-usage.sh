@@ -8,8 +8,9 @@
 # totals, the format-registry compile count the compile callers are measured
 # against, and the comparison tool's treatment of the reading time.
 #
-# Every run passes -mem: on Windows a run without it takes no reading, so the
-# counts asserted here would not be reached there.
+# The runs that count readings between steps pass -mem: without it, where the
+# peak the operating system keeps can be read, no reading is taken between
+# steps (no-mem-readings asserts that).
 #
 # Each assertion records, per tests/HARNESS-DESIGN.md § Self-documenting
 # assertions: asserts, produced_by (function name), contract. All three are
@@ -44,6 +45,7 @@ C_DEBUG="$DOC § Decisions D5, D6 and the section contract; criteria 10 and 11"
 C_BENCH="$DOC § -V memory-usage section contract (benchmark-data); criterion 12"
 C_MAP="$DOC § Issue #709 › Acceptance criteria 9 and 10, § Store inventory; § Issue #356 Specification S3 and S5; features/memory-baseline-profiling.md DD-03"
 C_PEAK="$DOC § Issue #709 › Decisions D1 and D2; Acceptance criteria 3, 4, 6 and 12; § -V memory-usage section contract"
+C_NOMEM="$DOC § Issue #709 › Decisions (following from D1 and D2: without -mem, no reading is taken between steps); Acceptance criterion 5"
 
 # The callers of the section contract, in the order their lines print.
 SITE_ORDER="kept_peak,phase_boundary,grouping_checkpoint,grouping_final_pass,format_scan_compile,csv_block_compile,debug_decomposition,debug_sample"
@@ -506,15 +508,58 @@ scenario_peak_fallback() {
     printf '%s\n' 'package hide_bsd_resource;' \
         'unshift @INC, sub { die "Can'"'"'t locate BSD/Resource.pm in \@INC (hidden by the harness)\n" if $_[1] eq "BSD/Resource.pm"; return };' \
         '1;' > "$TMP_DIR/hide/hide_bsd_resource.pm"
-    PERL5OPT="-I$TMP_DIR/hide -Mhide_bsd_resource" run_ltl hidden -bs 1440 -oe -mem -V benchmark-data,memory-usage,notices "$ACCESS_FIXTURE"
+    # Without -mem: the readings between steps are taken for the fallback alone.
+    PERL5OPT="-I$TMP_DIR/hide -Mhide_bsd_resource" run_ltl hidden -bs 1440 -oe -V benchmark-data,memory-usage,notices "$ACCESS_FIXTURE"
     produced hidden $'^MEMORY\trss_peak\t' 'the fallback' || return 0
 
     check "the notice, once, in the panel" "$(notice_kind_count "$TMP_DIR/hidden.out" memory-unreadable)|$(notice_field "$TMP_DIR/hidden.out" memory-unreadable evidence | grep -c 'BSD::Resource module.*is not installed' || true)|$(notice_field "$TMP_DIR/hidden.out" memory-unreadable stage)|$(notice_field "$TMP_DIR/hidden.out" memory-unreadable shown)" "1|1|detect|panel" \
         'Without BSD::Resource on macOS the run raises the memory-unreadable notice once, naming the module, as the pipeline starts, and draws it in the panel rather than in the options review' \
         'resolve_kept_peak_reading() from pipeline_detect() in ltl' "$C_PEAK"
     check "the readings' peak, from the readings between steps" "$(site hidden kept_peak readings)|$(site hidden phase_boundary readings)|$([[ "$(bench hidden MEMORY rss_peak)" -gt 0 ]] && echo peak || echo no-peak)" "|5|peak" \
-        'The fallback reads no kept peak; the readings between steps are taken and their peak is reported' \
+        'The fallback reads no kept peak; the readings between steps are taken, without -mem too, and their peak is reported' \
         'read_run_peak_memory() and measure_memory_structures() in ltl' "$C_PEAK"
+}
+
+# ---------------------------------------------------------------------------
+# Without -mem no reading is taken between steps: the kept peak is read once
+# at each reporting moment, and the compile readings stay where a memory
+# surface armed them. Where the kept peak cannot be read (the notice says so),
+# the readings between steps are the run's peak and are taken.
+# -bs 1440 -oe: no check reads the time axis.
+# ---------------------------------------------------------------------------
+# between_steps <tag>: the phase-boundary and grouping callers listed.
+between_steps() { site_names "$1" | tr ',' '\n' | awk '/^(phase_boundary|grouping_checkpoint|grouping_final_pass)$/' | paste -sd, -; }
+
+scenario_no_mem_readings() {
+    current_scenario="no-mem-readings"
+    echo "[$current_scenario]"
+    local tag unreadable want_steps want_peak
+    for tag in plain grouped; do
+        if [[ "$tag" == plain ]]; then
+            run_ltl "nomem-$tag" -bs 1440 -oe -V memory-usage,notices "$ACCESS_FIXTURE"
+        else
+            run_ltl "nomem-$tag" -bs 1440 -oe -g -V memory-usage,notices "$ACCESS_FIXTURE"
+        fi
+        produced "nomem-$tag" '^=== memory-usage ===$' "readings without -mem ($tag)" || continue
+        unreadable=$(notice_kind_count "$TMP_DIR/nomem-$tag.out" memory-unreadable)
+        # The summary is the one reporting moment of these runs.
+        if [[ "$unreadable" == 0 ]]; then want_steps=""; want_peak=1
+        elif [[ "$tag" == grouped ]]; then want_steps="phase_boundary,grouping_checkpoint,grouping_final_pass"; want_peak=""
+        else want_steps=phase_boundary; want_peak=""; fi
+        check "no reading between steps, one kept peak ($tag)" "$(between_steps "nomem-$tag")|$(site "nomem-$tag" kept_peak readings)" "$want_steps|$want_peak" \
+            'Without -mem the run takes no phase-boundary or grouping reading and reads the kept peak once, before the summary; where the kept peak is unreadable it takes the readings between steps instead' \
+            'measure_memory_structures() and read_run_peak_memory() in ltl' "$C_NOMEM"
+    done
+
+    printf 'timestamp,latency\n2026-06-01 10:00:05,12\n2026-06-01 10:01:05,34\n2026-06-01 10:02:05,56\n' > "$TMP_DIR/nomem-metrics.csv"
+    run_ltl nomem-csv -bs 1440 -oe -udm latency:ms:mean -V memory-usage,benchmark-data,notices "$TMP_DIR/nomem-metrics.csv"
+    if produced nomem-csv '^=== memory-usage ===$' 'readings without -mem (csv)'; then
+        unreadable=$(notice_kind_count "$TMP_DIR/nomem-csv.out" memory-unreadable)
+        if [[ "$unreadable" == 0 ]]; then want_steps=""; want_peak=2; else want_steps=phase_boundary; want_peak=""; fi
+        check "the compile readings stay, the steps take none (csv)" "$(between_steps nomem-csv)|$(site nomem-csv kept_peak readings)|$(site nomem-csv csv_block_compile readings)" "$want_steps|$want_peak|2" \
+            'Without -mem, under -V benchmark-data, the CSV block compile still reads before and after, the kept peak is read for benchmark-data and the summary, and no reading is taken between steps' \
+            'compile_csv_block(), measure_memory_structures() and read_run_peak_memory() in ltl' "$C_NOMEM"
+    fi
 }
 
 scenario_register phase-boundary \
@@ -527,7 +572,8 @@ scenario_register phase-boundary \
                   memory-map \
                   peak-consumers \
                   peak-not-below-readings \
-                  peak-fallback
+                  peak-fallback \
+                  no-mem-readings
 scenario_parse_args "$@"
 
 if [[ ! -x "$LTL" ]]; then
@@ -552,6 +598,7 @@ while read -r _scenario; do
         peak-consumers ) scenario_peak_consumers ;;
         peak-not-below-readings ) scenario_peak_not_below_readings ;;
         peak-fallback  ) scenario_peak_fallback ;;
+        no-mem-readings ) scenario_no_mem_readings ;;
     esac
 done < <(scenario_selected)
 
