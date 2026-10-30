@@ -5,7 +5,6 @@
 #
 # Requirements:
 #   - Rancher Desktop (https://rancherdesktop.io/)
-#   - cpanfile generated (run ./build/generate-cpanfile.sh first)
 #
 # Usage:
 #   ./build/windows-package.sh
@@ -38,11 +37,9 @@ echo "Windows Build: ${PACKAGE_NAME}.exe"
 echo "Architecture: ${architecture}"
 echo "=========================================="
 
-# Check cpanfile.windows exists
-if [ ! -f "build/cpanfile.windows" ]; then
-    echo "[error] Missing build/cpanfile.windows - run ./build/generate-cpanfile.sh first"
-    exit 1
-fi
+# The container installs the Windows modules: generate their file for this
+# build, whatever the host
+./build/generate-cpanfile.sh "$SCRIPT_NAME" windows
 
 docker run --rm --platform=linux/$architecture \
    -e PACKAGE_NAME -e SCRIPT_NAME -e GITHUB_TOKEN="${GITHUB_TOKEN:-}" \
