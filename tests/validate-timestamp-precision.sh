@@ -33,6 +33,7 @@ scenario_register \
     carry/next-day \
     truncate/second-precision \
     index/older-row-fresh \
+    index/older-row-part-group \
     option/values \
     option/equivalence \
     option/width-separate \
@@ -120,7 +121,7 @@ printf '%s\n' \
 printf '%s\n' \
     '2026-01-26 10:00:01,123456789 [main] INFO  com.example.Service - first line' \
     '2026-01-26 10:00:02,999999999 [main] INFO  com.example.Service - second line' > "$NINE"
-# TWO carries two-digit fractions, which complete no millisecond.
+# TWO carries two-digit fractions: a millisecond whose trailing zero is not written.
 printf '%s\n' \
     '2026-01-26 10:00:01,12 [main] INFO  com.example.Service - first line' \
     '2026-01-26 10:00:02,45 [main] INFO  com.example.Service - second line' > "$TWO"
@@ -399,6 +400,33 @@ else
         "the index's file_mtime keeps its whole-second ISO form, so a row an earlier build wrote is still matched by string equality with the on-disk time" \
         'format_timestamp() in ltl, called by read_index_file() (freshness)' "$CONTRACT_INDEX" \
         "file_mtime written: $written (wanted $old_form)" "freshness: ${fresh:-MISSING-ANCHOR:freshness}"
+fi
+fi
+
+if scenario_wanted index/older-row-part-group; then
+current_scenario="index/older-row-part-group"
+# -idx -ms: the index is the subject. A row written before the ts_precision
+# column was filled carries '-', and its precision is read from its stored
+# first_timestamp's digits. The rows are rewritten to that form with a
+# two-digit fraction later than the line's own (.13 against .123): read to the
+# millisecond the line is earlier than the row, a drift; read to the second
+# the two are the same second, none.
+d="$TMP_DIR/partgroup"
+mkdir -p "$d"
+cp "$THREE" "$d/three.log"
+run_in partgroup "${COMMON[@]}" -idx -ms -bs 1000 three.log
+perl -i -F, -lane 'BEGIN { $, = "," } if ($. == 1) { %c = map { $F[$_] => $_ } 0 .. $#F } elsif ($F[ $c{ts_precision} ] eq "ms") { $F[ $c{ts_precision} ] = "-"; $F[ $c{first_timestamp} ] =~ s/T10:00:01\.123$/T10:00:01.13/ } print @F' "$d/ltl-index.csv"
+written="$(index_cell "$d" file first_timestamp) $(index_cell "$d" file ts_precision)"
+run_in partgroup "${COMMON[@]}" -idx -V index-read-back -ms -bs 1000 three.log
+drift=$(awk '/^=== index-read-back ===/ {s=1; next} s && /^  first_timestamp: live=/ {print $NF; exit}' "$d/out.txt")
+if [[ "$written" == "2026-01-26T10:00:01.13 -" && "$drift" == "drifted=yes" ]]; then
+    pass_with "an older row whose first timestamp carries two digits is read to the millisecond"
+else
+    fail_with "an older row whose first timestamp carries two digits is read to the millisecond" \
+        "a part-group of digits is a full group whose trailing zeros are not written: .13 is .130, a millisecond, so the line at .123 is earlier than the row" \
+        'index_row_precision() in ltl, through fraction_precision(); detect_index_drift()' \
+        "features/759-duration-precision-rendering.md D4; features/525-timestamp-precision-option.md § 6.4" \
+        "row written: ${written} (wanted 2026-01-26T10:00:01.13 -)" "first_timestamp drift: ${drift:-MISSING-ANCHOR:first_timestamp drift line}"
 fi
 fi
 
@@ -846,7 +874,7 @@ fi
 # ---------------------------------------------------------------------------
 # The precision the log carries (D4, D10)
 # ---------------------------------------------------------------------------
-CONTRACT_D4_CLAMP='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains, with a stderr notice) and D10 (read from the timestamp field'"'"'s stated unit and its digits); § 6.4 (proposed: a fraction not a multiple of three covers the steps its digits complete; a file whose precision cannot be read sets no limit); D4 as amended 2026-10-08 (several files: the request gives way only to the finest precision any processed file carries)'
+CONTRACT_D4_CLAMP='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains, with a stderr notice) and D10 (read from the timestamp field'"'"'s stated unit and its digits); § 6.4 (a part-group of digits descends one step as a full group does, features/759-duration-precision-rendering.md D4; a file whose precision cannot be read sets no limit); D4 as amended 2026-10-08 (several files: the request gives way only to the finest precision any processed file carries)'
 
 # note_lines DIR — the precision notices on the run's stderr.
 note_lines() {
@@ -902,12 +930,18 @@ fi
 
 if scenario_wanted truth/ladder; then
 current_scenario="truth/ladder"
+# A part-group of digits is a full group whose trailing zeros are not written:
+# four digits are a microsecond, two a millisecond.
 run_in tl-carry "${COMMON[@]}" -ni -bs 1 -tp us "$CARRY"
-expect_note "a four-digit fraction resolves to the millisecond" "$TMP_DIR/tl-carry" \
-    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+expect_note "a four-digit fraction resolves to the microsecond: -tp us, no notice" "$TMP_DIR/tl-carry" ""
+run_in tl-carry-ns "${COMMON[@]}" -ni -bs 1 -tp ns "$CARRY"
+expect_note "a four-digit fraction resolves to the microsecond: -tp ns, the notice names it" "$TMP_DIR/tl-carry-ns" \
+    "Note: timestamps are shown to the microsecond: nanosecond precision was asked for, and the log's timestamps carry microseconds"
 run_in tl-two "${COMMON[@]}" -ni -bs 1 -tp ms "$TWO"
-expect_note "a two-digit fraction resolves to the second" "$TMP_DIR/tl-two" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+expect_note "a two-digit fraction resolves to the millisecond: -tp ms, no notice" "$TMP_DIR/tl-two" ""
+run_in tl-two-us "${COMMON[@]}" -ni -bs 1 -tp us "$TWO"
+expect_note "a two-digit fraction resolves to the millisecond: -tp us, the notice names it" "$TMP_DIR/tl-two-us" \
+    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
 run_in tl-fixed3 "${COMMON[@]}" -ni -bs 1 -tp us "$FIXED3"
 expect_note "a fixed three-digit format resolves to the millisecond it declares" "$TMP_DIR/tl-fixed3" \
     "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
@@ -1010,12 +1044,12 @@ if scenario_wanted truth/structure; then
 current_scenario="truth/structure"
 defs=$(grep -cE '^sub fraction_precision\b' "$LTL" || true)
 callers=$(perl -ne '$s = $1 if /^sub (\w+)/; print "$s\n" if /fraction_precision\(/ && $s ne "fraction_precision"' "$LTL" | sort -u | tr '\n' ' ')
-if [[ "$defs" == 1 && "$callers" == "index_row_precision resolve_timestamp_precision " ]]; then
-    pass_with "one digits-to-precision rule, read from the ladder, serves the clamp and the index"
+if [[ "$defs" == 1 && "$callers" == "index_row_precision resolve_duration_precision resolve_timestamp_precision udm_precision " ]]; then
+    pass_with "one digits-to-precision rule, read from the ladder, serves the clamp, the index and the durations' precision"
 else
-    fail_with "one digits-to-precision rule, read from the ladder, serves the clamp and the index" \
-        "the precision a fraction's digits carry is resolved by one sub that walks the time-unit ladder from the field's stated unit; no other sub keeps a digit table" \
-        'fraction_precision() in ltl' "$CONTRACT_D4_CLAMP" "definitions: $defs" "callers: $callers"
+    fail_with "one digits-to-precision rule, read from the ladder, serves the clamp, the index and the durations' precision" \
+        "the precision a fraction's digits carry is resolved by one sub that walks the time-unit ladder from the stated unit, for timestamps and durations alike; no other sub keeps a digit table" \
+        'fraction_precision() in ltl' "$CONTRACT_D4_CLAMP; features/759-duration-precision-rendering.md D4 (one rule for timestamps and durations)" "definitions: $defs" "callers: $callers"
 fi
 fi
 

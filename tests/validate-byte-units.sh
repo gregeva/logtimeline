@@ -47,6 +47,8 @@ GC_PREFIX_FIXTURE="$REPO_DIR/tests/fixtures/gc-heap-byte-units.txt"
 # 1500000 bytes. At -bs 1 each line is its own bucket, so the STATS
 # bytes_nice cells read the formatter's answer for each size in turn.
 BOUNDARY_FIXTURE="$REPO_DIR/tests/fixtures/byte-boundary.txt"
+THREAD_SESSION_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/access-thread-session.txt"
+SPREAD_SECONDS_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread-seconds.txt"
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -64,6 +66,7 @@ CONTRACT_OPTION='features/608-byte-unit-ladder.md D7 and D17 (one notation per r
 CONTRACT_DECLARE='features/608-byte-unit-ladder.md D7 and D12 (a format declares its byte notation in its spec; the Java GC format declares IEC)'
 CONTRACT_MIXED='features/608-byte-unit-ladder.md D13 and D20 (IEC only when every file declares IEC, else SI with one notice; no notice under -bn; an unrecognised file declares nothing)'
 CONTRACT_REACH='features/608-byte-unit-ladder.md D15 (the run notation reaches every byte string, the memory rows and the export included)'
+CONTRACT_PRECISION='features/759-duration-precision-rendering.md AC8 (the CSV duration and percentile decimals follow the precision the durations carry)'
 CONTRACT_STRUCT='features/608-byte-unit-ladder.md D5 (one byte ladder; no sub keeps a table of its own), D8 (help rows interpolate the ladder lists) and D9/D18 (decimals are a field of the time-ladder step)'
 CONTRACT_GC_IEC="features/609-gc-heap-suffix-convention.md D1 (the letter of a GC heap figure is an IEC prefix: K, M, G, T are KiB, MiB, GiB, TiB) and D2 (read on the one ladder at the notation the format declares, not the run output notation)"
 
@@ -412,7 +415,11 @@ PL
 # ---------------------------------------------------------------------------
 # Criterion 15 — the step's decimals are the source's resolution relative to
 # millisecond storage: -V csv-output reports 6 under -du ns, 3 under -du us,
-# 0 under -du ms and -du m; -cp 9 gives nine back.
+# 0 under -du ms and -du m on whole values; -cp 9 gives nine back. The
+# resolution is the precision the durations carry
+# (features/759-duration-precision-rendering.md AC8): milliseconds written
+# with three decimals report 3 and write them, seconds written with three
+# decimals under -du s report 0.
 # ---------------------------------------------------------------------------
 scenario_ladder_decimals() {
     current_scenario="ladder-decimals"
@@ -424,9 +431,22 @@ scenario_ladder_decimals() {
         run_ltl_in "$dir" run --disable-progress -ni -bs 1440 -oe -o -du "$unit" -V csv-output "$BOUNDARY_FIXTURE"
         got=$(sed -nE 's/^decimals_duration: //p' "$dir/run.out" | head -1)
         expect_equal "-du $unit: decimals_duration $want" "${got:-MISSING-ANCHOR}" "$want" \
-            'The CSV duration family takes the resolved unit step decimals' \
-            'adapt_to_command_line_options() in ltl ($time_unit_step{...}{decimals})' "$CONTRACT_STRUCT"
+            'The CSV duration family takes the step decimals of the precision the durations carry: on whole values, the unit read in' \
+            'resolve_duration_precision() in ltl ($time_unit_step{...}{decimals})' "$CONTRACT_STRUCT; $CONTRACT_PRECISION"
     done
+    dir="$TMP_DIR/decimals-micro"
+    run_ltl_in "$dir" run --disable-progress -bs 1440 -oe -n 1 -o -V csv-output "$THREAD_SESSION_FIXTURE"
+    got=$(sed -nE 's/^decimals_(duration|percentile): //p' "$dir/run.out" | tr '\n' ' ')
+    got+=$(perl -MText::ParseWords -ne 'if ($. == 1) { @h = parse_line(",", 0, $_); ($i) = grep { $h[$_] eq "duration" } 0 .. $#h; next } @r = parse_line(",", 0, $_); $n++ if defined $i && $r[$i] =~ /^\d+\.\d{3}$/; END { print defined $i ? "cells-with-three-decimals:" . ($n ? "yes" : "no") : "MISSING-ANCHOR:duration-column" }' "$dir"/*MESSAGES*.csv 2>/dev/null || echo "MISSING-ANCHOR:MESSAGES-csv")
+    expect_equal "milliseconds written with three decimals: decimals 3, the duration cells carry them" "${got:-MISSING-ANCHOR}" "3 3 cells-with-three-decimals:yes" \
+        'Milliseconds written with three decimals carry the microsecond, so the duration and percentile families take three decimals and the MESSAGES duration cells write them' \
+        'resolve_duration_precision() in ltl; format_csv_value()' "$CONTRACT_PRECISION"
+    dir="$TMP_DIR/decimals-seconds"
+    run_ltl_in "$dir" run --disable-progress -bs 1440 -oe -n 1 -o -du s -V csv-output "$SPREAD_SECONDS_FIXTURE"
+    got=$(sed -nE 's/^decimals_(duration|percentile): //p' "$dir/run.out" | tr '\n' ' ')
+    expect_equal "seconds written with three decimals under -du s: decimals 0" "${got:-MISSING-ANCHOR}" "0 0 " \
+        'Seconds written with three decimals carry the millisecond, the storage unit, so the families take no decimals' \
+        'resolve_duration_precision() in ltl' "$CONTRACT_PRECISION"
     dir="$TMP_DIR/decimals-cp9"
     run_ltl_in "$dir" run --disable-progress -ni -bs 1440 -oe -o -du us -cp 9 -V csv-output "$BOUNDARY_FIXTURE"
     got=$(sed -nE 's/^decimals_duration: //p' "$dir/run.out" | head -1)

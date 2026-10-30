@@ -27,6 +27,10 @@
 # rows are in non-increasing numeric order of that column (the sort under
 # `-so`); `@zero_duration_nice<TAB><value>` asserts every row whose `duration`
 # is zero carries that `duration_nice` (a zero total in the source's unit).
+# `@duration_precision<TAB><token>` declares the precision the scenario's
+# input carries when its durations are written with decimals (milliseconds
+# with three decimals carry `us`); the default-mode decimals rule reads it in
+# place of `duration_unit_resolved`, which names only the unit read in.
 #
 # `@cell<TAB><kind><TAB><key_column>=<key_value><TAB><column><TAB><value><TAB><contract>`
 # reads one cell of either file: the one row of <kind> (`messages` or `stats`)
@@ -123,10 +127,13 @@ for my $family (sort keys %off_family) {
 }
 
 my @expected_categories;
+my $declared_precision;   # @duration_precision: what the input's durations carry
 if (defined $opt{expected_categories}) {
     @expected_categories = load_expected_categories($opt{expected_categories});
     die "expected-categories file has no assertions: $opt{expected_categories}\n"
         unless @expected_categories;
+    ($declared_precision) = map { $_->{value} } grep { ($_->{directive} // '') eq 'duration_precision' } @expected_categories;
+    @expected_categories = grep { ($_->{directive} // '') ne 'duration_precision' } @expected_categories;
     # A stats cell directive reads the STATS file; everything else the MESSAGES file.
     @expected_categories = grep {
         my $for = ($_->{directive} // '') eq 'cell' ? $_->{kind} : 'messages';
@@ -146,7 +153,7 @@ my $checks = 0;
 # Field presence is asserted on the messages pass only; the surface is a
 # run-level property, not a per-file one.
 if ($opt{file_kind} eq 'messages') {
-    $fails += check_observability_surface(\%vp);
+    $fails += check_observability_surface(\%vp, $declared_precision);
 }
 
 # --- Phase 1: column structure ---
@@ -664,6 +671,10 @@ sub load_expected_categories {
             push @exps, { directive => 'zero_duration_nice', value => $1 };
             next;
         }
+        if ($line =~ /^\@duration_precision\t(ns|us|ms|s|m|h|d)$/) {
+            push @exps, { directive => 'duration_precision', value => $1 };
+            next;
+        }
         if ($line =~ /^\@cell\t(messages|stats)\t([^\t=]+)=([^\t]*)\t([^\t]+)\t([^\t]*)\t(.+)$/) {
             push @exps, { directive => 'cell', kind => $1, key_column => $2, key_value => $3,
                           column => $4, value => ($5 eq '(empty)' ? '' : $5), contract => $6 };
@@ -951,7 +962,7 @@ sub load_v_precision {
 # duration unit is one of ns/us/ms/s/n/a; max_decimals_ceiling is 5, 'n/a',
 # or a non-negative integer.
 sub check_observability_surface {
-    my ($vp) = @_;
+    my ($vp, $declared_precision) = @_;
     my $f = 0;
     my @locked_fields = qw(
         precision_mode
@@ -1010,12 +1021,15 @@ sub check_observability_surface {
         $f++;
     }
 
-    # Default mode: the duration and percentile families take the resolved
-    # unit's ladder-step decimals, the source's resolution (ns 6, us 3, every
-    # other step 0), and the ceiling is that or 5, whichever is larger.
+    # Default mode: the duration and percentile families take the ladder-step
+    # decimals of the precision the durations carry, the source's resolution
+    # (ns 6, us 3, every other step 0): the unit read in, or the precision the
+    # scenario declares for an input written with more decimals. The ceiling
+    # is that or 5, whichever is larger.
     if ($vp->{precision_mode} eq 'default' && $vp->{duration_unit_resolved} =~ /^\w+$/) {
         my %step_decimals = ( ns => 6, us => 3 );
-        my $want = $step_decimals{ $vp->{duration_unit_resolved} } // 0;
+        my $precision = $declared_precision // $vp->{duration_unit_resolved};
+        my $want = $step_decimals{$precision} // 0;
         my $want_ceiling = $want > 5 ? $want : 5;
         for my $check ( [ decimals_duration => $want ], [ decimals_percentile => $want ], [ max_decimals_ceiling => $want_ceiling ] ) {
             my ($field, $expected) = @$check;
@@ -1023,9 +1037,9 @@ sub check_observability_surface {
             emit_fail({
                 scenario => $opt{scenario}, file => $opt{file_kind}, row => 0,
                 column => "(v-csv-output/$field)",
-                asserts => "in default mode $field follows the resolved duration unit's ladder-step decimals (ns 6, us 3, others 0; ceiling at least 5)",
-                produced_by => 'adapt_to_command_line_options() in ltl (%csv_family_decimals from $time_unit_step{...}{decimals})',
-                contract => 'features/608-byte-unit-ladder.md D9 and D18 (one default decimals rule, from the ladder step)',
+                asserts => "in default mode $field follows the ladder-step decimals of the precision the durations carry, here $precision (ns 6, us 3, others 0; ceiling at least 5)",
+                produced_by => 'resolve_duration_precision() in ltl (%csv_family_decimals from $time_unit_step{...}{decimals})',
+                contract => 'features/608-byte-unit-ladder.md D9 and D18 (one default decimals rule, from the ladder step); features/759-duration-precision-rendering.md AC8 (the precision the durations carry)',
                 expected => $expected,
                 actual => $vp->{$field},
                 rule => 'ladder-step decimals',

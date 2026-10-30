@@ -110,7 +110,7 @@ grammar, the case rule and the rejection text the same on every option.
 - `resolve_quantity_option` :: `my ($number, $spelling) = $text =~ /^($quantity_number_re)([A-Za-z]*)$/`: the one number-and-unit split, reading `%quantity_kind` (each kind's canonical sub, value, noun and list).
 - `adapt_to_command_line_options` :: `( map { my $row = $_; ( quantity_option_spec($row) . '=s' => sub { $quantity_entered{ $row->{long} } = $_[1] } ) } @quantity_options ),`: the rows' `GetOptions` entries; the settlement loop beside it resolves each given row, and the `-bs` block calls `resolve_quantity_option` with its run unit as base.
 - `adapt_to_command_line_options` :: `for my $min_row (grep { $_->{bound} && $_->{bound}{end} eq 'min' } @quantity_options) {`: the inverted-range check, quoting the values as typed; `has_active_filters`, `serialize_filters` and `quantity_bounds_given` read the rows' roles and signature flags.
-- `note_finer_duration_bounds` :: `next unless $time_unit_step{$unit}{ms} < $time_unit_step{$finest}{ms};`: a duration bound typed finer than the log's declared unit gets a note.
+- `note_finer_duration_bounds` :: `next unless $time_unit_step{$unit}{ms} < $time_unit_step{$precision}{ms};`: a duration bound typed finer than the precision the log's durations carry gets a note.
 - `emit_option_resolution_verbose` :: `grep { defined $quantity_entered{ $_->{long} } } @quantity_options;`: `-V option-resolution`, each given option as entered beside what it resolved to.
 - `print_help` :: `$out .= help_opt("-$_->{short}, --$_->{long} <N>", bound_option_help($_)) for grep { $_->{bound} } @quantity_options;`: the bound rows in one phrasing; `quantity_unit_sentence` ends every unit-bearing row with its pointer to `print_help_units` (`ltl --help units`).
 - `-tp` follows the pattern through `time_unit_canonical` directly: its value is a unit name, not a quantity.
@@ -402,14 +402,14 @@ rendered and written under six rules, each locked in the owning record:
    bounds never pass through a float (D23).
 4. **Never shown finer than the execution's processed files carry.** Each
    file's true precision is read from the unit its timestamp field states and
-   the fraction digits it carries, through the ladder: a clock time states the
-   second, so `.234` is a millisecond; the duration field's unit plays no
-   part. A request finer than the finest precision any processed file carries
-   gives way to that precision, with a stderr notice naming the precision used
-   and what was found; a file carrying less than another does not lower the
-   run (D4 as amended 2026-10-08, D10). It is the timestamp instance
-   of the rule that a value never renders in a unit smaller than its stated
-   unit (`features/617-width-to-format-rule.md` D4, D16).
+   the fraction digits it carries, through `fraction_precision()`: a clock
+   time states the second, so `.234` and `.23` (a part-group is a full group
+   with its trailing zeros unwritten) are a millisecond. A request finer than
+   the finest precision any processed file carries gives way to it, with a
+   stderr notice naming the precision used and what was found; a file carrying
+   less does not lower the run (D4 as amended 2026-10-08, D10). It is the
+   timestamp instance of the rule that nothing renders finer than the
+   precision the raw data carries (`features/759-duration-precision-rendering.md`).
 5. **Rendered by one formatter.** Every site that renders or writes a
    timestamp, the output file-name stamp included, calls `format_timestamp`;
    the sub-second part is rounded half-up once, at the last digit shown,
@@ -841,8 +841,11 @@ cross-references this one.
 
 **Definition.** Every number a person reads is rendered by one dispatch,
 `value_text()`, given the value, its kind (or the metric whose kind
-`resolve_value_kind()` resolves, with its floor: the source's resolved unit or
-a metric's declared unit), and the name of a budget table row (`%value_budget`),
+`resolve_value_kind()` resolves, with its floor: the precision the raw data
+carries, the unit the values are read in descended by the decimals they are
+written with, from `resolve_duration_precision()` for the built-in duration and
+`udm_precision()` for a user-defined time or byte metric; a zero renders in it
+and nothing finer does), and the name of a budget table row (`%value_budget`),
 plus a width where the surface has one. A row names a tier (short, medium,
 long: how far the number is abbreviated), a fit (tight or loose: the space
 before the unit), a width where fixed, a precision where a record locks one,
@@ -884,7 +887,8 @@ width" (`features/617-width-to-format-rule.md` § 1).
 - `emit_classification_percentage_notices` :: `budget => 'notice share'`; `report_skipped_final_pass` :: `budget => 'notice'`
 - `format_csv_value` :: `return strip_trailing_zeros(sprintf("%.${decimals}f", $value));`
 
-**Owning record.** `features/617-width-to-format-rule.md` (D1 to D24). Its model
+**Owning record.** `features/617-width-to-format-rule.md` (D1 to D24); the
+floor, `features/759-duration-precision-rendering.md` (D2 to D5). Its model
 is the one-table-per-surface shape of *Precision tiers: one lever, one table per
 surface*.
 
