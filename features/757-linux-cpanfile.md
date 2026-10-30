@@ -5,9 +5,8 @@ modules `ltl` loads on Linux). Parent: #729 (process, tests and build).
 Blocks: #709 (`-mem` misses stores and working memory), from its delivery plan
 drop 2 on.
 
-Status: delivery, from 2026-10-30, on branch `757-cpanfile-per-platform`.
-Drops 1 and 2 are delivered; drop 3 runs on GitHub's macOS runner
-(§ Delivery plan › Progress). The contracts of the surfaces
+Status: **delivered**, issue closed: PR #763 merged into `release/0.20.0` as
+9cd76712 on 2026-10-30. All six criteria met (§ Delivery plan › Progress). The contracts of the surfaces
 touched are confirmed by the architect; the records sweep, the findings, the
 architect's direction and the scope are recorded below, and the acceptance
 criteria are agreed (architect, 2026-10-28), with his corrections to 3, 5 and 6
@@ -349,8 +348,25 @@ workflow's two generate steps are gone; the temporary Linux job is added, in
   `build/cpanfile` with no suffix, outside `features/` and `releases/`, finds
   nothing.
 
-**Drop 3, in progress (2026-10-30)** (5e6c0a8c): the temporary workflow, renamed
+**Drop 3, delivered 2026-10-30** (5e6c0a8c): the temporary workflow, renamed
 `757-temporary-checks.yml`, gains the macOS job of § Delivery plan, item 3.
+Evidence, run 41056819366 (both jobs passed): on `macos-latest`, after
+`build/macos-setup.sh --package`, the scratch `ltl` carries
+`require BSD::Resource` at line 63; the macOS file generated from it names
+`BSD::Resource`; `cpanm --notest --cpanfile cpanfile.macos --installdeps .`
+installs BSD-Resource-1.2911; the copy packed with `perl -S pp`, as
+`build/macos-package.sh` packs, lists `lib/BSD/Resource.pm` and
+`lib/auto/BSD/Resource/Resource.bundle` under `unzip -l`. Criterion 6 is met
+for carrying the module. Its other half, the binary reporting the kept peak,
+reads #709's reading and passes to #709 with it (`features/memory-tracking-improvements.md`
+§ Issue #709).
+
+**Completion gate, 2026-10-30.** The temporary workflow deleted (0c8798c5),
+`$version_number` restored to `0.20.0` (f6736cdb). Scope test: the diff
+touches no line of `ltl` and no harness, library, fixture or expectation; the
+harnesses that mention `process/check-environment.pl` print its name in a
+message and run none of the changed scripts. Benchmark and suite skipped;
+`perl -c ltl` passes; `tests/validate-help-content.sh` 114 passed, 0 failed.
 
 Observation on the development host, recorded for #709's drop 2, which needs
 the module there: `BSD::Resource` (1.2911) is installed into the development

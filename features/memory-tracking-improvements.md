@@ -157,11 +157,10 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 **Status:** in progress since 2026-10-27. The specification and prototype
 stages are complete (2026-10-28), and delivery plan drops 4 and 5 are
 delivered on the issue branch, ahead of drops 2 and 3 by the architect's
-order. Blocked by #757 (a Linux-specific
-variant of the cpanfile) from delivery plan drop 2 on: #757 owns declaring
-`BSD::Resource` for macOS, installing it in macOS setup and carrying it in the
-macOS binary, and #709 keeps the reading and its fallback (the architect,
-2026-10-28). Filed 2026-10-12,
+order. #757 (a Linux-specific variant of the cpanfile), which blocked
+delivery plan drop 2, is delivered (PR #763, merged as 9cd76712 on
+2026-10-30): `BSD::Resource` goes to the macOS cpanfile alone, and #709 keeps
+the reading and its fallback (the architect, 2026-10-28). Filed 2026-10-12,
 found while reading the third `all`-tier benchmark round of 0.19.0.
 - Locked (§ Decisions): D1, the reported peak is the operating system's kept
   high-water mark; D2, macOS reads it from `getrusage` through
@@ -195,12 +194,19 @@ PR yet: the 38 inventory stores in the map and `MEMORY_FINAL` converged
 criterion 11 checked under one pinned hash seed (`8cba52b3`), after the
 finding that the message store's size follows the per-process hash seed.
 
-**Next, once #757 is delivered:**
+**Next:**
 - Drop 2, the kept peak (D1, D2).
-  - The issue branch needs none of #757's commits, since this issue changes no
-    build file. What it needs is `BSD::Resource` installed on the macOS host
-    by #757's macOS setup, for criterion 1, and the module absent for
-    criterion 6's fallback scenario.
+  - The issue branch needs #757's commits from `release/0.20.0` (merged as
+    9cd76712): the generator that routes `BSD::Resource` to
+    `build/cpanfile.macos` alone. The `require BSD::Resource` this drop adds to
+    `ltl` enters that file when the cpanfiles are regenerated
+    (`./build/generate-cpanfile.sh ltl all`), and the regenerated file is
+    committed with the drop.
+  - `BSD::Resource` 1.2911 is installed in the first macOS development host's
+    Perl (5.44), from a macOS cpanfile naming it, for criterion 1; criterion
+    6's fallback scenario hides it.
+  - Criterion 7's other half, the packaged macOS binary reporting the kept
+    peak, comes back from #757 with the reading (§ Acceptance criteria).
   - Criterion 1 also runs on the Windows development host and in a Linux
     container.
 - Drop 3, readings between steps only under `-mem`.
@@ -226,7 +232,6 @@ finding that the message store's size follows the per-process hash seed.
 - The issue worktree, `.claude/worktrees/709-memory-peak-and-unmeasured-stores`.
 
 **Where it can block or move hosts:**
-- Drop 2 waits for #757.
 - Criterion 1 in drop 2 also runs on the Windows development host and in a
   Linux container.
 
@@ -781,8 +786,8 @@ check covers every store all of the time (2026-10-27). It is recorded in
 | 4 | The reported peak is never below a reading the run took: under `-mem debug`, every `rss` in the `memory-usage / debug` records is at or below `rss_peak` | assertable | `tests/validate-memory-usage.sh`, a `-mem debug` scenario; holds on every platform |
 | 5 | Without `-mem`, no reading is taken between steps: `-V memory-usage` lists the kept-peak site, once per reporting moment, and under `-V benchmark-data` the compile sites; no `phase_boundary`, `grouping_checkpoint` or `grouping_final_pass` reading | assertable | `tests/validate-memory-usage.sh`, runs without `-mem`: plain, `-g` (checkpoints and windows), a CSV input |
 | 6 | On macOS without `BSD::Resource`, the run prints the `memory-unreadable` notice once, reports the readings' peak, and takes the readings between steps | assertable | `tests/validate-memory-usage.sh`, a macOS-only scenario that hides the module through an `@INC` hook given at invocation |
-| 7 | Moved to #757 (a Linux-specific variant of the cpanfile) by the architect, 2026-10-28: the packaged macOS binary carries `BSD::Resource` and reports the kept peak | — | #757 |
-| 8 | Moved to #757 by the architect, 2026-10-28: `build/generate-cpanfile.sh` names `BSD::Resource` for macOS only, in no Linux or Windows cpanfile | — | #757 |
+| 7 | Moved to #757 (a Linux-specific variant of the cpanfile) by the architect, 2026-10-28: the packaged macOS binary carries `BSD::Resource` and reports the kept peak. Carrying it is met by #757 (PR #763, its criterion 6). Reporting the kept peak reads this issue's reading and comes back with it | assertable | The macOS binary built from the issue branch with drop 2 in reports the kept peak, without the `memory-unreadable` notice of D2's fallback |
+| 8 | Moved to #757 by the architect, 2026-10-28: `build/generate-cpanfile.sh` names `BSD::Resource` for macOS only, in no Linux or Windows cpanfile. Met by #757 (PR #763, its criterion 4) | — | #757 |
 | 9 | Every store of § Store inventory is in `named_structure_sizes()`: under `-mem`, `-V benchmark-data` carries a `MEMORY` row for each of the 38, and on the one-day log with `-hg -hgdm raw -h HTTP` the highlighted raw values' row reads about 70 MB | assertable | The row names of one `-mem -V benchmark-data` run against the 38; the premise case for the size |
 | 10 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
 | 11 | Under `-mem`, each grouping checkpoint and final-pass window walks only the 15 `consolidation_*` stores (D3): every grouping store of 1 MB or more reports a `MEMORY` row within 5 % of the every-call reference, and the run on 15 unmasked days is at most 12 % slower in wall clock than the same run without `-mem` (P1: +9.1 %) | assertable (bounds from P1, 2026-10-28) | `prototype/709-memory-peak/criterion-11.sh check <ltl>`: the eight P1 inputs (`candidates.txt`) with `-mem -V benchmark-data`, their rows against `results/criterion-11-reference.tsv`; 15 unmasked days (`-bs 1440 -g`) with and without `-mem`, three runs each under `/usr/bin/time -l`, medians. Every run, and the reference, hashes under one pinned `PERL_HASH_SEED` (the architect, 2026-10-28), since the message store's size follows the hash seed (§ Drop 5, the finding); the checker refuses a run that does not show it |
@@ -1272,14 +1277,18 @@ then drop 6.
    - The findings report goes beside it.
    - The architect locks the choice of grouping's walks, and criterion 11's
      bounds are written from it.
-2. **The kept peak (D1, D2), once #757 is delivered.**
+2. **The kept peak (D1, D2).**
    - Each platform reads the kept peak at its own `-V memory-usage` site, and
      the four consumers of the peak read it.
    - On macOS, the fallback and its `memory-unreadable` notice.
-   - No build file changes here: #757 (a Linux-specific variant of the
-     cpanfile) declares `BSD::Resource` for macOS, installs it in macOS setup
-     and carries it in the macOS binary.
-   - Criteria 1 to 4, 6, 12 and 14, on this drop's surfaces. Criterion 1's
+   - The cpanfiles regenerated with the `require BSD::Resource` this drop
+     adds. #757 (a Linux-specific variant of the cpanfile) routes the module to
+     `build/cpanfile.macos` alone, so the macOS setup installs it and no Linux
+     or Windows path requires it; `pp` packs it into the macOS binary, shown on
+     a scratch copy of `ltl` (`features/757-linux-cpanfile.md` § Delivery plan
+     › Progress, drop 3).
+   - Criteria 1 to 4, 6, 12 and 14, and criterion 7's other half, on this
+     drop's surfaces. Criterion 1's
      Windows run is on the Windows development host, and its Linux run in a
      container.
 3. **Readings between steps only under `-mem`, or in the fallback**
@@ -1293,12 +1302,14 @@ then drop 6.
    Results. Then the completion gate per `docs/process/workflow.md` § 3, then
    the PR.
 
-**Edges (the dependency-first test, 2026-10-28).** One blocks.
-- **#757 (a Linux-specific variant of the cpanfile) blocks #709**, a native
-  edge, filed at the architect's direction as a sub-issue of #729 (process,
-  tests and build). #709 cannot reach a clean implementation before it.
-  Today `build/cpanfile` serves macOS and Linux, so declaring `BSD::Resource`
-  there would have three effects on Linux, all for a module it never loads:
+**Edges (the dependency-first test, 2026-10-28).** None blocks since #757's
+delivery (2026-10-30).
+- **#757 (a Linux-specific variant of the cpanfile) blocked #709** until its
+  delivery (PR #763, 2026-10-30), a native edge, now removed, filed at the
+  architect's direction as a sub-issue of #729 (process, tests and build).
+  #709 could not reach a clean implementation before it. `build/cpanfile`
+  then served macOS and Linux, so declaring `BSD::Resource` there would have
+  had three effects on Linux, all for a module it never loads:
   - `build/linux-setup.sh` stops until the module's package is named
     (`features/750-interpreter-resolution.md` § `build/linux-setup.sh`);
   - the environment check's condition 3, the Perl loads every runtime module
@@ -1307,7 +1318,7 @@ then drop 6.
   - the Linux release binary's container build, `build/ubuntu-package.sh`,
     installs it.
 
-  The prototype stage does not depend on #757; drop 2 does.
+  The prototype stage did not depend on #757; drop 2 did.
 - **#710 (remove the run index).** Each of the two reaches a clean
   implementation without the other. The index's `memory_used` is one of the
   peak's four consumers. Whichever issue lands second either moves it to the
