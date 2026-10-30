@@ -1,7 +1,8 @@
-# Temporary: the Linux readers of the per-platform cpanfiles, run on each push
-# to the issue branch. Deleted before the pull request.
+# Temporary: the Linux readers of the per-platform cpanfiles, and the macOS
+# binary carrying the macOS file's modules, run on each push to the issue
+# branch. Deleted before the pull request.
 
-name: 757 Linux readers (temporary)
+name: 757 checks (temporary)
 
 on:
   push:
@@ -48,3 +49,22 @@ jobs:
         run: |
           bash -x ./tests/profile/profiling-preflight.sh 2>&1 | grep -E '^\+ CPANFILE='
           ./tests/profile/profiling-preflight.sh
+
+  macos-binary-modules:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup build environment
+        run: ./build/macos-setup.sh --package
+
+      - name: "Criterion 6: the macOS binary carries the macOS file's modules"
+        run: |
+          perl -pe 'print "require BSD::Resource;\n" if /^## GLOBALS ##$/' ltl > ltl-bsd
+          grep -n '^require BSD::Resource' ltl-bsd
+          ./build/generate-cpanfile.sh ltl-bsd macos >/dev/null
+          grep -n "BSD::Resource" build/cpanfile.macos
+          (cd build && cpanm --notest --cpanfile cpanfile.macos --installdeps .)
+          perl -S pp -o ltl-bsd_static-binary_macos-arm64 ltl-bsd
+          unzip -l ltl-bsd_static-binary_macos-arm64 | grep 'BSD/Resource'
