@@ -319,6 +319,7 @@ architect, is a last resort after the steps have been tried singly.
 1. `git checkout release/X.Y.Z && git pull origin release/X.Y.Z`
 2. Verify `$version_number` reads `X.Y.Z` (no branch left its `-{issue}` marker). If wrong, fix it here and note which branch.
 3. `./tests/run-suite.sh <scratch-dir>`: every `tests/validate-*.sh`, in the order and with the captures of § 3 (b); inspect the files. The gate is the complete suite.
+   A patch release made for one issue runs the suite once, here, on the code the release holds: that issue's completion gate does not run it again a few minutes before, and the second pass of step 4 does not run.
 4. For `validate-statistics.sh`: T3/T4 failures on any layer (L1 drift, L2 invariants, L3 NumPy/SciPy oracle) block; T1/T2 advisories are reviewed for intentional drift.
    Then the suite runs a second time, on the generated read path
    (`features/621-generated-read-loop-body.md` D3). The harnesses' fixtures are
