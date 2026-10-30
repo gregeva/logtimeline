@@ -258,12 +258,15 @@ last test alone ran 9 % above its median.
 fallback and its notice, `build/cpanfile.macos` requiring `BSD::Resource`;
 criteria 3, 4, 6, 12 and 14 met, and criterion 1 on macOS.
 
+**Done, delivery plan drop 3 (2026-10-30),** on the issue branch (§ Drop 3,
+`4b30ab6a`): without `-mem`, no reading between steps; criterion 5 met.
+
 **Next:**
-- Drop 2's runs that cannot be made on this host (§ Drop 2, *Not run on this
-  host*): criterion 1 on the Windows development host and on Linux, and
-  criterion 7's other half, the packaged macOS binary reporting the kept
-  peak. How each runs is the architect's to direct.
-- Drop 3, readings between steps only under `-mem`.
+- Criterion 1 on Linux: the finding of § Drop 2, the reported peak up to
+  0.13 % above GNU `time`'s, is the architect's to decide.
+- Criterion 7's other half: the macOS binary of release run 41079293013,
+  run on this host on the one-day case under `time -l`.
+- Criterion 1 on the Windows development host.
 - After drop 3, which changes `measure_memory_structures()` (drop 2 left it
   unchanged), re-run criterion 11:
   `prototype/709-memory-peak/criterion-11.sh check ltl <work dir>`, from the
@@ -1447,6 +1450,83 @@ equals RSS at end of run" and "RSS never decreases even when structures are
 freed". This issue measured macOS returning memory before the next reading:
 733 MB inside the displayed rows' statistics, 638 MB at the next reading
 (§ Issue #709 › Findings, the heatmap-histogram-consolidate case). It is left for the architect.
+
+**The runs off this host, by the architect's direction (2026-10-30).** A
+temporary workflow, `.github/workflows/709-temporary-checks.yml` on the issue
+branch, runs on GitHub's `ubuntu-latest` (image `ubuntu-24.04`, kernel
+7.0.0-1017-azure) on each push. It measures `rss_peak` against GNU `time
+-v`'s maximum resident set size on a generated input, the committed
+combined-format access-log fixture repeated to 300,000 lines, read with
+`-bs 1440 -oe -hg bytes -hgdm raw -h HTTP`, since the corpus cannot leave
+the host. It then runs `tests/validate-memory-usage.sh`. It is deleted
+before the pull request. A manual run of the release workflow on the issue
+branch (41079293013, at 3596690f) built every binary; the macOS one packs
+`lib/BSD/Resource.pm` and its bundle.
+
+**Finding: on Linux the reported peak can be above the exit-time peak GNU
+`time` reports, by up to 0.13 %.** Criterion 1 reads "not above the
+operating system's peak for the process, and within 1 % below it". `rss_peak`
+less `time -v`'s figure, in bytes, the peak near 81.3 MB:
+
+| Commit | Run | Without `-mem` | With `-mem` |
+|---|---|---|---|
+| `3596690f` (drop 2) | 1 | −69,632 | −28,672 |
+| `4b30ab6a` (drop 3) | 1 | +81,920 | 0 |
+| `bfa1d064` (drop 3) | 1 | +20,480 | 0 |
+| | 2 | +57,344 | +106,496 |
+| | 3 | +20,480 | 0 |
+| | 4 | +16,384 | 0 |
+| | 5 | +90,112 | 0 |
+
+- Every difference is a whole number of 4 KB pages, from 4 to 26.
+- `rss_peak` is `VmHWM` from `/proc/self/status`, read at `benchmark-data`'s
+  moment; GNU `time` reads `ru_maxrss` from the exited process. Both are the
+  kernel's counts of the same high-water mark.
+- Not established: why the two counts differ. The kernel's resident-set
+  counters are kept per CPU and summed approximately, which would produce
+  differences of a few pages; that is a hypothesis, not a measurement.
+- On macOS the two readings matched to the byte, or fell below (§ Criterion 1
+  on macOS above).
+
+**Not caused by this issue: `benchmark-rows` fails on Linux.** Its check
+"comparison marks the reading time within parent" (`compare-results.sh`
+reporting `memory/readings` within parent) fails on Linux on drop 2's code,
+on drop 3's, and on the base code, 6dadde32, run in the same workflow. Every
+other scenario passes there: 36 checks, `peak-fallback` skipped as macOS only.
+Criteria 3, 4 and 12 therefore hold on Linux too.
+
+### Drop 3: no reading between steps without `-mem` (2026-10-30)
+
+Delivered at `4b30ab6a` on the issue branch. `measure_memory_structures()`
+returns before its reading unless `-mem` is given or the kept peak cannot be
+read (`return unless $show_memory || !$kept_peak_readable;`). Without `-mem`
+no reading is taken at the phase boundaries, the grouping checkpoints or the
+final-pass windows. The compile readings stay where a memory surface armed
+them (`$format_scan_measure_rss`). In the fallback, macOS without
+`BSD::Resource`, the readings between steps are the run's peak and are still
+taken.
+
+Measured without `-mem`, the code of drop 2 against drop 3's, `-V
+benchmark-data,memory-usage`, one run each, no ` at <file> line <N>` on
+stderr:
+
+| Input | Readings | Time in them | `rss_peak` against `time -l` |
+|---|---|---|---|
+| one day of a web application access log | 9 → 4 | 29.6 → 6.7 ms | 0.09 % below |
+| the 97 MB application log of 286,000 unique messages, `-n 25 -g -m uuid` | 15 → 4 | 46.9 → 6.8 ms | 0.03 % below |
+
+The four left are two `kept_peak` readings (`benchmark-data` and the
+summary) and the two compile readings `-V benchmark-data` arms.
+
+`tests/validate-memory-usage.sh` gains `no-mem-readings` (criterion 5),
+covering a plain run, a grouped run and a CSV input, each without `-mem`. On
+drop 2's code it fails on all three. Where the notice reports the kept peak
+unreadable, the scenario expects the readings between steps instead.
+`peak-fallback` now runs without `-mem`, and fails on a gate that drops the
+fallback (`return unless $show_memory;`: no reading, no peak). The harness
+passes, 39 checks, and the failed-run checker passes.
+`docs/architecture-patterns.md` § Run-scoped activation flags names the
+gate.
 
 ### Delivery plan
 
