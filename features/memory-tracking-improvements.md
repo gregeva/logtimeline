@@ -232,13 +232,15 @@ so they are not used as the `before`. Against the first base, round 5
 differed by −1.5 % to +0.2 % per test, within run-to-run variation, as
 #759's own gate measured on the standard case.
 
-At drop 6 the `before` and the `after` run interleaved instead, round by
-round in one session, as #759's gate ran them: the four tests of criterion
-13, at least three rounds a side, from a worktree at the issue branch's base
-beside the issue worktree, so that a disturbance falls on both sides alike;
-medians with ranges.
+**The `before` is captured again at 6dadde32 once the machine is quiet**
+(the architect, 2026-10-30, who says when it is): the four tests of
+criterion 13, three rounds, from a worktree checked out at 6dadde32 beside
+the issue worktree. Drop 2 onward proceed meanwhile, and no other `ltl` runs
+while it is captured. The `after` at drop 6 is compared with it.
 
 **Next:**
+- The `before` benchmark at 6dadde32, on the architect's word that the
+  machine is quiet (§ Done, the rebase).
 - Drop 2, the kept peak (D1, D2).
   - The `require BSD::Resource` this drop adds to `ltl` enters
     `build/cpanfile.macos` when the cpanfiles are regenerated
@@ -260,9 +262,8 @@ medians with ranges.
   5f6c9f9c:ltl`).
 - Then drop 6:
   - restore `$version_number` to `0.20.0`;
-  - run the `before` and `after` benchmarks (criterion 13) interleaved, from
-    a worktree at the branch's base and the issue worktree (§ Done, the
-    rebase);
+  - run the `after` benchmark (criterion 13) from the issue worktree,
+    against the `before` captured at 6dadde32 (§ Done, the rebase);
   - run the completion gate;
   - open the one PR.
 
@@ -271,7 +272,8 @@ medians with ranges.
   first base) and `709-before-6dadde32-1.tsv` to `-6.tsv` (at 6dadde32),
   untracked, in the `release/0.20.0` worktree
   (`.claude/worktrees/release-0.20.0`): the evidence of § Done, the rebase,
-  superseded by drop 6's interleaved runs and deleted at close-out.
+  superseded by the capture at 6dadde32 on a quiet machine, and deleted at
+  close-out.
 - The issue worktree, `.claude/worktrees/709-memory-peak-and-unmeasured-stores`.
 
 **Where it can block or move hosts:**
