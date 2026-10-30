@@ -167,7 +167,8 @@ found while reading the third `all`-tier benchmark round of 0.19.0.
 - Locked (§ Decisions): D1, the reported peak is the operating system's kept
   high-water mark; D2, macOS reads it from `getrusage` through
   `BSD::Resource`; D3, under `-mem` grouping's checkpoints and windows walk
-  only the `consolidation_*` stores.
+  only the `consolidation_*` stores; D4, on Linux criterion 1 holds within
+  1 % of GNU `time`'s peak either side.
 - The prototype stage is complete (2026-10-28).
 - The acceptance criteria are agreed, criterion 11's bounds written from P1,
   and the delivery plan confirmed.
@@ -262,8 +263,6 @@ criteria 3, 4, 6, 12 and 14 met, and criterion 1 on macOS.
 `4b30ab6a`): without `-mem`, no reading between steps; criterion 5 met.
 
 **Next:**
-- Criterion 1 on Linux: the finding of § Drop 2, the reported peak up to
-  0.13 % above GNU `time`'s, is the architect's to decide.
 - Criterion 7's other half: the macOS binary of release run 41079293013,
   run on this host on the one-day case under `time -l`.
 - Criterion 1 on the Windows development host.
@@ -790,6 +789,17 @@ the module loaded from the scratch library. One run each:
   each); the reading stage's difference was within run-to-run variation.
   § Issue #356 Specification S4 already keeps `-mem debug`'s walks out of
   loops.
+- **D4 (locked 2026-10-30): on Linux, criterion 1 holds within 1 % of GNU
+  `time`'s maximum resident set size, either side; `ltl` reads `VmHWM`
+  unchanged.** Read during the run, `VmHWM` came out above the exit-time
+  `ru_maxrss` GNU `time` reports in six of ten runs on drop 3's code, by 4 to
+  26 pages, at most 0.13 % (§ Drop 2, *Finding: on Linux…*). Both are the
+  kernel's counts of the same high-water mark, and no reading `ltl` can take
+  is nearer the operating system's own peak. macOS and Windows keep "not
+  above". Rejected: a prototype of an in-process `getrusage` on Linux,
+  through a system call whose number differs by architecture or through
+  `BSD::Resource`, which #757 routes to macOS alone, and which would likely
+  read the same kernel count; finding the cause before deciding.
 - **Following from D1 and D2: without `-mem`, no reading is taken between
   steps.** Those readings served only the peak. The phase-boundary readings
   (5 to 7 a run) and the grouping readings (58 on the month, 0.46 to 0.55 s
@@ -843,7 +853,7 @@ check covers every store all of the time (2026-10-27). It is recorded in
 
 | # | Condition and observable outcome | Triage | Validation |
 |---|---|---|---|
-| 1 | On every run, with or without `-mem`, `MEMORY rss_peak` and MAXIMUM MEMORY USED are not above the operating system's peak for the process, and within 1 % below it, including the cases where the readings between steps fell short | assertable | macOS: the three premise cases (the one-day log `-hg -hgdm raw -h HTTP`; the month `-bs 1440 -n 25 -g -m uuid` and `-bs 1440 -hm -hg -g -m uuid`) under `/usr/bin/time -l`, with and without `-mem`. Windows x64: the one-day case, sampled for `PeakWorkingSet64` as in § Issue #146, on the Windows development host. Linux: the one-day case under `/usr/bin/time -v` in a container with the corpus mounted, at the cost of a container run, since no Linux host is at hand. Recorded under Results |
+| 1 | On every run, with or without `-mem`, `MEMORY rss_peak` and MAXIMUM MEMORY USED are not above the operating system's peak for the process, and within 1 % below it, including the cases where the readings between steps fell short. On Linux, within 1 % of it either side (D4, the architect, 2026-10-30) | assertable | macOS: the three premise cases (the one-day log `-hg -hgdm raw -h HTTP`; the month `-bs 1440 -n 25 -g -m uuid` and `-bs 1440 -hm -hg -g -m uuid`) under `/usr/bin/time -l`, with and without `-mem`. Windows x64: the one-day case, sampled for `PeakWorkingSet64` as in § Issue #146, on the Windows development host. Linux: GNU `time -v` on GitHub's `ubuntu-latest`, on a generated input, since no container starts on the first macOS development host and the corpus cannot leave it (the architect, 2026-10-30). Recorded under § Drop 2 |
 | 2 | The 32-bit Windows branch reads `PeakWorkingSetSize` at offset 8, four bytes wide | unassertable | Strawberry Perl is x64 only; the offset follows from the structure layout (`cb` 4 + `PageFaultCount` 4). Recorded gap |
 | 3 | Each consumer of the peak reports the kept peak at its moment: MAXIMUM MEMORY USED and the export's `max_memory_used` carry the same value, `rss_peak` and the index's `memory_used` the lifetime peak, and the breakdown's shares and `unattributed` are computed against it | assertable | A harness scenario reading the four consumers above on one fixture run with `-mem -V benchmark-data -o`, the index written; criterion 1's runs read them at scale |
 | 4 | The reported peak is never below a reading the run took: under `-mem debug`, every `rss` in the `memory-usage / debug` records is at or below `rss_peak` | assertable | `tests/validate-memory-usage.sh`, a `-mem debug` scenario; holds on every platform |
@@ -1487,6 +1497,9 @@ less `time -v`'s figure, in bytes, the peak near 81.3 MB:
   differences of a few pages; that is a hypothesis, not a measurement.
 - On macOS the two readings matched to the byte, or fell below (§ Criterion 1
   on macOS above).
+- Decided by the architect, 2026-10-30: D4, criterion 1 on Linux holds within
+  1 % either side, and the reading is unchanged. Every run above is within it,
+  so criterion 1 is met on Linux.
 
 **Not caused by this issue: `benchmark-rows` fails on Linux.** Its check
 "comparison marks the reading time within parent" (`compare-results.sh`
