@@ -31,10 +31,12 @@ jobs:
         run: |
           perl process/check-environment.pl --condition 3,4
           sed -i "1i requires 'No::Such::Module757';" build/cpanfile.linux
-          if perl process/check-environment.pl --condition 3 | tee /tmp/planted.txt; then
+          if perl process/check-environment.pl --condition 3 > /tmp/planted.txt; then
+            cat /tmp/planted.txt
             echo "::error::condition 3 passed with a module that does not exist planted in build/cpanfile.linux"
             exit 1
           fi
+          cat /tmp/planted.txt
           grep -q 'build/cpanfile.linux' /tmp/planted.txt
           grep -q 'No::Such::Module757 does not load' /tmp/planted.txt
           git checkout -- build/cpanfile.linux
