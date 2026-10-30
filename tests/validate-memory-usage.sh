@@ -29,6 +29,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 neutralize_colour_env
 
@@ -41,6 +43,10 @@ C_GATE="$DOC § -V memory-usage section contract (the activation flag); criteria
 C_DEBUG="$DOC § Decisions D5, D6 and the section contract; criteria 10 and 11"
 C_BENCH="$DOC § -V memory-usage section contract (benchmark-data); criterion 12"
 C_MAP="$DOC § Issue #709 › Acceptance criteria 9 and 10, § Store inventory; § Issue #356 Specification S3 and S5; features/memory-baseline-profiling.md DD-03"
+C_PEAK="$DOC § Issue #709 › Decisions D1 and D2; Acceptance criteria 3, 4, 6 and 12; § -V memory-usage section contract"
+
+# The callers of the section contract, in the order their lines print.
+SITE_ORDER="kept_peak,phase_boundary,grouping_checkpoint,grouping_final_pass,format_scan_compile,csv_block_compile,debug_decomposition,debug_sample"
 
 # The stores § Issue #709 › Store inventory found growing with the input
 # outside the map, each under its variable's name.
@@ -97,14 +103,15 @@ check() {
     fi
 }
 
-# run_ltl <tag> <args...>: one ltl run in the harness's own directory; stdout
-# and stderr land in $TMP_DIR/<tag>.out and .err, the exit status in .rc. A
-# Perl runtime warning on stderr, a non-zero exit, or an empty standard output
-# is a failure.
+# run_ltl <tag> <args...>: one ltl run in the harness's own directory, or in
+# $RUN_IN when set (a run whose files another run must not see); stdout and
+# stderr land in $TMP_DIR/<tag>.out and .err, the exit status in .rc. A Perl
+# runtime warning on stderr, a non-zero exit, or an empty standard output is
+# a failure.
 run_ltl() {
     local tag="$1"; shift
     local rc=0
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$TMP_DIR/$tag.out" 2> "$TMP_DIR/$tag.err" || rc=$?
+    ( cd "${RUN_IN:-$TMP_DIR}" && "$LTL" --disable-progress -ni "$@" ) > "$TMP_DIR/$tag.out" 2> "$TMP_DIR/$tag.err" || rc=$?
     echo "$rc" > "$TMP_DIR/$tag.rc"
     if [[ "$rc" -ne 0 ]]; then
         fail=$((fail + 1)); failures+=("$current_scenario :: $tag exit $rc")
@@ -379,7 +386,7 @@ scenario_memory_map() {
     # its high-water marks can exceed the block's: it is checked against its own
     # figures, not the block's rows.
     local stray
-    stray=$(comm -23 <(breakdown map | cut -f1 | grep -vx unattributed | LC_ALL=C sort) <(rows map MEMORY) | paste -sd, -)
+    stray=$(comm -23 <(breakdown map | cut -f1 | awk '$0 != "unattributed"' | LC_ALL=C sort) <(rows map MEMORY) | paste -sd, -)
     check "the breakdown lists stores of the map, then unattributed" "${stray:-none}|$(breakdown map | tail -1 | cut -f1)" "none|unattributed" \
         'Every row of the -mem breakdown is a store of the named-structure map, and the last row is unattributed' \
         'print_summary_table() in ltl' "$C_MAP"
@@ -407,6 +414,109 @@ scenario_memory_map() {
         'print_summary_table() in ltl' "$C_MAP"
 }
 
+# ---------------------------------------------------------------------------
+# The peak: the high-water mark the operating system keeps for the process,
+# read once at each moment a peak is reported (-V benchmark-data, before the
+# summary, the run index), so every consumer reports it at its moment. On
+# macOS without BSD::Resource the run reports the readings' peak and says so.
+# -bs 1440 -oe: no check reads the time axis.
+# ---------------------------------------------------------------------------
+# index_memory_used <dir>: the run index's memory_used, from its selection row.
+index_memory_used() {
+    [[ -f "$1/ltl-index.csv" ]] || return 0
+    perl -MText::CSV -e 'my $c = Text::CSV->new({ binary => 1 }); open my $f, "<", $ARGV[0] or exit;
+        my $h = $c->getline($f); my %i; @i{@$h} = 0 .. $#$h;
+        while (my $r = $c->getline($f)) { print $r->[$i{memory_used}], "\n" if $r->[$i{entry_type}] eq "selection" }' "$1/ltl-index.csv"
+}
+# in_order <names> <order>: yes when the comma-separated names appear in the
+# comma-separated order, each at most once.
+in_order() {
+    awk -v names="$1" -v order="$2" 'BEGIN { n = split(order, o, ","); for (i = 1; i <= n; i++) pos[o[i]] = i
+        m = split(names, s, ","); last = 0
+        for (i = 1; i <= m; i++) { if (!(s[i] in pos) || pos[s[i]] <= last) { print "no (" names ")"; exit } last = pos[s[i]] }
+        print (m ? "yes" : "no (no site)") }'
+}
+
+scenario_peak_consumers() {
+    current_scenario="peak-consumers"
+    echo "[$current_scenario]"
+    mkdir -p "$TMP_DIR/consumers"
+    RUN_IN="$TMP_DIR/consumers" run_ltl consumers -bs 1440 -oe -mem -o -idx -V benchmark-data,memory-usage,notices "$ACCESS_FIXTURE"
+    produced consumers $'^MEMORY\trss_peak\t' 'the peak consumers' || return 0
+
+    local peak exported
+    peak=$(sed -E 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/consumers.out" | sed -nE 's/^ *MAXIMUM MEMORY USED +(.*[^ ]) *$/\1/p' | head -1 || true)
+    exported=$(sed -nE 's/^ *max_memory_used: *//p' "$TMP_DIR/consumers"/*.yaml 2>/dev/null | head -1 || true)
+    check "MAXIMUM MEMORY USED and the export carry one value" "$peak" "${exported:-MISSING-ANCHOR}" \
+        'The summary and the aggregate export report the peak read once before the summary' \
+        'pipeline_render(), print_summary_table() and write_aggregate_export() in ltl' "$C_PEAK"
+
+    local rss used
+    rss=$(bench consumers MEMORY rss_peak); used=$(index_memory_used "$TMP_DIR/consumers" | head -1)
+    check "the index's peak is the lifetime peak, not below rss_peak" "$([[ -n "$rss" && -n "$used" && "$rss" -gt 0 && "$used" -ge "$rss" ]] && echo yes || echo "no (rss_peak=${rss:-absent} memory_used=${used:-absent})")" "yes" \
+        'rss_peak and the index memory_used each read the peak at their moment; the index is written last, so its peak is at or above rss_peak' \
+        'print_verbose_output() and write_index_file() in ltl' "$C_PEAK"
+
+    # One kept-peak reading at each reporting moment: benchmark-data, the
+    # summary, the index. A run that cannot read it says so and reads none.
+    local unreadable expected
+    unreadable=$(notice_kind_count "$TMP_DIR/consumers.out" memory-unreadable)
+    if [[ "$unreadable" == 0 ]]; then expected=3; else expected=""; fi
+    check "kept-peak readings, one per reporting moment" "$(site consumers kept_peak readings)|$unreadable" "$expected|$unreadable" \
+        'Where the kept peak is readable it is read once for benchmark-data, once before the summary and once for the index; where it is not, the memory-unreadable notice says so and no kept-peak reading is counted' \
+        'read_run_peak_memory() and get_kept_peak_memory() in ltl' "$C_PEAK"
+}
+
+scenario_peak_not_below_readings() {
+    current_scenario="peak-not-below-readings"
+    echo "[$current_scenario]"
+    mkdir -p "$TMP_DIR/readings"
+    # -g: the grouping callers read too, so the order check sees them.
+    RUN_IN="$TMP_DIR/readings" run_ltl readings -bs 1440 -oe -g -mem debug -idx -V benchmark-data "$ACCESS_FIXTURE"
+    produced readings $'^decomposition\t' 'the readings against the peak' || return 0
+
+    # benchmark-data prints after the after_normalize record and before the next.
+    local rss used
+    rss=$(bench readings MEMORY rss_peak); used=$(index_memory_used "$TMP_DIR/readings" | head -1)
+    check "no reading before rss_peak is above it" "$(debug_records readings | awk -F'\t' -v peak="${rss:-0}" '
+        $4 != "-" && !done { n++; if ($4 > peak) bad = bad " " $3 "=" $4 }
+        $1 == "decomposition" && $3 == "after_normalize" { done = 1 }
+        END { print (peak > 0 && n > 0 && bad == "") ? "yes" : "no (rss_peak=" peak ", readings=" n ", above:" bad ")" }')" "yes" \
+        'The peak benchmark-data reports is never below a reading the run took before it' \
+        'read_run_peak_memory() from print_verbose_output() in ltl' "$C_PEAK"
+    check "no reading is above the index's peak" "$(debug_records readings | awk -F'\t' -v peak="${used:-0}" '
+        $4 != "-" { n++; if ($4 > peak) bad = bad " " $3 "=" $4 }
+        END { print (peak > 0 && n > 0 && bad == "") ? "yes" : "no (memory_used=" peak ", readings=" n ", above:" bad ")" }')" "yes" \
+        'The peak the index records, read after the last diagnostic reading, is never below any reading the run took' \
+        'read_run_peak_memory() from write_index_file() in ltl' "$C_PEAK"
+    check "callers in the contract's order" "$(in_order "$(site_names readings)" "$SITE_ORDER")" "yes" \
+        'The site lines print in the fixed order of the section contract, the kept-peak caller first' \
+        'emit_memory_usage_verbose() in ltl (@memory_reading_sites)' "$C_PEAK"
+}
+
+scenario_peak_fallback() {
+    current_scenario="peak-fallback"
+    echo "[$current_scenario]"
+    if [[ "$(uname -s)" != Darwin ]]; then
+        echo "  SKIP  $current_scenario :: macOS only: BSD::Resource is read on macOS alone"
+        return 0
+    fi
+    # An @INC hook, given at invocation, that refuses BSD::Resource.
+    mkdir -p "$TMP_DIR/hide"
+    printf '%s\n' 'package hide_bsd_resource;' \
+        'unshift @INC, sub { die "Can'"'"'t locate BSD/Resource.pm in \@INC (hidden by the harness)\n" if $_[1] eq "BSD/Resource.pm"; return };' \
+        '1;' > "$TMP_DIR/hide/hide_bsd_resource.pm"
+    PERL5OPT="-I$TMP_DIR/hide -Mhide_bsd_resource" run_ltl hidden -bs 1440 -oe -mem -V benchmark-data,memory-usage,notices "$ACCESS_FIXTURE"
+    produced hidden $'^MEMORY\trss_peak\t' 'the fallback' || return 0
+
+    check "the notice, once, in the panel" "$(notice_kind_count "$TMP_DIR/hidden.out" memory-unreadable)|$(notice_field "$TMP_DIR/hidden.out" memory-unreadable evidence | grep -c 'BSD::Resource module.*is not installed' || true)|$(notice_field "$TMP_DIR/hidden.out" memory-unreadable stage)|$(notice_field "$TMP_DIR/hidden.out" memory-unreadable shown)" "1|1|detect|panel" \
+        'Without BSD::Resource on macOS the run raises the memory-unreadable notice once, naming the module, as the pipeline starts, and draws it in the panel rather than in the options review' \
+        'resolve_kept_peak_reading() from pipeline_detect() in ltl' "$C_PEAK"
+    check "the readings' peak, from the readings between steps" "$(site hidden kept_peak readings)|$(site hidden phase_boundary readings)|$([[ "$(bench hidden MEMORY rss_peak)" -gt 0 ]] && echo peak || echo no-peak)" "|5|peak" \
+        'The fallback reads no kept peak; the readings between steps are taken and their peak is reported' \
+        'read_run_peak_memory() and measure_memory_structures() in ltl' "$C_PEAK"
+}
+
 scenario_register phase-boundary \
                   grouping \
                   compiles \
@@ -414,7 +524,10 @@ scenario_register phase-boundary \
                   debug \
                   debug-samples \
                   benchmark-rows \
-                  memory-map
+                  memory-map \
+                  peak-consumers \
+                  peak-not-below-readings \
+                  peak-fallback
 scenario_parse_args "$@"
 
 if [[ ! -x "$LTL" ]]; then
@@ -436,6 +549,9 @@ while read -r _scenario; do
         debug-samples  ) scenario_debug_samples ;;
         benchmark-rows ) scenario_benchmark_rows ;;
         memory-map     ) scenario_memory_map ;;
+        peak-consumers ) scenario_peak_consumers ;;
+        peak-not-below-readings ) scenario_peak_not_below_readings ;;
+        peak-fallback  ) scenario_peak_fallback ;;
     esac
 done < <(scenario_selected)
 

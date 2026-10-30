@@ -41,7 +41,8 @@ use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
 use Devel::Size qw(total_size);
-# get_memory_usage() loads Win32::API at runtime on Windows only
+# windows_working_set() loads Win32::API at runtime on Windows only, and
+# resolve_kept_peak_reading() BSD::Resource on macOS only
 use List::Util qw(min max);
 use Scalar::Util qw(looks_like_number);
 use File::Glob qw(bsd_glob);
@@ -172,6 +173,7 @@ my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elaps
 my ( $elapsed_stats_bucket_stats, $elapsed_stats_population_walk, $elapsed_stats_sort_selection, $elapsed_stats_group_calc, $elapsed_stats_threadpool_stats ) = ( 0,0,0,0,0 );
 my ( $stats_population_buckets, $stats_population_messages, $stats_population_threadpools ) = ( 0,0,0 );
 my $memory_reading_failed = 0;  # a failed Windows memory reading, noticed once per run
+my $kept_peak_readable = 0;     # the operating system's kept peak can be read, settled as the pipeline starts
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 
@@ -8295,6 +8297,9 @@ sub write_index_file {
         }
     }
 
+    # The run's peak as the index is written, once for every selection row.
+    my $run_peak = read_run_peak_memory();
+
     # Write atomically via temp file
     my $write_ok = eval {
         open my $ofh, '>', $temp_path or die "Cannot write $temp_path: $!";
@@ -8350,7 +8355,7 @@ sub write_index_file {
                     duration_occurrences   => $fd->{sel_duration_occurrences},   duration_min   => $fd->{sel_duration_min} // '-',   duration_max   => $fd->{sel_duration_max} // '-',   duration_mean   => $sel_dur_avg,
                     file_bytes_occurrences => $fd->{sel_file_bytes_occurrences}, file_bytes_min => $fd->{sel_file_bytes_min} // '-', file_bytes_max => $fd->{sel_file_bytes_max} // '-', file_bytes_mean => $sel_file_bytes_mean,
                     count_occurrences      => $fd->{sel_count_occurrences},      count_min      => $fd->{sel_count_min} // '-',      count_max      => $fd->{sel_count_max} // '-',      count_mean      => $sel_count_mean,
-                    read_rate => '-', memory_used => $max_memory_usage, processing_time => sprintf("%.3f", $elapsed_total), filters => $current_filters,
+                    read_rate => '-', memory_used => $run_peak, processing_time => sprintf("%.3f", $elapsed_total), filters => $current_filters,
                 ) );
             }
         }
@@ -12356,41 +12361,112 @@ sub get_memory_usage {
             }
         }
     } elsif ($^O eq 'MSWin32') {                                # Windows
-        # Working set read through kernel32's K32GetProcessMemoryInfo (Win32::API)
-        eval {
-            require Win32::API;
-            my $get_current = Win32::API->new('kernel32', 'GetCurrentProcess', [], 'N');
-            my $handle = $get_current->Call();
-            # PROCESS_MEMORY_COUNTERS struct: cb(DWORD) + PageFaultCount(DWORD) + 8 SIZE_T fields
-            my $is_64bit = length(pack('P', 0)) == 8;
-            my $struct_size = $is_64bit ? 72 : 40;
-            my $buf = "\0" x $struct_size;
-            substr($buf, 0, 4, pack('V', $struct_size));
-            my $get_mem_info = Win32::API->new('kernel32', 'K32GetProcessMemoryInfo', ['N', 'P', 'N'], 'I');
-            if ($get_mem_info->Call($handle, $buf, $struct_size)) {
-                # WorkingSetSize: after cb(4) + PageFaultCount(4) + PeakWorkingSetSize(SIZE_T)
-                my $offset = $is_64bit ? 16 : 12;
-                $memory_usage = $is_64bit ? unpack('Q', substr($buf, $offset, 8))
-                                          : unpack('V', substr($buf, $offset, 4));
-            }
-        };
-        # Once per run: every later reading fails the same way.
-        if ( $@ && !$memory_reading_failed++ ) {
-            chomp( my $err = $@ );
-            notice( kind => 'memory-unreadable', category => 'runtime_condition',
-                    statement => 'Failed to get memory usage on Windows', evidence => $err );
-        }
+        ( undef, $memory_usage ) = windows_working_set();
     } else {
         return 0;                                               # no reading on this platform
     }
 
-    if ($reading_start) {
-        my $tally = $memory_readings{$site} //= { readings => 0, seconds => 0 };
-        $tally->{readings}++;
-        $tally->{seconds} += tv_interval($reading_start);
-    }
+    count_memory_reading( $site, $reading_start ) if $reading_start;
 
     return $memory_usage // 0;
+}
+
+# The high-water mark of the process's resident memory that the operating
+# system keeps, in bytes: the true peak up to this moment, whatever was freed
+# before it. macOS reads ru_maxrss from getrusage through BSD::Resource (in
+# bytes there), Linux VmHWM from /proc/self/status, Windows the working set's
+# peak. 0 when the reading fails. Called only once resolve_kept_peak_reading()
+# has found it readable.
+sub get_kept_peak_memory {
+    my $peak;
+    my $reading_start = $memory_readings_active ? [gettimeofday] : undef;
+
+    if ($^O eq 'darwin') {                                      # macOS
+        $peak = ( BSD::Resource::getrusage() )[2];
+    } elsif ($^O eq 'linux') {                                  # Linux
+        if (open my $fh, '<', '/proc/self/status') {
+            while (my $line = <$fh>) {
+                if ($line =~ /^VmHWM:\s+(\d+)\s+kB/) { $peak = $1 * 1024; last }
+            }
+            close $fh;
+        }
+    } elsif ($^O eq 'MSWin32') {                                # Windows
+        ($peak) = windows_working_set();
+    }
+
+    count_memory_reading( 'kept_peak', $reading_start ) if $reading_start;
+
+    return $peak // 0;
+}
+
+# Whether the operating system's kept peak can be read, settled once as the
+# pipeline starts. Linux and Windows read it as they read the current size; macOS
+# needs BSD::Resource, loaded here and on macOS only. Without it the run
+# reports the highest of the readings taken between steps, and says so once.
+sub resolve_kept_peak_reading {
+    return 1 if $^O eq 'linux' || $^O eq 'MSWin32';
+    return 0 unless $^O eq 'darwin';
+    my $loaded = eval {
+        require BSD::Resource;
+        1;
+    };
+    return 1 if $loaded;
+    my $missing = $@ =~ m{^Can't locate BSD/Resource\.pm} ? 'is not installed' : 'did not load';
+    notice( kind => 'memory-unreadable', category => 'runtime_condition',
+            statement => 'The peak memory reported is the highest reading taken between processing steps, and can fall short of the true peak',
+            evidence  => "the BSD::Resource module, which reads the peak macOS keeps for the process, $missing" );
+    return 0;
+}
+
+# The run's peak resident memory at a moment it is reported, in bytes: the
+# operating system's kept peak, or where that cannot be read, the highest of
+# the readings taken between steps. $max_memory_usage takes it, so every
+# figure computed against the peak at that moment reads the same value.
+sub read_run_peak_memory {
+    if ($kept_peak_readable) {
+        my $peak = get_kept_peak_memory();
+        $max_memory_usage = $peak if $peak;
+    }
+    return $max_memory_usage;
+}
+
+# Windows: the process's peak working set and its working set, in bytes, read
+# through kernel32's K32GetProcessMemoryInfo (Win32::API); an empty list when
+# the call fails.
+sub windows_working_set {
+    my ( $peak, $current );
+    eval {
+        require Win32::API;
+        my $get_current = Win32::API->new('kernel32', 'GetCurrentProcess', [], 'N');
+        my $handle = $get_current->Call();
+        # PROCESS_MEMORY_COUNTERS struct: cb(DWORD) + PageFaultCount(DWORD) + 8 SIZE_T fields
+        my $is_64bit = length(pack('P', 0)) == 8;
+        my $struct_size = $is_64bit ? 72 : 40;
+        my $buf = "\0" x $struct_size;
+        substr($buf, 0, 4, pack('V', $struct_size));
+        my $get_mem_info = Win32::API->new('kernel32', 'K32GetProcessMemoryInfo', ['N', 'P', 'N'], 'I');
+        if ($get_mem_info->Call($handle, $buf, $struct_size)) {
+            # PeakWorkingSetSize after cb(4) + PageFaultCount(4), WorkingSetSize after it
+            ( $peak, $current ) = $is_64bit ? unpack('Q Q', substr($buf, 8, 16))
+                                            : unpack('V V', substr($buf, 8, 8));
+        }
+    };
+    # Once per run: every later reading fails the same way.
+    if ( $@ && !$memory_reading_failed++ ) {
+        chomp( my $err = $@ );
+        notice( kind => 'memory-unreadable', category => 'runtime_condition',
+                statement => 'Failed to get memory usage on Windows', evidence => $err );
+    }
+    return defined $current ? ( $peak, $current ) : ();
+}
+
+# One reading of the process memory under its caller, for -V memory-usage.
+sub count_memory_reading {
+    my ( $site, $reading_start ) = @_;
+    my $tally = $memory_readings{$site} //= { readings => 0, seconds => 0 };
+    $tally->{readings}++;
+    $tally->{seconds} += tv_interval($reading_start);
+    return;
 }
 
 # ==================================================================================
@@ -14488,7 +14564,7 @@ sub memory_debug_decomposition {
 # -mem debug the diagnostic readings, printed at the end of pipeline_render(),
 # after the run's last reading. Contract: features/memory-tracking-improvements.md
 # § -V memory-usage section contract.
-my @memory_reading_sites = qw( phase_boundary grouping_checkpoint grouping_final_pass
+my @memory_reading_sites = qw( kept_peak phase_boundary grouping_checkpoint grouping_final_pass
                                format_scan_compile csv_block_compile
                                debug_decomposition debug_sample );
 sub emit_memory_usage_verbose {
@@ -23884,13 +23960,15 @@ sub print_verbose_output {
     printf "TIMING\tfinalize/histogram_statistics\t%.3f\n", $elapsed_finalize_histogram_statistics;
     printf "TIMING\trender/normalize_data\t%.3f\n", $elapsed_render_normalize_data;
     printf "TIMING\ttotal\t%.3f\n", $elapsed_total;
+    # The peak as this block prints, read before the totals so they count it.
+    my $run_peak = read_run_peak_memory();
     # The -V memory-usage totals so far: time spent reading memory inside the
     # stages above, an accumulator like detect/scan_sub_compile.
     my ( $memory_readings, $memory_reading_seconds ) = memory_reading_totals();
     printf "TIMING\tmemory/readings\t%.3f\n", $memory_reading_seconds if $memory_readings_active;
 
     # Memory rows (raw bytes)
-    printf "MEMORY\trss_peak\t%d\n", $max_memory_usage;
+    printf "MEMORY\trss_peak\t%d\n", $run_peak;
     # #413/D62: a compile-boundary RSS delta, not a structure walk, so it is
     # available whenever a memory surface armed it — with no -mem it would
     # otherwise be missing, since the per-structure rows below are gated on
@@ -23910,7 +23988,7 @@ sub print_verbose_output {
         # Same value the -mem terminal breakdown renders as 'unattributed'.
         my $total_hwm = 0;
         $total_hwm += $_ for values %memory_high_water_marks;
-        my $unattributed = $max_memory_usage - $total_hwm;
+        my $unattributed = $run_peak - $total_hwm;
         $unattributed = 0 if $unattributed < 0;
         printf "MEMORY\tunattributed\t%d\n", $unattributed;
     }
@@ -25856,6 +25934,11 @@ sub print_threadpool_summary {
 # inside read_and_process_logs() — see the parse-stage interleaving note.
 sub pipeline_detect {
     enter_notice_stage('detect');
+    # Settled once, before the first reading, as the pipeline starts rather
+    # than with the options: its notice is a runtime condition, not one the
+    # options review puts to the analyst before the read.
+    $kept_peak_readable = resolve_kept_peak_reading();
+
     # Issue #58: compile the declarative format definitions into the live
     # registry and run its load-time validation gates. Must run after
     # option parsing — extraction closures bake CLI-gated behavior.
@@ -26264,12 +26347,12 @@ sub pipeline_render {
     print_threadpool_summary() if $include_threadpool_summary && $capture_messages && !section_hidden('threadpools');					    # Print threadpool summaries
     memory_debug_decomposition("after_threadpool_summary") if $include_threadpool_summary;
 
-    # Issue #356 (S1): capture the peak across every rendered analysis section so
+    # Issue #356 (S1): the peak read after every rendered analysis section, so
     # the MAXIMUM MEMORY USED the summary reports accounts for all of them. The
     # summary render's own residual is covered by the post-output measurement
     # below and visible under -mem debug.
     measure_memory_structures('phase_boundary');
-    $reported_max_memory_usage = $max_memory_usage;
+    $reported_max_memory_usage = read_run_peak_memory();
 
     # The summary reports on the run itself -- the span analysed, the files read,
     # the totals, timing and memory -- so it closes the output, leaving the
