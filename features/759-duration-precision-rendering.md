@@ -646,5 +646,13 @@ first value here (six decimals of a millisecond reach the nanosecond); the
 +2.1% that remains is the per-value test of the metric's count flag. An
 array of flags in its place measured the same (+3.4% against +3.0%).
 
+| gate | 35dee9e0 | two harness expectations follow the precision: `validate-csv-output`'s default-mode decimals check reads a scenario's declared precision (`@duration_precision`; `gc-g1-categories` and `udm-ratio-cell` write milliseconds with three decimals), and `validate-timestamp-precision` `truth/structure` lists the durations' callers of `fraction_precision()` (D4) |
+
 Count metrics declared with a multiplier (`K`, `M`) keep their declared floor:
 D5 names time and byte metrics.
+
+**Completion gate** (2026-10-30, on 35dee9e0, `$version_number` 0.20.0): the
+`after` benchmark first (below; `ltl` unchanged since a3c30a4f), then
+`tests/run-suite.sh`: 54 harnesses, 54 passed, 5,475 checks, 0 failed. The
+first run, on a3c30a4f, failed the two expectations the gate row above
+corrects.
