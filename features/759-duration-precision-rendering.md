@@ -567,6 +567,13 @@ is added for the precision. Every scenario carries the runtime-warning check.
 
 **Confirmed by the architect 2026-10-29.**
 
+**Release targets** (the architect, 2026-10-30): the fix is delivered to
+0.20.0 and to a 0.19.1 patch release made for it, which then merges to `main`.
+Before either is released, the architect tests the built tool himself, to be
+sure what is released solves the reported case. The process remediation found
+during this work (§ 7, *Process remediation*) is delivered on this issue's
+branch and reaches `main` through the release.
+
 **Before the first line of code.** The issue branch
 `759-duration-precision-rendering` is cut from `release/0.20.0`,
 `$version_number` set to `0.20.0-759`, and the `before` benchmark captured on
