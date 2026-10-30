@@ -569,8 +569,9 @@ is added for the precision. Every scenario carries the runtime-warning check.
 
 **Release targets** (the architect, 2026-10-30): the fix is delivered to
 0.20.0 and to a 0.19.1 patch release made for it, which then merges to `main`.
-Before either is released, the architect tests the built tool himself, to be
-sure what is released solves the reported case. The process remediation found
+The architect tests the change himself, to be sure what is released solves
+the reported case; his test comes before each completion gate, which runs on
+the commit he accepted (`docs/process/workflow.md` § 3). The process remediation found
 during this work (§ 7, *Process remediation*) is delivered on this issue's
 branch and reaches `main` through the release.
 

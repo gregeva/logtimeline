@@ -57,8 +57,11 @@ about anything else, these still hold.
   direction. Starting new work always waits. Once an issue's work has started,
   the drops of its agreed delivery plan, then its completion gate, PR, merge
   and close-out, run in sequence without asking between them; the run stops
-  only for a decision that is the architect's, a failure, or a finding. The
-  gate follows the last drop of a plan the architect agreed; Claude's own sense
+  only for a decision that is the architect's, a failure, or a finding. When the
+  architect says he will test the change himself, his test sits between the
+  last drop and the gate: it takes him minutes and the suite half an hour, so
+  the change is handed to him first and the gate runs on the commit he accepted.
+  The gate follows the last drop of a plan the architect agreed; Claude's own sense
   that the work is done never starts it, and an issue with no agreed plan has
   one agreed first.
 - **A drop is not a release.** It ends with the developer's own runs on chosen
@@ -227,7 +230,8 @@ about anything else, these still hold.
       runs once, as the completion gate, through `tests/run-suite.sh` and
       nothing else; the Bash guard refuses it outside the gate. Before
       launching any gate: name the behaviour this change could have altered;
-      if none, there is nothing to prove.
+      if none, there is nothing to prove; and confirm no test the architect
+      said he would run is still outstanding.
 - [ ] Every `ltl` invocation in a test is shaped to the assertion that reads it:
       smallest fixture carrying the signal, everything unread switched off via
       documented options (`-bs 1440 -oe` for detection and selection assertions).

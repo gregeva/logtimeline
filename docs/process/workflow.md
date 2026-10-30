@@ -140,6 +140,12 @@ commit being merged**. A gate run that predates the last amend does not count,
 and an added commit re-applies the scope test. The `after` benchmark runs
 first, then the full harness suite.
 
+The gate is the last step of development, not part of it. When the architect
+has said he will test the change himself, the change is handed to him when the
+last drop is pushed, and the gate starts only once he has accepted it: his test
+takes minutes and the suite half an hour, and a finding from his test is a new
+commit that a gate run before it would have to repeat.
+
 ### Scope test, applied to the diff
 
 | The diff touches | Before/after benchmark | Full harness suite |
