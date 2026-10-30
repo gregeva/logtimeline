@@ -693,6 +693,18 @@ which is emitted on elapsed time, and the re-run passed. The shape compares
 time-driven output; the loop's text is the base's, so this is the harness's,
 not this change's.
 
+**Completion gate, on the rework** (2026-10-30, on 0ab35bd4, `$version_number`
+0.20.0): the `after` benchmark first, three alternating pairs a side against
+the base: `single-day-access-log-standard` total 5.159 s [5.026..5.235] against
+5.239 s [5.184..5.335], peak memory 107.0 MB against 106.9 MB;
+`network-latency-csv` 1.321 s [1.248..1.486] against 1.326 s [1.260..1.384].
+The read loop's text is the base's; on the standard log, nine interleaved runs
+a side measured +1.8% and five measured +0.1%, while intermediate commits that
+never touched the read loop measured −1.4% to +1.0% in the same round, the
+machine's spread on that file. Then `tests/run-suite.sh`: 54 harnesses, 54
+passed, 5,476 checks, 0 failed. The architect tested the branch on another
+machine and validated it.
+
 ### Process remediation
 
 The architect, 2026-10-30, on the per-value count: through this work the
