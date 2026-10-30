@@ -6,7 +6,8 @@ Blocks: #709 (`-mem` misses stores and working memory), from its delivery plan
 drop 2 on.
 
 Status: delivery, from 2026-10-30, on branch `757-cpanfile-per-platform`.
-Drop 1 is delivered (§ Delivery plan › Progress). The contracts of the surfaces
+Drops 1 and 2 are delivered; drop 3 is blocked on this host's network
+(§ Delivery plan › Progress). The contracts of the surfaces
 touched are confirmed by the architect; the records sweep, the findings, the
 architect's direction and the scope are recorded below, and the acceptance
 criteria are agreed (architect, 2026-10-28), with his corrections to 3, 5 and 6
@@ -312,6 +313,48 @@ Observation: `prototype/720-packed-generated-loop/pack-linux.sh` runs
 `cpanfile` that no longer exists. It is the instrument of a closed issue's
 measurement and is left as it ran; the grep of criterion 5 does not see it,
 since it names no `build/cpanfile`.
+
+**Drop 2, delivered 2026-10-30** (ed49210d, with 895916c0 correcting the
+temporary job). `build/ubuntu-package.sh` and `build/windows-package.sh` each
+run the generator with their target platform before installing; the release
+workflow's two generate steps are gone; `.github/workflows/757-linux-readers.yml`
+is the temporary Linux job. Evidence:
+- Criterion 1 on Linux, by the temporary job (run 41049116425, `ubuntu-latest`,
+  `uname -s` `Linux`): with the three files removed, the generator with no
+  argument wrote `build/cpanfile.linux` alone. Recorded with drop 2, the one
+  sensible option: once the release workflow's generate steps go, its Ubuntu
+  job runs the generator with `linux` only, never without an argument, so the
+  criterion is checked by the temporary job on the same runner rather than by
+  the release run the criterion names.
+- Criterion 5, Linux readers, by the same run: `build/linux-setup.sh` to its
+  end, 7 pass, 0 FAIL, 1 note (the profiler, as expected without
+  `--dev-deps`); the environment check, conditions 3 and 4, reading
+  `build/cpanfile.linux`, and with a module that does not exist planted in it
+  condition 3 fails naming the module and `build/cpanfile.linux`;
+  `build/linux-setup.sh --dev-deps` to its end, 8 pass, 0 FAIL; the preflight,
+  its trace setting `CPANFILE=cpanfile.linux`, all three of its checks `[ok]`.
+  The job's first run (41048944357) failed on its own step: a `| tee` took
+  the planted check's exit status under a shell without `pipefail`, though the
+  check had failed as intended; 895916c0 reads the status directly.
+- Criterion 5, builds, by the release workflow's `workflow_dispatch` run on the
+  issue branch (41048952843, all four build jobs passed, the release job
+  skipped as off a tag): the macOS job generated and installed from
+  `cpanfile.macos`, both Ubuntu jobs (amd64, arm64) from `cpanfile.linux`, and
+  the Windows job, on `ubuntu-latest` under Wine, from `cpanfile.windows`; each
+  binary answers `--version` with `0.20.0-757`. After drop 2 the grep for
+  `build/cpanfile` with no suffix, outside `features/` and `releases/`, finds
+  nothing.
+
+**Drop 3, blocked on this host's network (2026-10-30).** `BSD::Resource` is
+installed into the development Perl (1.2911) by the macOS setup's own install
+command, `cpanm --notest --cpanfile cpanfile.macos --installdeps .`, run
+against a macOS file generated from a scratch `ltl` carrying
+`require BSD::Resource`. The pack cannot run: this host's Perl (5.44) has no
+PAR::Packer, and `build/macos-setup.sh --package` fails installing it, because
+the download of its dependency Archive::Zip (`Archive-Zip-1.68.tar.gz` from
+www.cpan.org) is answered by a network proxy's HTML block page, which `tar`
+cannot unpack. The PAR and PAR-Packer archives from the same mirror download
+whole.
 
 Completion gate: the temporary job deleted first. The diff touches no line of
 `ltl` and no harness, fixture or expectation, and no harness runs the changed
