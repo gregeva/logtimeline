@@ -124,7 +124,6 @@ SHAPES=(
     "script-udm-heatmap-histogram=-udm durationMS::max -hm durationMS -hg durationMS -bs 5@SCRIPT"
     "script-udm-heatmap-highlight=-udm durationMS::max -hm durationMS -h Things -bs 5@SCRIPT"
     "script-udm-group=-udm durationMS::max -g 50 -bs 5@SCRIPT"
-    "script-udm-time=-udm durationMS:ms:max -hm durationMS -bs 5@SCRIPT"
     "csv-udm=-udm system_cpu_total -bs 5@METRICS"
 )
 

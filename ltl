@@ -767,7 +767,6 @@ my ( @udm_configs, @udm_raw_args, %udm_last_value );
 my %udm_distinct;                           # Per-bucket distinct value sets for counting aggregations (Issue #313), freed after counting like %log_sessions
 my @udm_rejected_specs;                     # -udm arguments skipped at parse time: { spec, reason } (Issue #443), reported on -V udm-specs
 my %udm_production;                         # Run-wide per-metric production derived from the bucket accumulators after the read loop (Issue #443)
-my $udm_counts_decimals = 0;                # a -udm metric's precision reads its values' decimals (a time or byte metric): the read loop's count is compiled in
 my %udm_skipped_lines;                      # Per /regex/ metric: retained lines whose capture its numeric aggregation could not use; a key exists only once one is skipped (Issue #638)
 my @udm_sources;                            # Per config index: the sources the metric was read from ('line', 'csv:<column>', 'csv:unbound'), noted once per file as it binds (Issue #638)
 my @udm_csv_unbound_files;                  # Per config index: CSV files whose rows matched and whose header has no column for the metric (Issue #640)
@@ -6390,6 +6389,7 @@ sub format_registry_classify {
 #   duration_digits => { entry name => { unit token written on the line, ''
 #                       for a format that declares its unit => the most
 #                       decimals among that format's sampled durations } }
+#   recognised     => [ indices into lines of the lines a format recognised ]
 #   elapsed_us     => wall time of the whole sample
 #
 # The sample also knows the file's size and observes its average line
@@ -6419,7 +6419,7 @@ sub sample_file_for_detection {
 
     my @offsets = $whole ? (0)
                 : map { $_ == $parts - 1 ? $size - $bytes : int($_ * ($size - $bytes) / ($parts - 1)) } 0 .. $parts - 1;
-    my (@lines, @part_obs, %formats, %frac_digits, %duration_digits);
+    my (@lines, @part_obs, %formats, %frac_digits, %duration_digits, @recognised);
     for my $offset (@offsets) {
         seek $sfh, $offset, 0;
         my $buf = '';
@@ -6440,6 +6440,7 @@ sub sample_file_for_detection {
             push @lines, $line;
             my ($e, @c) = format_classify_interpreted( $line, \@format_registry );
             if ($e) {
+                push @recognised, $#lines;
                 $obs->{matched}++;
                 $obs->{formats}{ $e->[FR_NAME] }++;
                 $formats{ $e->[FR_NAME] }++;
@@ -6468,7 +6469,7 @@ sub sample_file_for_detection {
     return {
         size => $size, parts => scalar(@offsets), bytes_per_part => $bytes, whole => $whole,
         lines => \@lines, part_obs => \@part_obs, formats => \%formats, frac_digits => \%frac_digits,
-        duration_digits => \%duration_digits,
+        duration_digits => \%duration_digits, recognised => \@recognised,
         elapsed_us => tv_interval($t0) * 1e6,
     };
 }
@@ -12097,11 +12098,6 @@ sub parse_udm_configs {
             $converter = undef;
         }
 
-        # The ladder steps finer than a time or byte metric's declared unit.
-        my $finer_steps = $unit_type eq 'time'  ? scalar( grep { $_->{ms} < $time_unit_step{$unit}{ms} } @time_unit_ladder )
-                        : $unit_type eq 'bytes' ? byte_unit_index($unit) // 0
-                        :                         0;
-
         # Build default patterns if no custom pattern provided; the token key
         # (when given) is the extraction anchor, leaving the name as pure label
         if (!@patterns) {
@@ -12137,13 +12133,11 @@ sub parse_udm_configs {
             unit_type   => $unit_type,
             converter   => $converter,
             # A time or byte metric's precision is its declared unit descended
-            # by the decimals its values are written with: the read loop keeps
-            # the most of them under decimals (udm_precision()), and stops
-            # counting at decimals_full, where the precision reaches the
-            # ladder's finest step and no later value can change it.
-            counts_decimals => $finer_steps ? 1 : 0,
-            decimals        => 0,
-            decimals_full   => 3 * $finer_steps - 2,
+            # by the most decimals its values are written with (udm_precision()):
+            # counted on the detection sample's lines, else read back from the
+            # buckets' stored extremes after the read (count_udm_sample_decimals(),
+            # resolve_udm_decimals()).
+            counts_decimals => ( $unit_type eq 'time' || $unit_type eq 'bytes' ) && $agg_kind ne 'counting' ? 1 : 0,
         };
     }
 
@@ -16607,9 +16601,10 @@ sub resolve_value_kind {
 }
 
 # A user-defined time or byte metric's precision: its declared unit descended
-# by the fraction_steps() of the most decimals among the values it read, on
-# the time ladder or the byte ladder (never below the byte); the declared unit
-# when none carried a decimal.
+# by the fraction_steps() of the most decimals its values are written with
+# (count_udm_sample_decimals(), resolve_udm_decimals()), on the time ladder or
+# the byte ladder (never below the byte); the declared unit when none carried
+# a decimal.
 sub udm_precision {
     my ($config) = @_;
     my $digits = $config->{decimals};
@@ -16617,6 +16612,51 @@ sub udm_precision {
     my $steps = fraction_steps($digits) or return $config->{unit};
     my $at = byte_unit_index( $config->{unit} ) // return $config->{unit};
     return $byte_unit_ladder[ $at > $steps ? $at - $steps : 0 ]{si}{token};
+}
+
+# The decimals a time or byte metric's values are written with, counted on
+# the detection sample's lines a format recognised (a metric's patterns are
+# tried only on those, as the read loop tries them), with the read loop's
+# number test; the most seen across the run's files is kept on the metric.
+# Nothing is counted per line of the read.
+sub count_udm_sample_decimals {
+    my ($sample) = @_;
+    my @configs = grep { $_->{counts_decimals} } @udm_configs or return;
+    for my $line ( @{ $sample->{lines} }[ @{ $sample->{recognised} // [] } ] ) {
+        for my $config (@configs) {
+            my $value;
+            for my $pattern ( @{ $config->{patterns} } ) {
+                next unless $line =~ $pattern;
+                $value = defined $1 ? $1 : substr( $line, $-[0], $+[0] - $-[0] );
+                last;
+            }
+            next unless defined $value && ( $value =~ tr/0-9.eE+\-//c ) == 0 && looks_like_number($value);
+            my $decimals = $value =~ /\.(\d+)/ ? length $1 : 0;
+            $config->{decimals_sampled} = 1;
+            $config->{decimals} = $decimals if $decimals > ( $config->{decimals} // 0 );
+        }
+    }
+    return;
+}
+
+# After the read, a time or byte metric the detection sample never reached
+# takes its decimals from what the read stored exactly: each bucket's minimum
+# and maximum, expressed back in the declared unit, whose twelve significant
+# digits give back the decimals the value was written with (0.25 s, stored as
+# 250 ms, reads back 0.25).
+sub resolve_udm_decimals {
+    for my $config ( grep { $_->{counts_decimals} && !$_->{decimals_sampled} } @udm_configs ) {
+        my $name = $config->{name};
+        my $per_unit = $config->{unit_type} eq 'time' ? $time_unit_step{ $config->{unit} }{ms} : $byte_unit_bytes{ $config->{unit} };
+        next unless $per_unit;
+        for my $bucket ( values %log_analysis ) {
+            for my $value ( grep { defined } @$bucket{ "udm_${name}_min", "udm_${name}_max" } ) {
+                my $decimals = sprintf( '%.12g', $value / $per_unit ) =~ /\.(\d+)$/ ? length $1 : 0;
+                $config->{decimals} = $decimals if $decimals > ( $config->{decimals} // 0 );
+            }
+        }
+    }
+    return;
 }
 
 # A byte unit's step on the byte ladder, 0 for the byte: the step whose
@@ -17906,7 +17946,6 @@ sub adapt_to_command_line_options {
     # The -udm metrics are parsed before the optional operands are settled:
     # -hm and -hg take a user-defined metric's name, wherever -udm stands.
     parse_udm_configs() if @udm_raw_args;
-    $udm_counts_decimals = ( grep { $_->{counts_decimals} } @udm_configs ) ? 1 : 0;
 
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
     # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
@@ -19009,6 +19048,7 @@ sub read_and_process_logs {
             # (#615 D9). A file that is not CSV holds them, at most the three
             # sample parts, until it ends: releasing them sooner would add a
             # test to every line.
+            count_udm_sample_decimals($sample) if @udm_configs;
             $csv_sample_lines = delete $sample->{lines};
             $csv_sample_lines = undef unless @udm_configs;
             $format_detection_sample{$in_file} = $sample;
@@ -19365,18 +19405,6 @@ sub read_and_process_logs {
                     unless (($matched_value =~ tr/0-9.eE+\-//c) == 0 && looks_like_number($matched_value)) {
                         push @$udm_skipped, $name unless $match_type == 13;
                         next;
-                    }
-
-                    # The decimals a time or byte metric's value is written
-                    # with: its precision is its declared unit descended by
-                    # the most of them (udm_precision()).
-                    #@and $udm_counts_decimals
-                    if ($udm_counts_decimals && $config->{counts_decimals}) {
-                        my $decimals = length($matched_value) - index($matched_value, '.') - 1;
-                        if ($decimals > $config->{decimals} && $decimals < length($matched_value)) {
-                            $config->{decimals} = $decimals;
-                            $config->{counts_decimals} = 0 if $decimals >= $config->{decimals_full};
-                        }
                     }
 
                     my $raw_value = $matched_value + 0;
@@ -25810,6 +25838,7 @@ sub pipeline_parse {
     resolve_byte_notation();
     resolve_timestamp_precision();
     resolve_duration_precision();
+    resolve_udm_decimals() if @udm_configs;
     note_finer_duration_bounds();
     measure_memory_structures('phase_boundary');
     memory_debug_decomposition("after_read");

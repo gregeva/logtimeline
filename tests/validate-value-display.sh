@@ -799,7 +799,29 @@ scenario_precision_several_files() {
         contract    "$PRECISION_CONTRACT § 5 (several files); AC6"
 }
 
-scenario_register count-spelling fixed-budget-sweep zero-duration floor-unit cv-agreement user-defined-kind rate-suffix fit-sweep common-maxima boundary-carry messages-total axis-tick exact-counts no-trailing-zero precision-pair precision-zero precision-floor precision-part-group precision-rounding precision-several-files
+# ---------------------------------------------------------------------------
+# precision-udm-fallback (AC7, D5 as amended): a metric the detection sample
+# never reaches takes its decimals from the buckets' stored extremes after the
+# read. Generated: 700 lines of the seconds-metric fixture's format, about 113
+# KB, whose only metric lines (elapsed=0.012) start at byte 24,138, between
+# the sample's front part and its middle one. -bs 1440 -oe -n 0: one bucket,
+# its timeline cell and the heatmap header are read.
+# ---------------------------------------------------------------------------
+scenario_precision_udm_fallback() {
+    current_scenario="precision-udm-fallback"
+    echo "[$current_scenario]"
+    local gen="$TMP_DIR/udm-fallback.txt"
+    "$PERL" -e 'for my $i (0..699) { my $tail = ($i >= 150 && $i < 156) ? "VD-seconds executed elapsed=0.012" : "VD-filler executed without a value to read here at all"; printf "2026-01-26 10:%02d:%02d.000+0000 [L: INFO] [O: ValueDisplayFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] %s\n", int($i/60)%60, $i % 60, $tail }' > "$gen"
+    render puf "$gen" -bs 1440 -oe -n 0 --terminal-width 160 --debug-layout -udm 'elapsed:s:max' -hm elapsed || return 0
+    assert_command \
+        command     "[[ \$(awk '/elapsed=/ { print c; exit } { c += length(\$0) + 1 }' '$gen') -gt 8192 ]] && cell_text puf '^ 2026-01-26 00:00' udm_elapsed | grep -qE '^12 ?(ms|msec|milliseconds)\$' && grep -E 'heatmap \\[elapsed\\]' '$TMP_DIR/puf.txt' | grep -qE '12ms .*heatmap \\[elapsed\\] +12ms *\$'" \
+        label       'a seconds metric first seen past the sample reads 12 milliseconds on its timeline cell and heatmap header' \
+        asserts     "A metric the detection sample never reaches takes its decimals from the buckets' stored extremes, read back in its declared unit: 0.012 s carries the millisecond" \
+        produced_by 'resolve_udm_decimals() in ltl, after the read; udm_precision() gives the floor' \
+        contract    "features/759-duration-precision-rendering.md D5 as amended, AC7"
+}
+
+scenario_register count-spelling fixed-budget-sweep zero-duration floor-unit cv-agreement user-defined-kind rate-suffix fit-sweep common-maxima boundary-carry messages-total axis-tick exact-counts no-trailing-zero precision-pair precision-zero precision-floor precision-part-group precision-rounding precision-several-files precision-udm-fallback
 scenario_parse_args "$@"
 
 scenario_wanted count-spelling     && { scenario_count_spelling; echo ""; }
@@ -822,6 +844,7 @@ scenario_wanted precision-floor         && { scenario_precision_floor; echo ""; 
 scenario_wanted precision-part-group    && { scenario_precision_part_group; echo ""; }
 scenario_wanted precision-rounding      && { scenario_precision_rounding; echo ""; }
 scenario_wanted precision-several-files && { scenario_precision_several_files; echo ""; }
+scenario_wanted precision-udm-fallback  && { scenario_precision_udm_fallback; echo ""; }
 
 echo "Results: $pass passed, $fail failed"
 if [[ "$fail" -gt 0 || "$pass" -eq 0 ]]; then
