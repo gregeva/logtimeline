@@ -108,6 +108,7 @@ substring of the `message` column and the category every matching row carries
 | `@no_highlight_rows` | no row carries category `highlight` |
 | `@non_increasing<TAB><column>` | rows are in non-increasing numeric order of the column (the `-so` sort) |
 | `@zero_duration_nice<TAB><value>` | every row whose `duration` is 0 carries that `duration_nice` (a zero total in the source's unit) |
+| `@duration_precision<TAB><token>` | declares the precision the input's durations carry when they are written with decimals (milliseconds with three decimals carry `us`); the default-mode decimals check of `-V csv-output` reads it in place of the unit read in |
 | `@cell<TAB><kind><TAB><key_column>=<key_value><TAB><column><TAB><value><TAB><contract>` | the one row of the `messages` or `stats` file whose key column equals the key value carries `value` in `column` (`(empty)` for an empty cell); the last field is the contract a failure reports |
 
 The file is handed to both validator runs of a scenario: a `stats` cell

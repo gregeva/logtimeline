@@ -167,7 +167,11 @@ about anything else, these still hold.
       touches is searched across `features/`, `docs/`, `releases/` and the issue
       bodies (a surface with no option, such as file arguments, by the subs and
       messages that implement it), and each
-      record found is read or dismissed in the feature doc with its reason.
+      record found is read or dismissed in the feature doc with its reason,
+      judged by its subject, never by the lines that matched; an entry of
+      `docs/architecture-patterns.md` the search names is a record of its own.
+- [ ] A decision that adds a surface (a sub, a store, a path run per line or
+      per value) re-runs the search over that surface's nouns before it is locked.
 - [ ] Read every feature file and doc the issue references; investigation
       findings live there, not in the thread. An audit, an issue body or another
       record's restatement points at a record; it is never the record.
@@ -445,7 +449,8 @@ rules in this file are enforced rather than advised:
   Before every file write `process/claude-hooks/guard-write.sh` blocks writes
   under `logs/`, to released baseline TSVs, and of problem reports into the repo,
   and a feature doc write that cites a `features/` or `docs/` record the
-  session's transcript shows no read of.
+  session's transcript shows no read of; it asks before an edit to `ltl`'s
+  per-line read loop.
 
 A rule that a hook can check belongs in a hook; a rule that needs judgement
 belongs in a checkpoint. `.claude/settings.local.json` stays machine-local and
