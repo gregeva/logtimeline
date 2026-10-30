@@ -1,3 +1,5 @@
 message_match	expected
 # one day bucket: ten lines carry the key over four distinct values, a ratio of 2.5, written at the shape family's decimals
 @cell	stats	timestamp=2026-01-26 00:00	repeat_ratio	2.5	features/618-csv-column-declaration.md D9 (a user-defined ratio is unitless: precision family shape, three decimals at the default precision)
+# the fixture writes milliseconds with three decimals: the microsecond
+@duration_precision	us

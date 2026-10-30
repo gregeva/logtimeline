@@ -1,0 +1,3 @@
+message_match	expected
+# the fixture's pauses are milliseconds written with three decimals: the microsecond
+@duration_precision	us
