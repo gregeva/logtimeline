@@ -238,12 +238,12 @@ echo "[6/7] Generating cpanfile and installing dependencies..."
 cd "$SCRIPT_DIR"
 ./generate-cpanfile.sh
 if [ "$dev_deps" = 1 ]; then
-    echo "[info] Installing runtime and development-only dependencies (cpanm --notest --installdeps --with-develop .)"
-    cpanm --notest --installdeps --with-develop .
+    echo "[info] Installing runtime and development-only dependencies (cpanm --notest --cpanfile cpanfile.macos --installdeps --with-develop .)"
+    cpanm --notest --cpanfile cpanfile.macos --installdeps --with-develop .
 else
-    echo "[info] Installing runtime dependencies only (cpanm --notest --installdeps .)"
+    echo "[info] Installing runtime dependencies only (cpanm --notest --cpanfile cpanfile.macos --installdeps .)"
     echo "[info] --dev-deps also installs the development-only profiling tools."
-    cpanm --notest --installdeps .
+    cpanm --notest --cpanfile cpanfile.macos --installdeps .
 fi
 
 echo "[7/7] Shell configuration..."

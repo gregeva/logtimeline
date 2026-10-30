@@ -137,7 +137,7 @@ modules=$(perl -ne '
     $develop = 1 if /^on\s+.develop./;
     $develop = 0 if /^\};/;
     print "$1\n" if /^\s*requires\s+.([\w:]+)./ && ( $develop ? $want : 1 );
-' "$dev_deps" "$SCRIPT_DIR/cpanfile")
+' "$dev_deps" "$SCRIPT_DIR/cpanfile.linux")
 if [ "$package" = 1 ]; then
     modules="$modules"$'\n'"PAR::Packer"
 fi

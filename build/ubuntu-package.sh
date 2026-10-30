@@ -5,7 +5,6 @@
 #
 # Requirements:
 #   - Docker (or Rancher Desktop)
-#   - cpanfile generated (run ./build/generate-cpanfile.sh first)
 #
 # Usage:
 #   ./build/ubuntu-package.sh [amd64|arm64]
@@ -35,11 +34,9 @@ echo "Ubuntu Build: ${PACKAGE_NAME}"
 echo "Architecture: ${architecture}"
 echo "=========================================="
 
-# Check cpanfile exists
-if [ ! -f "build/cpanfile" ]; then
-    echo "[error] Missing build/cpanfile - run ./build/generate-cpanfile.sh first"
-    exit 1
-fi
+# The container installs the Linux modules: generate their file for this build,
+# whatever the host
+./build/generate-cpanfile.sh "$SCRIPT_NAME" linux
 
 docker run --rm --platform=linux/$architecture \
    -e PACKAGE_NAME -e SCRIPT_NAME -v "$PWD":/work -w /work "${os}:${version}" bash -lc '
@@ -55,9 +52,9 @@ docker run --rm --platform=linux/$architecture \
     echo "[2/4] Installing PAR::Packer..."
     cpanm --notest PAR::Packer
 
-    echo "[3/4] Installing dependencies from cpanfile..."
-    if [ -f build/cpanfile ]; then
-      cd build && cpanm --notest --installdeps .
+    echo "[3/4] Installing dependencies from cpanfile.linux..."
+    if [ -f build/cpanfile.linux ]; then
+      cd build && cpanm --notest --cpanfile cpanfile.linux --installdeps .
       cd ..
     fi
 

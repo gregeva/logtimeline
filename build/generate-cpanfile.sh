@@ -7,11 +7,12 @@
 #
 # Arguments:
 #   script_name - Perl script to scan (default: ltl)
-#   platform    - Target platform: unix, windows, or all (default: all)
+#   platform    - Target platform: macos, linux, windows, or all (default: this host's, from uname -s)
 #
 # Output (in build/ directory):
-#   cpanfile          - Dependencies for Unix platforms (or all if platform=all)
-#   cpanfile.windows  - Dependencies for Windows (only when platform=windows or all)
+#   cpanfile.macos    - Dependencies for macOS (platform=macos or all)
+#   cpanfile.linux    - Dependencies for Linux (platform=linux or all)
+#   cpanfile.windows  - Dependencies for Windows (platform=windows or all)
 #
 
 # Determine the build directory (where this script lives)
@@ -19,13 +20,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 SCRIPT_NAME=${1:-ltl}
-TARGET_PLATFORM=${2:-all}
+TARGET_PLATFORM=${2:-}
+
+usage() {
+    echo "Usage: $0 [script_name] [macos|linux|windows|all]"
+}
+
+# With no platform named, this host's: the file its setup installs from.
+if [[ -z "$TARGET_PLATFORM" ]]; then
+    case "$(uname -s)" in
+        Darwin) TARGET_PLATFORM=macos ;;
+        Linux)  TARGET_PLATFORM=linux ;;
+        MINGW* | MSYS* | CYGWIN*) TARGET_PLATFORM=windows ;;
+        *)
+            echo "Unknown host: $(uname -s); name the platform"
+            usage
+            exit 1
+            ;;
+    esac
+fi
 
 # Change to repo root for script scanning
 cd "$REPO_ROOT"
 
-# Platform-specific modules that should be excluded from cross-platform builds
+# Platform-specific modules, each left out of the files of the platforms that
+# never load it
 UNIX_ONLY_MODULES=""
+MACOS_ONLY_MODULES="BSD::Resource"
 WINDOWS_ONLY_MODULES="Win32::API"
 
 # Drop the lines naming any module in the given grep pattern; an empty pattern
@@ -62,37 +83,52 @@ append_develop_block() {
     } | tee -a "$target"
 }
 
-# Write the Unix cpanfile: the scanned runtime list, then the develop block.
-generate_unix_cpanfile() {
-    generate_cpanfile | exclude_modules "$WINDOWS_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile"
-    append_develop_block "$SCRIPT_DIR/cpanfile"
+# Write one platform's cpanfile: the scanned runtime list less the modules of
+# the two given patterns, then the develop block.
+write_cpanfile() {
+    local target="$SCRIPT_DIR/cpanfile.$1"
+    generate_cpanfile | exclude_modules "$2" | exclude_modules "$3" | tee "$target"
+    append_develop_block "$target"
 }
 
-# Write the Windows cpanfile: the scanned runtime list, then the develop block.
+generate_macos_cpanfile() {
+    write_cpanfile macos "$WINDOWS_ONLY_MODULES" ""
+}
+
+generate_linux_cpanfile() {
+    write_cpanfile linux "$WINDOWS_ONLY_MODULES" "$MACOS_ONLY_MODULES"
+}
+
 generate_windows_cpanfile() {
-    generate_cpanfile | exclude_modules "$UNIX_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile.windows"
-    append_develop_block "$SCRIPT_DIR/cpanfile.windows"
+    write_cpanfile windows "$UNIX_ONLY_MODULES" "$MACOS_ONLY_MODULES"
 }
 
 case "$TARGET_PLATFORM" in
-    unix)
-        echo "Generating build/cpanfile for Unix..."
-        generate_unix_cpanfile
+    macos)
+        echo "Generating build/cpanfile.macos for macOS..."
+        generate_macos_cpanfile
+        ;;
+    linux)
+        echo "Generating build/cpanfile.linux for Linux..."
+        generate_linux_cpanfile
         ;;
     windows)
         echo "Generating build/cpanfile.windows for Windows..."
         generate_windows_cpanfile
         ;;
     all)
-        echo "Generating build/cpanfile (Unix)..."
-        generate_unix_cpanfile
+        echo "Generating build/cpanfile.macos (macOS)..."
+        generate_macos_cpanfile
+        echo ""
+        echo "Generating build/cpanfile.linux (Linux)..."
+        generate_linux_cpanfile
         echo ""
         echo "Generating build/cpanfile.windows (Windows)..."
         generate_windows_cpanfile
         ;;
     *)
         echo "Unknown platform: $TARGET_PLATFORM"
-        echo "Usage: $0 [script_name] [unix|windows|all]"
+        usage
         exit 1
         ;;
 esac

@@ -10,7 +10,7 @@ brew install cpanminus
 
 
 ./generate-cpanfile.sh				# generate list of cpan module dependencies from ltl Perl script
-sudo cpanm --notest --installdeps .  		# install required cpan modules listed in the cpanfile
+sudo cpanm --notest --cpanfile cpanfile.macos --installdeps .  	# install required cpan modules listed in the cpanfile
 sudo cpan -u					# to upgrade installed modules
 
 
@@ -22,7 +22,7 @@ sudo apt-get update
 sudo apt-get install build-essential
 sudo apt-get install cpanminus
 ./generate-cpanfile.sh				# generate list of cpan module dependencies from ltl Perl script
-sudo cpanm --notest --installdeps .  		# install required cpan modules listed in the cpanfile
+sudo cpanm --notest --cpanfile cpanfile.linux --installdeps .  	# install required cpan modules listed in the cpanfile
 pp -o ltl_static-binary_ubuntu-amd64 ltl
 
 

@@ -62,9 +62,6 @@ jobs:
         if: matrix.arch == 'arm64'
         uses: docker/setup-qemu-action@v3
 
-      - name: Generate cpanfile
-        run: cd build && ./generate-cpanfile.sh
-
       - name: Build static binary
         run: |
           ./build/ubuntu-package.sh ${{ matrix.arch }}
@@ -95,9 +92,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Generate cpanfile
-        run: cd build && ./generate-cpanfile.sh
 
       - name: Build Windows executable
         env:
