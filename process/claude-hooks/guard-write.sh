@@ -21,6 +21,34 @@ my $rel = $p;
 if ( $root ne '' ) { $windows ? $rel =~ s{^\Q$root\E/}{}i : $rel =~ s{^\Q$root\E/}{} }
 
 sub deny { print STDERR "[claude-hook] BLOCKED: $_[0]\n"; exit 2 }
+sub ask  {
+    print encode_json({ hookSpecificOutput => {
+        hookEventName => 'PreToolUse', permissionDecision => 'ask',
+        permissionDecisionReason => "[claude-hook] $_[0]" } });
+    exit 0;
+}
+
+# The per-line read loop of an ltl source: read_and_process_logs from its
+# `while (1) {` to that loop's closing brace, the text the generated read body
+# is built from. Returns the loop's text and its byte span in the source, or
+# nothing when the source has no such loop.
+sub read_loop_span {
+    my ($source) = @_;
+    my ( $in_sub, $offset, $from, $indent ) = ( 0, 0 );
+    for my $line ( split /(?<=\n)/, $source ) {
+        my $at = $offset;
+        $offset += length $line;
+        if ( !$in_sub ) { $in_sub = 1 if $line =~ /^sub read_and_process_logs \{/; next }
+        return if $line =~ /^sub /;
+        if ( !defined $from ) {
+            ( $indent ) = $line =~ /^(\s*)while \(1\) \{/ or next;
+            $from = $at;
+            next;
+        }
+        return ( substr( $source, $from, $offset - $from ), $from, $offset ) if $line =~ /^\Q$indent\E\}\s*$/;
+    }
+    return;
+}
 
 # A shell command line split into the commands it runs: at ;, &, | and
 # newlines outside quotes, so a quoted sed script or grep alternation stays
@@ -111,6 +139,33 @@ if ( $p =~ m{^(.*)/features/([^/]+)\.md$} ) {
            . join( ', ', @unread )
            . ". Read each one before citing it (CLAUDE.md, Before planning)"
             if @unread;
+    }
+}
+
+# An edit to ltl that changes the per-line read loop asks first: the loop pays
+# once per line for everything it carries, so a change to it is weighed
+# against what such changes have measured before it is made, not after.
+if ( $p =~ m{(?:^|/)ltl$} && -f $p && open my $fh, '<', $p ) {
+    my $source = <$fh>;
+    close $fh;
+    my ( $loop, $from, $to ) = read_loop_span($source);
+    if ( defined $loop ) {
+        my $ti = $call->{tool_input} // {};
+        my $touches = 0;
+        for my $old ( grep { defined && $_ ne '' } $ti->{old_string}, map { $_->{old_string} } @{ $ti->{edits} // [] } ) {
+            for ( my $at = index( $source, $old ); $at >= 0; $at = index( $source, $old, $at + 1 ) ) {
+                $touches = 1 if $at < $to && $at + length($old) > $from;
+            }
+        }
+        if ( defined $ti->{content} ) {
+            my ($new_loop) = read_loop_span( $ti->{content} );
+            $touches = 1 if ( $new_loop // '' ) ne $loop;
+        }
+        ask "this edit changes ltl's per-line read loop (read_and_process_logs, its while (1) loop), which pays once per line for everything it carries. "
+          . "Before it is made: docs/architecture-patterns.md § Hot-loop discipline (a gate that does not execute measured about 1.6% on access logs), "
+          . "and a new per-line or per-value cost is prototyped or measured, and recorded in the owning feature doc, before it is decided (prototype/README.md § When a prototype is required). "
+          . "Confirm that record exists"
+            if $touches;
     }
 }
 

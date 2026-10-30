@@ -12,7 +12,11 @@ Every change to the hot path is taken carefully and proven not to regress: a
 before/after benchmark on this machine is required whenever the work adds cost
 per line or per key (`docs/process/workflow.md` § 3 (a)). For a small change to
 an existing path, such as a test, a cleared value or a substitution, that
-comparison is the evidence, and no prototype is needed.
+comparison is the evidence, and no prototype is needed. What counts as small is
+read from `docs/architecture-patterns.md` § Hot-loop discipline, which records
+what such changes have measured (a gate that does not execute, about 1.6% on
+access logs): an operation added per line or per value is weighed against those
+figures, and the weighing recorded in the feature doc, before "no prototype" is.
 
 A prototype is required when the work introduces:
 

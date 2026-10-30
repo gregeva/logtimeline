@@ -38,7 +38,7 @@ term_patterns() {
     fi
 }
 
-declare -A hits terms_of
+declare -A hits=() terms_of=()
 for term in "$@"; do
     patterns=()
     while IFS= read -r pattern; do patterns+=(-e "$pattern"); done < <(term_patterns "$term")
@@ -55,6 +55,33 @@ else
     for f in "${!hits[@]}"; do
         printf '%6d  %s  [%s]\n' "${hits[$f]}" "$f" "${terms_of[$f]}"
     done | sort -rn
+fi
+
+# The patterns file is an index of entries, each its own record: a hit there
+# is listed by the entries whose text carries a term, so each entry is read or
+# dismissed by name rather than the file by the entries already known.
+patterns_file=docs/architecture-patterns.md
+if [[ -n "${hits[$patterns_file]:-}" ]]; then
+    echo
+    echo "Entries of $patterns_file that mention a term:"
+    for term in "$@"; do
+        term_patterns "$term" | while IFS= read -r pattern; do printf '%s\t%s\n' "$term" "$pattern"; done
+    done | (cd "$root" && perl -e '
+        my $file = shift;
+        my @pairs = map { chomp; [ split /\t/, $_, 2 ] } <STDIN>;
+        open my $fh, "<", $file or die "find-records: $file: $!\n";
+        my ( $heading, @order, %terms );
+        while ( my $line = <$fh> ) {
+            if ( $line =~ /^## (.+?)\s*$/ ) { $heading = $1; next }
+            next unless defined $heading;
+            for my $pair (@pairs) {
+                next unless index( $line, $pair->[1] ) >= 0;
+                push @order, $heading unless $terms{$heading};
+                $terms{$heading}{ $pair->[0] } = 1;
+            }
+        }
+        printf "  § %s  [%s]\n", $_, join( ", ", sort keys %{ $terms{$_} } ) for @order;
+    ' "$patterns_file")
 fi
 
 status=0
