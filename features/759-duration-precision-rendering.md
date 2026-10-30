@@ -669,8 +669,58 @@ array of flags in its place measured the same (+3.4% against +3.0%).
 Count metrics declared with a multiplier (`K`, `M`) keep their declared floor:
 D5 names time and byte metrics.
 
-**Completion gate** (2026-10-30, on 35dee9e0, `$version_number` 0.20.0): the
-`after` benchmark first (below; `ltl` unchanged since a3c30a4f), then
-`tests/run-suite.sh`: 54 harnesses, 54 passed, 5,475 checks, 0 failed. The
-first run, on a3c30a4f, failed the two expectations the gate row above
-corrects.
+**Completion gate, first pass** (2026-10-30, on 35dee9e0, `$version_number`
+0.20.0): the `after` benchmark first (below; `ltl` unchanged since a3c30a4f),
+then `tests/run-suite.sh`: 54 harnesses, 54 passed, 5,475 checks, 0 failed.
+The first run, on a3c30a4f, failed the two expectations the gate row above
+corrects. The architect then rejected the per-value count's cost (D5 as
+amended), so the gate runs again on the rework.
+
+| Rework | Commit | Delivered |
+|---|---|---|
+| process | 53c4deba | the remediation below |
+| 5, D5 as amended | 0ab35bd4 | the per-value count removed, the read loop's text again the base's; `count_udm_sample_decimals()` counts a time or byte metric's decimals on the detection sample's recognised lines; `resolve_udm_decimals()` falls back after the read to each bucket's stored minimum and maximum read back in the declared unit; `validate-value-display` `precision-udm-fallback` (a metric first written past the sample reads `12ms`; the base and a build without the fallback read `0s`) |
+
+Measured on the rework, `network-latency-csv`'s file, `parse/read_files`,
+nine interleaved runs a side against the base: `-udm latency_ms` 1.285 s
+[1.253..1.354] against 1.295 s [1.255..1.541], +0.8%; read as a time metric
+(`-udm latency_ms:ms`) 1.349 s [1.325..1.496] against 1.358 s
+[1.341..1.418], +0.7%. Both within the run-to-run spread.
+
+A read-path identity run failed once on the `progress` shape: the two paths
+differed by one intermediate progress update (`Processing 69% line 13824`),
+which is emitted on elapsed time, and the re-run passed. The shape compares
+time-driven output; the loop's text is the base's, so this is the harness's,
+not this change's.
+
+### Process remediation
+
+The architect, 2026-10-30, on the per-value count: through this work the
+records that govern units, precision and the read loop were never read. The
+investigation found the rules in place and nothing firing at the moment a
+decision added a surface:
+
+- the record search ran once, at phase 3, over the display vocabulary; D5
+  added a per-value path in the read loop and relied on how values are
+  stored, and the search was not re-run. Re-run with D5's nouns, its top four
+  are #528, `docs/architecture-patterns.md`, #561 and #273;
+- #528 (what a transform may leave in a shared record lexical) was returned
+  by the phase 3 search and dismissed by the lines that matched (`-du us` as a
+  harness's input unit), not by its subject, how retained durations are
+  stored;
+- `docs/architecture-patterns.md` was read by the two entries already known;
+  the finder named the file, not its entries, so *Hot-loop discipline* (a gate
+  that does not execute measured about 1.6%) and *Precise storage* were never
+  named;
+- `prototype/README.md`'s small-change exemption ("such as a test") let "no
+  prototype" stand for a per-value operation;
+- `guard-write.sh` checks only that cited records were read, and counts a
+  `grep` of a record as a read.
+
+Delivered on this branch (53c4deba), reaching `main` through the release:
+`find-records.sh` names the matching pattern entries (and reports a search
+that matches nothing, which failed under bash 5.3); `CLAUDE.md` § Before
+planning judges a record by its subject, counts a pattern entry as a record,
+and re-runs the search when a decision adds a surface; `guard-write.sh` asks
+before an edit to `ltl`'s per-line read loop; `prototype/README.md` reads
+"small" from *Hot-loop discipline*'s figures.
