@@ -384,6 +384,17 @@ is the unit read in, and the display is unchanged. Confirmed by the architect
   which a `-udm` run keeps (no per-line cost, but a metric on lines too rare
   to appear in 24 KB, such as GC pauses, falls back to its declared unit and
   shows the reported defect). Locked by the architect 2026-10-29.
+  **Amended by the architect 2026-10-30:** the per-value count measured +2.7%
+  of the read stage on a run whose every line carries a time metric, after
+  optimisation (§ 7, *Measured*), and is not acceptable. The values are not
+  truncated at the read: each is stored exactly (`docs/architecture-patterns.md`
+  § *Precise storage, formatting at the output boundary*), and each bucket keeps
+  its `udm_<name>_min` and `_max`. A metric's decimals are read first from the
+  detection sample's lines, which a `-udm` run already keeps; a metric the
+  sample does not reach falls back, after the read, to each bucket's stored
+  minimum and maximum, expressed in the declared unit (12 significant digits
+  give back the decimals written: `0.25` s stored as 250 ms reads back `0.25`).
+  No per-line work. The per-value count is removed.
 
 Settled by the records, taken without a question:
 
