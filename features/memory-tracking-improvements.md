@@ -263,8 +263,8 @@ criteria 3, 4, 6, 12 and 14 met, and criterion 1 on macOS.
 `4b30ab6a`): without `-mem`, no reading between steps; criterion 5 met.
 
 **Next:**
-- Criterion 7's other half: the macOS binary of release run 41079293013,
-  run on this host on the one-day case under `time -l`.
+- Criterion 11's cost half and its attribution, on a quiet machine, on the
+  architect's word (§ Criteria 7 and 11 after drop 3).
 - Criterion 1 on the Windows development host.
 - After drop 3, which changes `measure_memory_structures()` (drop 2 left it
   unchanged), re-run criterion 11:
@@ -1540,6 +1540,38 @@ fallback (`return unless $show_memory;`: no reading, no peak). The harness
 passes, 39 checks, and the failed-run checker passes.
 `docs/architecture-patterns.md` § Run-scoped activation flags names the
 gate.
+
+### Criteria 7 and 11 after drop 3 (2026-10-30)
+
+**Criterion 7's other half, met.** The macOS binary of release run
+41079293013, built from `3596690f` (drop 2), carries `lib/BSD/Resource.pm`
+and its bundle. It ran on this host in a bare environment (`env -i`, `PATH`
+`/usr/bin:/bin`, so no Homebrew Perl was reachable), on the one-day web
+application access log with `-hg -hgdm raw -h HTTP`. It reported
+`0.20.0-709`, an `rss_peak` of 304,955,392 bytes equal to `time -l`'s maximum
+resident set size, and two `kept_peak` readings. It raised no
+`memory-unreadable` notice, and its stderr carried no `Can't locate` and no
+` at <file> line <N>`.
+
+**Criterion 11, the capture met; the cost not met in one run, not yet
+attributed.** `prototype/709-memory-peak/criterion-11.sh check` on drop 3's
+`ltl` (`4b30ab6a`), 16:20 to 16:28:
+- *Capture:* every grouping store of 1 MB or more is within 5 % of the
+  reference on all eight inputs, 56 of the 59 byte-equal.
+- *Cost:* on 15 unmasked days, without `-mem` 47.92 s [47.47–49.88], with
+  it 54.21 s [54.02–55.38], +13.1 % against the bound of 12 %. At drop 5, on
+  the first base, another session: 49.83 s and 54.30 s, +9.0 %.
+- *Drop 3 does not explain it.* Interleaved in one session, the run without
+  `-mem` took 47.79 s [47.64–50.23] on drop 2's code and 47.90 s
+  [46.65–48.35] on drop 3's. The readings drop 3 removes cost 0.45 to
+  0.51 s of it.
+- *The attribution was stopped.* A run interleaving drop 5 on the first base,
+  drop 5 rebased and drop 3, each with and without `-mem`, was stopped after
+  11 of its 18 runs, when the architect reported other work on the machine
+  (2026-10-30). Its figures are not used. The cost figures above may also be
+  affected by that work: when it began is not known.
+
+Next: the cost half and its attribution, on a quiet machine.
 
 ### Delivery plan
 
