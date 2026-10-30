@@ -1066,12 +1066,12 @@ if scenario_wanted truth/structure; then
 current_scenario="truth/structure"
 defs=$(grep -cE '^sub fraction_precision\b' "$LTL" || true)
 callers=$(perl -ne '$s = $1 if /^sub (\w+)/; print "$s\n" if /fraction_precision\(/ && $s ne "fraction_precision"' "$LTL" | sort -u | tr '\n' ' ')
-if [[ "$defs" == 1 && "$callers" == "index_row_precision resolve_timestamp_precision " ]]; then
-    pass_with "one digits-to-precision rule, read from the ladder, serves the clamp and the index"
+if [[ "$defs" == 1 && "$callers" == "index_row_precision resolve_duration_precision resolve_timestamp_precision udm_precision " ]]; then
+    pass_with "one digits-to-precision rule, read from the ladder, serves the clamp, the index and the durations' precision"
 else
-    fail_with "one digits-to-precision rule, read from the ladder, serves the clamp and the index" \
-        "the precision a fraction's digits carry is resolved by one sub that walks the time-unit ladder from the field's stated unit; no other sub keeps a digit table" \
-        'fraction_precision() in ltl' "$CONTRACT_D4_CLAMP" "definitions: $defs" "callers: $callers"
+    fail_with "one digits-to-precision rule, read from the ladder, serves the clamp, the index and the durations' precision" \
+        "the precision a fraction's digits carry is resolved by one sub that walks the time-unit ladder from the stated unit, for timestamps and durations alike; no other sub keeps a digit table" \
+        'fraction_precision() in ltl' "$CONTRACT_D4_CLAMP; features/759-duration-precision-rendering.md D4 (one rule for timestamps and durations)" "definitions: $defs" "callers: $callers"
 fi
 fi
 
