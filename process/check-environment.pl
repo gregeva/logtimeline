@@ -514,14 +514,14 @@ my @conditions = (
       tests => { macos => sub { test_tool( 'perl', $tool_severity{perl} ) }, linux => sub { test_tool( 'perl', $tool_severity{perl} ) }, windows => sub { test_tool( 'perl', $tool_severity{perl} ) } } },
     { n => 3, title => 'it loads every runtime module the cpanfile requires',
       tests => {
-          macos   => sub { test_modules( 'cpanfile', 0, 'FAIL' ) },
-          linux   => sub { test_modules( 'cpanfile', 0, 'FAIL' ) },
+          macos   => sub { test_modules( 'cpanfile.macos', 0, 'FAIL' ) },
+          linux   => sub { test_modules( 'cpanfile.linux', 0, 'FAIL' ) },
           windows => sub { test_modules( 'cpanfile.windows', 0, 'FAIL' ) },
       } },
     { n => 4, title => 'it loads the development-only modules (the profiler)',
       tests => {
-          macos   => sub { test_modules( 'cpanfile', 1, 'note' ) },
-          linux   => sub { test_modules( 'cpanfile', 1, 'note' ) },
+          macos   => sub { test_modules( 'cpanfile.macos', 1, 'note' ) },
+          linux   => sub { test_modules( 'cpanfile.linux', 1, 'note' ) },
           windows => sub { test_modules( 'cpanfile.windows', 1, 'note' ) },
       } },
     { n => 6, title => 'bash on PATH is 4 or later',
@@ -625,7 +625,7 @@ sub user_message {
         my $more     = @problems > 1 ? ' (' . ( @problems - 1 ) . ' more in the full report: perl process/check-environment.pl)' : '';
         push @lines, "Environment check: $first$more.";
         if ( @missing && $host eq 'windows' ) {
-            push @lines, 'Likely cause: the setup has not run on this host, Strawberry Perl was reinstalled, or build/cpanfile.windows is behind build/cpanfile.',
+            push @lines, 'Likely cause: the setup has not run on this host, Strawberry Perl was reinstalled, or modules were added or upgraded since it last ran.',
                 'Fix: ' . $run->($full) . '.';
         }
         elsif (@missing) {

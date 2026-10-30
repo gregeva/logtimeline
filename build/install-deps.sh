@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 #
-# install-deps.sh : generate a CPAN package file (if not existing) and then install those package dependencies
+# install-deps.sh : generate this host's CPAN package file (if not existing) and then install those package dependencies
 #
 
-if [ ! -f cpanfile ]; then
+case "$(uname -s)" in
+    Darwin) CPANFILE=cpanfile.macos ;;
+    Linux)  CPANFILE=cpanfile.linux ;;
+    MINGW* | MSYS* | CYGWIN*) CPANFILE=cpanfile.windows ;;
+    *) echo "Unknown host: $(uname -s)"; exit 1 ;;
+esac
+
+if [ ! -f "$CPANFILE" ]; then
     ./generate-cpanfile.sh
 fi
 
-cpanm --notest --installdeps .
+cpanm --notest --cpanfile "$CPANFILE" --installdeps .

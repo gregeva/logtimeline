@@ -5,7 +5,7 @@
 #
 # Requirements:
 #   - Perl with PAR::Packer installed
-#   - cpanfile generated and dependencies installed
+#   - build/cpanfile.macos generated and its dependencies installed (./build/macos-setup.sh)
 #
 # Usage:
 #   ./build/macos-package.sh [arm64|x86_64]

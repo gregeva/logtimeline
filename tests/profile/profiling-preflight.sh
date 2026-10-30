@@ -39,12 +39,18 @@ PROFILER_MODULE="Devel::NYTProf::Data"
 HTML_TOOL="nytprofhtml"
 CHECK_ENVIRONMENT="$SCRIPT_DIR/../../process/check-environment.pl"
 POINTER="see: docs/development-environment.md § Troubleshooting a failed condition"
-# Each host's setup, run with --dev-deps, installs cpanm and the profiler; Windows
-# has its own cpanfile.
-CPANFILE="cpanfile"
+# Each host's setup, run with --dev-deps, installs cpanm and the profiler; each
+# host has its own cpanfile.
+CPANFILE=""
 case "$(uname -s)" in
-    Darwin) SETUP_COMMAND="./build/macos-setup.sh --dev-deps" ;;
-    Linux)  SETUP_COMMAND="./build/linux-setup.sh --dev-deps" ;;
+    Darwin)
+        SETUP_COMMAND="./build/macos-setup.sh --dev-deps"
+        CPANFILE="cpanfile.macos"
+        ;;
+    Linux)
+        SETUP_COMMAND="./build/linux-setup.sh --dev-deps"
+        CPANFILE="cpanfile.linux"
+        ;;
     MINGW* | MSYS* | CYGWIN*)
         SETUP_COMMAND='powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1 --dev-deps'
         CPANFILE="cpanfile.windows"
