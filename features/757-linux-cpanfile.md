@@ -5,7 +5,8 @@ modules `ltl` loads on Linux). Parent: #729 (process, tests and build).
 Blocks: #709 (`-mem` misses stores and working memory), from its delivery plan
 drop 2 on.
 
-Status: specification stage, from 2026-10-28. The contracts of the surfaces
+Status: delivery, from 2026-10-30, on branch `757-cpanfile-per-platform`.
+Drop 1 is delivered (§ Delivery plan › Progress). The contracts of the surfaces
 touched are confirmed by the architect; the records sweep, the findings, the
 architect's direction and the scope are recorded below, and the acceptance
 criteria are agreed (architect, 2026-10-28), with his corrections to 3, 5 and 6
@@ -260,6 +261,57 @@ Branch `757-cpanfile-per-platform` off `release/0.20.0`, `$version_number`
 3. **Criterion 6 on this host.** `BSD::Resource` installed into the
    development Perl, the scratch copy of `ltl` packed as
    `build/macos-package.sh` packs, `unzip -l` read. No commit.
+
+### Progress
+
+**Drop 1, delivered 2026-10-30** (8b8b4601 on `757-cpanfile-per-platform`).
+Evidence, from the macOS development host:
+- Criterion 1: with no platform argument, a scratch copy of the generator
+  wrote `cpanfile.macos` alone under the host's `uname` (`Darwin`),
+  `cpanfile.windows` alone under a `uname` first on PATH reporting
+  `MINGW64_NT-10.0-26100`, and `cpanfile.linux` alone under one reporting
+  `Linux`. The CI Ubuntu run on Linux is drop 2's.
+- Criterion 2: `macos`, `linux` and `windows` each wrote that file alone, `all`
+  the three; `unix` and an unknown name exit 1 having written nothing.
+- Criterion 3: the macOS and Linux files equal `git show f72c2167:build/cpanfile`
+  byte for byte, the Windows file `git show f72c2167:build/cpanfile.windows`;
+  two runs are byte-identical; `git log --follow` on `build/cpanfile.macos`
+  reaches the old file's history (#146's regeneration, a698384d, and earlier).
+  Git's status pairs the rename with `build/cpanfile.linux`, the two contents
+  being identical; `--follow` finds the history from either.
+- Criterion 4: a scratch `ltl` carrying `require BSD::Resource`, passed as the
+  script name with `all`: the macOS file names `BSD::Resource` and the Linux
+  and Windows files do not; `Win32::API` is in the Windows file alone.
+- Criterion 5, macOS runs, each exit 0: the environment check, conditions 3
+  and 4, pass, and with a module that does not exist planted in
+  `build/cpanfile.macos` condition 3 fails naming it and `build/cpanfile.macos`;
+  the preflight with `LTL_PROFILING_INSTALL=0`, its trace setting
+  `CPANFILE=cpanfile.macos`; `build/install-deps.sh` from `build/`, running
+  `cpanm --notest --cpanfile cpanfile.macos --installdeps .`;
+  `build/macos-setup.sh` and `build/macos-setup.sh --dev-deps` to their end,
+  installing with `--cpanfile cpanfile.macos`, the check after it 9 pass,
+  0 FAIL. The setup ran with `HOMEBREW_NO_AUTO_UPDATE=1` and
+  `HOMEBREW_NO_INSTALL_UPGRADE=1`, so its `brew install` steps upgraded no
+  formula on the host (`python@3.15` was outdated); the cpanfile step ran
+  unchanged. After drop 1 the grep for `build/cpanfile` with no suffix finds
+  only `build/ubuntu-package.sh`, drop 2's.
+
+Recorded with drop 1, each the one sensible option:
+- The environment check's Windows message gave "`build/cpanfile.windows` is
+  behind `build/cpanfile`" as a cause of a missing module. Each file is now
+  generated from `ltl` for its platform, so the comparison has no meaning; the
+  cause reads "modules were added or upgraded since it last ran", as the other
+  hosts' message does. `docs/development-environment.md`'s condition 3 row
+  drops the comparison in the same way and names the three files under "the
+  host's cpanfile".
+- `build/install-deps.sh` reads the host from `uname -s` with the mapping the
+  generator and the preflight use.
+
+Observation: `prototype/720-packed-generated-loop/pack-linux.sh` runs
+`cpanm --notest --installdeps .` in `build/`, which reads a file named
+`cpanfile` that no longer exists. It is the instrument of a closed issue's
+measurement and is left as it ran; the grep of criterion 5 does not see it,
+since it names no `build/cpanfile`.
 
 Completion gate: the temporary job deleted first. The diff touches no line of
 `ltl` and no harness, fixture or expectation, and no harness runs the changed
