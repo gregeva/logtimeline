@@ -6,7 +6,7 @@ Blocks: #709 (`-mem` misses stores and working memory), from its delivery plan
 drop 2 on.
 
 Status: delivery, from 2026-10-30, on branch `757-cpanfile-per-platform`.
-Drops 1 and 2 are delivered; drop 3 is blocked on this host's network
+Drops 1 and 2 are delivered; drop 3 runs on GitHub's macOS runner
 (§ Delivery plan › Progress). The contracts of the surfaces
 touched are confirmed by the architect; the records sweep, the findings, the
 architect's direction and the scope are recorded below, and the acceptance
@@ -224,8 +224,10 @@ instead (architect, 2026-10-28).
    case above.
 6. **The macOS binary carries the macOS file's modules** (#709's criterion 7,
    moved here). *Assertable.* Observable: the scratch copy of `ltl` that
-   requires `BSD::Resource`, packed on the macOS development host with `pp` as
-   `build/macos-package.sh` invokes it, with the module installed, lists
+   requires `BSD::Resource`, packed on GitHub's `macos-latest` runner (the
+   builds run on GitHub Actions, above) by a job of the temporary workflow,
+   with `pp` as `build/macos-package.sh` invokes it and the module installed
+   from the macOS file generated from that copy, lists
    `BSD/Resource.pm` under `unzip -l`. The criterion's other half, the binary
    reporting the kept peak, reads #709's reading and is checked on the binary
    built once that reading is in `ltl`.
@@ -259,9 +261,10 @@ Branch `757-cpanfile-per-platform` off `release/0.20.0`, `$version_number`
    is added. Proven by its push run (criterion 5's Linux runs) and a
    `workflow_dispatch` run of the release workflow on the issue branch
    (criterion 1 on Linux, criterion 5's builds).
-3. **Criterion 6 on this host.** `BSD::Resource` installed into the
-   development Perl, the scratch copy of `ltl` packed as
-   `build/macos-package.sh` packs, `unzip -l` read. No commit.
+3. **Criterion 6 on GitHub's macOS runner.** A job of the temporary workflow
+   on `macos-latest`: the setup with `--package`, the scratch copy of `ltl`
+   that requires `BSD::Resource`, its macOS file generated and installed, the
+   copy packed as `build/macos-package.sh` packs, `unzip -l` read.
 
 ### Progress
 
@@ -317,8 +320,9 @@ since it names no `build/cpanfile`.
 **Drop 2, delivered 2026-10-30** (ed49210d, with 895916c0 correcting the
 temporary job). `build/ubuntu-package.sh` and `build/windows-package.sh` each
 run the generator with their target platform before installing; the release
-workflow's two generate steps are gone; `.github/workflows/757-linux-readers.yml`
-is the temporary Linux job. Evidence:
+workflow's two generate steps are gone; the temporary Linux job is added, in
+`.github/workflows/757-temporary-checks.yml` since drop 3 (named
+`757-linux-readers.yml` at drop 2). Evidence:
 - Criterion 1 on Linux, by the temporary job (run 41049116425, `ubuntu-latest`,
   `uname -s` `Linux`): with the three files removed, the generator with no
   argument wrote `build/cpanfile.linux` alone. Recorded with drop 2, the one
@@ -345,16 +349,18 @@ is the temporary Linux job. Evidence:
   `build/cpanfile` with no suffix, outside `features/` and `releases/`, finds
   nothing.
 
-**Drop 3, blocked on this host's network (2026-10-30).** `BSD::Resource` is
-installed into the development Perl (1.2911) by the macOS setup's own install
-command, `cpanm --notest --cpanfile cpanfile.macos --installdeps .`, run
-against a macOS file generated from a scratch `ltl` carrying
-`require BSD::Resource`. The pack cannot run: this host's Perl (5.44) has no
-PAR::Packer, and `build/macos-setup.sh --package` fails installing it, because
-the download of its dependency Archive::Zip (`Archive-Zip-1.68.tar.gz` from
-www.cpan.org) is answered by a network proxy's HTML block page, which `tar`
-cannot unpack. The PAR and PAR-Packer archives from the same mirror download
-whole.
+**Drop 3, in progress (2026-10-30)** (5e6c0a8c): the temporary workflow, renamed
+`757-temporary-checks.yml`, gains the macOS job of § Delivery plan, item 3.
+
+Observation on the development host, recorded for #709's drop 2, which needs
+the module there: `BSD::Resource` (1.2911) is installed into the development
+Perl by the macOS setup's own install command, `cpanm --notest --cpanfile
+cpanfile.macos --installdeps .`, run against a macOS file generated from a
+scratch `ltl` carrying `require BSD::Resource`. PAR::Packer is not installed
+for that Perl (5.44): `build/macos-setup.sh --package` fails installing it,
+because the download of its dependency Archive::Zip
+(`Archive-Zip-1.68.tar.gz` from www.cpan.org) is answered by a network
+proxy's HTML block page, which `tar` cannot unpack.
 
 Completion gate: the temporary job deleted first. The diff touches no line of
 `ltl` and no harness, fixture or expectation, and no harness runs the changed
