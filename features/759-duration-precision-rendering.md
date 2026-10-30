@@ -2,14 +2,13 @@
 
 ## Status
 
-**Specification in progress.** Work started 2026-10-29 on `release/0.20.0`;
-the specification is written here on the release branch, and the issue branch,
-`759-duration-precision-rendering`, is cut from it when implementation starts. Phases 1 and 2 (the requirement
-and the surfaces, § 1 to § 3) are confirmed by the architect; phase 3 (the
-records, § 4) is written, with D1 locked; phase 4 (the design questions, § 5)
-is settled, D2 to D5 locked; phase 5 (§ 6) needs no prototype; phase 6 (the
-acceptance criteria) is confirmed; phase 7 (the delivery plan, § 7) is
-confirmed. Implementation runs on `759-duration-precision-rendering`.
+**Delivered.** Merged into `release/0.20.0` 2026-10-30 (PR #760, merge
+cbf8c80b; the four release-note bullets in `releases/v0.20.0.md`), and
+released in v0.19.1 the same day as a patch made for it (PR #761 into
+`release/0.19.1`, tag `v0.19.1`, merged to `main` by PR #762). Validated by
+the architect on both lines. The acceptance criteria pass, with AC2's
+dimensions-line clause an exception the architect accepted (zeros are not
+binned, #715). The specification ran in the phases below.
 
 | Phase | What it produces |
 |---|---|
@@ -446,7 +445,7 @@ by its characteristics, its outcome, and where it is asserted. Assertions read
 the rendered output against what each input's known decimals give; no `-V` key
 is added for the precision. Every scenario carries the runtime-warning check.
 
-- [ ] **AC1 — The reported defect** (§ 2, D2). The same durations, read once
+- [x] **AC1 — The reported defect** (§ 2, D2). The same durations, read once
       in milliseconds and once in seconds with three decimals under `-du s`,
       render the same text on every duration surface of § 3.1: the timeline
       P50 to P99.9 cells and duration column, the messages-table Min, P50,
@@ -456,7 +455,7 @@ is added for the precision. Every scenario carries the runtime-warning check.
       reads `123ms`. Input: the committed duration-spread access-log fixture
       and a committed copy of it in seconds with three decimals. *Assertable:*
       `validate-value-display`, a new scenario comparing the two captures.
-- [ ] **AC2 — A zero is shown in the precision** (617 D4 as amended, D1).
+- [x] **AC2 — A zero is shown in the precision** (617 D4 as amended, D1).
       Zero durations read `0ms` on whole milliseconds, `0us` on milliseconds
       written with three decimals, `0s` on whole seconds under `-du s`, and
       `0ms` on seconds written with three decimals under `-du s`: on the
@@ -473,28 +472,28 @@ is added for the precision. Every scenario carries the runtime-warning check.
       `validate-value-display` `precision-zero`. The dimensions line is an
       exception to this criterion, accepted by the architect 2026-10-29: a
       zero reaches it when #715 lands, through the same floor; noted on #715.
-- [ ] **AC3 — Nothing is shown below the precision** (§ 2). On whole
+- [x] **AC3 — Nothing is shown below the precision** (§ 2). On whole
       milliseconds no duration reads in micro- or nanoseconds (the existing
       assertion, its contract re-pointed here); on seconds with three decimals
       under `-du s`, none reads below the millisecond; on milliseconds with
       three decimals, a 0.5 ms duration reads `500us` and none reads in
       nanoseconds. *Assertable:* `validate-value-display` `floor-unit`,
       rewritten.
-- [ ] **AC4 — A part-group of decimals steps down one unit** (D3). `12.3` ms
+- [x] **AC4 — A part-group of decimals steps down one unit** (D3). `12.3` ms
       reads `12.3ms`, `0.4` ms reads `400us`, and `0.05` s under `-du s` reads
       `50ms`. *Assertable:* `validate-value-display`, a new scenario.
-- [ ] **AC5 — A computed value is rounded at the precision** (608 D9; 617 D19
+- [x] **AC5 — A computed value is rounded at the precision** (608 D9; 617 D19
       read from the precision). A percentile falling between two written
       values shows no digit finer than the precision: none below the
       millisecond on whole milliseconds, the microsecond's digits on
       milliseconds written to the microsecond. *Assertable:*
       `validate-value-display` `common-maxima` or a new scenario, beside 617's
       ceiling criterion.
-- [ ] **AC6 — Several files take the finest precision any carries**. A file of
+- [x] **AC6 — Several files take the finest precision any carries**. A file of
       whole milliseconds read with a file of milliseconds written to the
       microsecond: a zero reads `0us`. *Assertable:* `validate-value-display`,
       a new scenario.
-- [ ] **AC7 — A user-defined metric's precision is its declared unit and its
+- [x] **AC7 — A user-defined metric's precision is its declared unit and its
       decimals** (D5). `-udm elapsed:s:max` over the committed seconds-metric
       fixture (`0`, `0`, `0.25`, `2`; two decimals, so the millisecond): `0.25`
       reads `250ms` on its timeline column and heatmap labels, a zero `0ms`,
@@ -508,7 +507,7 @@ is added for the precision. Every scenario carries the runtime-warning check.
       `0.25` reads `250ms` on the heatmap labels and the dimensions line
       (`min=250ms max=2s`). The dimensions line reads no zero for the
       reason of AC2's accepted exception (zeros are not binned, #715).
-- [ ] **AC8 — The CSV duration and percentile decimals follow the precision**
+- [x] **AC8 — The CSV duration and percentile decimals follow the precision**
       (608 D9). `-V csv-output` `decimals_duration` and `decimals_percentile`
       read `3` on milliseconds written with three decimals, `0` on whole
       milliseconds, and `0` on seconds with three decimals under `-du s`; on
@@ -517,7 +516,7 @@ is added for the precision. Every scenario carries the runtime-warning check.
       `0` and `0`, and `-cp` still decides when given. *Assertable:*
       `validate-byte-units` `ladder-decimals`, its contract re-pointed and the
       cases added.
-- [ ] **AC9 — The finer-bound notice compares against the precision, on every
+- [x] **AC9 — The finer-bound notice compares against the precision, on every
       log** (§ 5, the notice). On seconds with three decimals under `-du s`,
       `-dmin 50ms` prints no note and `-dmin 200us` prints `-dmin 200us is
       finer than the log's durations, which are recorded to the millisecond`;
@@ -526,7 +525,7 @@ is added for the precision. Every scenario carries the runtime-warning check.
       `-dmin 200us` prints none and `-dmin 200ns` prints `... which are
       recorded to the microsecond`. *Assertable:* `validate-option-resolution`
       `finer-bound-note`, rewritten.
-- [ ] **AC10 — Timestamps read a part-group of digits by the same rule** (D4).
+- [x] **AC10 — Timestamps read a part-group of digits by the same rule** (D4).
       `-tp ms` on timestamps with two-digit fractions shows the millisecond
       with no note; `-tp us` on them clamps to the millisecond with a note
       naming milliseconds; `-tp us` on four-digit fractions shows the
@@ -534,7 +533,7 @@ is added for the precision. Every scenario carries the runtime-warning check.
       and a two-digit fraction reads the millisecond. *Assertable:*
       `validate-timestamp-precision` `truth/*` and `index/older-row-fresh`,
       rewritten where they assert the rule D4 replaces.
-- [ ] **AC11 — An input with no decimals, or whole groups of three, renders
+- [x] **AC11 — An input with no decimals, or whole groups of three, renders
       unchanged.** Every output on such an input is identical to the base:
       every duration call site of `value_text()` and `value_column()` (§ 3.1),
       the CSV decimals, the notice, the timestamp clamp and the run index.
@@ -544,7 +543,7 @@ is added for the precision. Every scenario carries the runtime-warning check.
       durations or part-group timestamp fractions, each listed with its
       reason; the `validate-value-display` scenarios not rewritten pass
       unchanged.
-- [ ] **AC12 — Looked at on real data** (a visual surface). The reproduction
+- [x] **AC12 — Looked at on real data** (a visual surface). The reproduction
       pair and the corpus's thread-session access log, rendered with `-hm
       duration -hg duration`: the legends, axes and messages table read in the
       precision. *Unassertable by a harness on corpus data:* inspected before
