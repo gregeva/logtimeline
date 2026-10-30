@@ -238,23 +238,21 @@ criterion 13, three rounds, from a worktree checked out at 6dadde32 beside
 the issue worktree. Drop 2 onward proceed meanwhile, and no other `ltl` runs
 while it is captured. The `after` at drop 6 is compared with it.
 
+**Done, delivery plan drop 2 (2026-10-30),** on the issue branch
+(§ Drop 2, `83f88bce`): the kept peak at each reporting moment, the macOS
+fallback and its notice, `build/cpanfile.macos` requiring `BSD::Resource`;
+criteria 3, 4, 6, 12 and 14 met, and criterion 1 on macOS.
+
 **Next:**
 - The `before` benchmark at 6dadde32, on the architect's word that the
   machine is quiet (§ Done, the rebase).
-- Drop 2, the kept peak (D1, D2).
-  - The `require BSD::Resource` this drop adds to `ltl` enters
-    `build/cpanfile.macos` when the cpanfiles are regenerated
-    (`./build/generate-cpanfile.sh ltl all`), and the regenerated file is
-    committed with the drop.
-  - `BSD::Resource` 1.2911 is in the first macOS development host's Perl
-    (5.44), for criterion 1; criterion 6's fallback scenario hides it.
-  - Criterion 7's other half, the packaged macOS binary reporting the kept
-    peak, comes back from #757 with the reading (§ Acceptance criteria).
-  - Criterion 1 also runs on the Windows development host and in a Linux
-    container.
+- Drop 2's runs that cannot be made on this host (§ Drop 2, *Not run on this
+  host*): criterion 1 on the Windows development host and on Linux, and
+  criterion 7's other half, the packaged macOS binary reporting the kept
+  peak. How each runs is the architect's to direct.
 - Drop 3, readings between steps only under `-mem`.
-- After each of drops 2 and 3, both of which change
-  `measure_memory_structures()`, re-run criterion 11:
+- After drop 3, which changes `measure_memory_structures()` (drop 2 left it
+  unchanged), re-run criterion 11:
   `prototype/709-memory-peak/criterion-11.sh check ltl <work dir>`, from the
   issue worktree. Its reference marks (`results/criterion-11-reference.tsv`)
   were made with this host's Perl 5.44. On another Perl, regenerate them first
@@ -1299,6 +1297,140 @@ the floor reports none:
   15 unmasked days). Drop 5's capture run fell in the larger state on all
   eight inputs.
 
+### Drop 2: the kept peak (2026-10-30)
+
+Delivered at `83f88bce` on the issue branch, rebased onto 6dadde32.
+
+**What it does.** `read_run_peak_memory()` reads the peak the operating
+system keeps for the process, through `get_kept_peak_memory()`, once at each
+moment a peak is reported:
+- in `print_verbose_output()`, before `benchmark-data`'s memory rows:
+  `rss_peak`, and `unattributed` against it;
+- in `pipeline_render()`, before the summary: `$reported_max_memory_usage`,
+  read by MAXIMUM MEMORY USED, the breakdown's shares and `unattributed`, and
+  the export's `max_memory_used`;
+- in `write_index_file()`, once for every selection row's `memory_used`.
+
+`$max_memory_usage` takes each reading, so a later reading between steps
+above it still raises it until the next moment reads the kept peak again.
+
+| Platform | Reading | Notes |
+|---|---|---|
+| macOS | `ru_maxrss` from `BSD::Resource::getrusage()` | in bytes: 6,291,456 at a script's start against `ps`'s 6,144 KB |
+| Linux | `VmHWM` in `/proc/self/status`, in kB | not run in this drop (below) |
+| Windows | `PeakWorkingSetSize` at offset 8 of `PROCESS_MEMORY_COUNTERS` | the call is now `windows_working_set()`, shared with the current reading; not run in this drop |
+
+- `-V memory-usage` lists the readings under `kept_peak`, first in the
+  section's order (§ -V memory-usage section contract).
+- `build/cpanfile.macos`, regenerated with `./build/generate-cpanfile.sh ltl
+  all` from the repository root, requires `BSD::Resource`. The Linux and
+  Windows files are unchanged.
+- `resolve_kept_peak_reading()` settles whether the peak is readable once,
+  from `pipeline_detect()`. On macOS it loads `BSD::Resource`. Without it the
+  run raises `memory-unreadable` once, with the evidence "the BSD::Resource
+  module, which reads the peak macOS keeps for the process, is not installed",
+  and reports the readings' peak.
+
+Recorded with the drop, the one sensible option: the readability is settled
+as the pipeline starts, not with the options as first written. A notice
+raised while the options are read is put to the analyst by
+`ask_about_option_notices()` as "the options given raised notices before the
+read", with a choice to stop and correct them. A missing module is not a
+matter of the options. Raised at `detect`, the notice is drawn in the panel,
+and the fallback scenario asserts that.
+
+**What it costs.** Loading `BSD::Resource` took 5.7 to 7.1 ms in three
+standalone runs, once at the start of each macOS run. The first `getrusage`
+call took 0.1 to 0.3 ms, later ones 1 to 2 µs. Under `-V memory-usage` on the
+access-log fixture, one `kept_peak` reading took 312 to 327 µs in three runs.
+
+**Criterion 1 on macOS** (`/usr/bin/time -l`, maximum resident set size,
+one run each, no ` at <file> line <N>` on any run's stderr):
+
+| Input and options | `-mem` | Code | `rss_peak` | `time -l` | Below it |
+|---|---|---|---|---|---|
+| one day of a web application access log, `-hg -hgdm raw -h HTTP` | no | before the drop (`ee9c79bf`) | 263,847,936 | 291,061,760 | 9.35 % |
+| | yes | before the drop | 276,889,600 | 293,240,832 | 5.58 % |
+| | no | drop 2 | 291,454,976 | 291,454,976 | 0 |
+| | yes | drop 2 | 293,896,192 | 293,896,192 | 0 |
+| one server's month of that log, 28 files, `-bs 1440 -n 25 -g -m uuid` | no | drop 2 | 1,011,318,784 | 1,011,351,552 | 0.003 % (32 KB) |
+| | yes | drop 2 | 1,019,871,232 | 1,019,871,232 | 0 |
+| the same month, `-bs 1440 -hm -hg -g -m uuid` | no | drop 2 | 766,623,744 | 766,623,744 | 0 |
+| | yes | drop 2 | 770,408,448 | 770,408,448 | 0 |
+
+MAXIMUM MEMORY USED rendered the same peak at its moment (291.5 MB and
+293.9 MB on the day; 1 GB, 766.6 MB and 770.4 MB on the month). The 32 KB is
+memory the render allocated after `benchmark-data` printed. Each run read
+`kept_peak` twice: `benchmark-data` and the summary; no index was written.
+The month cases were measured on drop 2 alone; the premise runs (§ Issue
+#709) measured the readings falling up to 158 MB short on them.
+
+**Criterion 4, as asserted.** `benchmark-data` prints during the render,
+before the timeline, so a reading taken after it can be above the peak it
+read. The check therefore compares `rss_peak` with the readings taken before
+it, through the `after_normalize` decomposition. It also compares the
+index's `memory_used`, read after the last diagnostic reading, with every
+reading. Against the code before the drop, the `after_normalize` reading was
+45,383,680 bytes, above an `rss_peak` of 45,318,144.
+
+**The harness.** `tests/validate-memory-usage.sh` gains three scenarios:
+
+| Scenario | Criteria | What it asserts |
+|---|---|---|
+| `peak-consumers` | 3, and 5's count for this drop | MAXIMUM MEMORY USED and the export's `max_memory_used` carry one string; the index's `memory_used` is at or above `rss_peak`; `kept_peak` reads 3 times (`benchmark-data`, the summary, the index), or none with the notice |
+| `peak-not-below-readings` | 4, 12 | no reading before `rss_peak` is above it; no reading is above the index's `memory_used`; the site lines follow the contract's order |
+| `peak-fallback` | 6 | macOS only: with `BSD::Resource` refused by an `@INC` hook given through `PERL5OPT`, one `memory-unreadable` notice naming the module, raised at `detect` and drawn in the panel; no `kept_peak` reading; five `phase_boundary` readings; a non-zero `rss_peak` |
+
+Each check was shown to fail on a build that breaks what it asserts:
+
+| Build | What fails |
+|---|---|
+| the code before the drop | the `kept_peak` count; no reading above `rss_peak`; the notice |
+| `kept_peak` moved last in the site order | the order |
+| the kept peak halved | both comparisons with the readings |
+| the export's peak raised by 9 MB | the summary and export string |
+| the index's peak lowered by 9 MB | the index against `rss_peak` and against every reading |
+| the fallback reporting 0 | the readings' peak |
+| the readability settled with the options | the notice's stage and surface (`options` and `ask`) |
+
+Drop 4's `memory-map` scenario failed the failed-run checker's lookup rule:
+its breakdown filter assigned a `grep` with no fallback. That filter is now
+an `awk`, and `./tests/validate-harness-failed-run.sh --scenario
+memory-usage` passes, 15 checks. The whole harness passes, 36 checks.
+
+Every consumer of the memory output still asserts (criterion 12), each named
+scenario run: `validate-verbose-content-shape` `every-section`,
+`validate-format-registry` `benchmark-data-reemission` and
+`unarmed-measurement`, `validate-statistics-demand` scenarios 13 and 14,
+`validate-byte-units` `one-notation-reach`, `validate-read-path`
+`identity`, `validate-summary-contribution-bar` `summary-mono`,
+`validate-timestamp-precision` `option/equivalence`, and the
+`benchmark-rows` scenario for `compare-results.sh`.
+`validate-notices` `migration-categories` reads `memory-unreadable` as a
+runtime condition at both of its producers, and `stderr-sites` passes.
+`features/412-notice-surfaces.md` § Inventory of current notices names the
+two producers (rows 35 and 36); `docs/architecture-patterns.md` § Run-scoped
+activation flags names the new flag's consumption site.
+
+**Not run on this host**, for drop 2's remaining criteria:
+- Criterion 1 on Windows: the Windows development host.
+- Criterion 1 on Linux: no container runtime starts on the first macOS
+  development host, a virtual machine without hypervisor support
+  (`kern.hv_support` 0; `features/757-linux-cpanfile.md` § Acceptance
+  criteria), so the container run the criterion names cannot be made here.
+- Criterion 7's other half, the packaged macOS binary reporting the kept
+  peak: PAR::Packer is not installed for this host's Perl 5.44, since its
+  dependency's download is blocked by a network proxy (same record,
+  § Completion gate). #757 packed its binary on GitHub's `macos-latest`
+  runner.
+
+Observation, raised with the drop: `docs/perl-performance-optimization.md`
+§ `free()` Returns to Perl's Allocator, Not the OS states "RSS high-water mark
+equals RSS at end of run" and "RSS never decreases even when structures are
+freed". This issue measured macOS returning memory before the next reading:
+733 MB inside the displayed rows' statistics, 638 MB at the next reading
+(§ Issue #709 › Findings, the heatmap-histogram-consolidate case). It is left for the architect.
+
 ### Delivery plan
 
 Drafted 2026-10-28. The stage starts only on the architect's direction. Each
@@ -1534,10 +1666,14 @@ kind	elapsed_s	tag	rss	named_sum	unattributed	structure	bytes
 === END memory-usage ===
 ```
 
-- `readings` and `readings_us`: every call of `get_memory_usage()` in the run and
-  the wall time spent inside them, in whole microseconds. They equal the sums of
-  the `site` lines.
+- `readings` and `readings_us`: every call of `get_memory_usage()` and
+  `get_kept_peak_memory()` in the run and the wall time spent inside them, in
+  whole microseconds. They equal the sums of the `site` lines.
 - `site` lines, one per caller that read at least once, in this order:
+  `kept_peak` (the peak the operating system keeps, `get_kept_peak_memory()`,
+  read by `read_run_peak_memory()` once at each moment a peak is reported:
+  `benchmark-data`, before the summary, the run index; #709 D1; none on macOS
+  without `BSD::Resource`, D2),
   `phase_boundary` (the pipeline steps' `measure_memory_structures()`),
   `grouping_checkpoint` (`run_consolidation_checkpoint()`),
   `grouping_final_pass` (`process_final_pass_window()`),
@@ -1554,7 +1690,8 @@ kind	elapsed_s	tag	rss	named_sum	unattributed	structure	bytes
   as its third line form; the contract first agreed omitted them.
 - When the section is armed, `benchmark-data` repeats the totals as `COUNTS memory_readings` and
   `TIMING memory/readings` (seconds), read from the same counters at the moment
-  `benchmark-data` prints, during the render, as its `MEMORY rss_peak` is. They
+  `benchmark-data` prints, during the render, after the `kept_peak` reading its
+  `MEMORY rss_peak` reports. They
   can therefore be lower than the section's totals by the readings taken after
   that point. `memory/readings` is time spent within the stages, so the
   comparison marks it within parent and leaves it out of the stage sum.

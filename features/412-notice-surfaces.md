@@ -844,7 +844,8 @@ and its callees, printed before the read starts; **read** = inside
 | 32 | `read_index_file` | detect (`pipeline_detect()`) | none (bare `warn`) | the run index file exists but cannot be read; read-back skipped | runtime condition | none |
 | 33 | `read_index_file` | detect (`pipeline_detect()`) | none (bare `warn`) | the run index file is malformed; read-back skipped | runtime condition | none |
 | 34 | `write_index_file` | render (`pipeline_render()`) | none (bare `warn`) | the run index file could not be renamed into place after writing | runtime condition | none |
-| 35 | `get_memory_usage` | read and after (registry and CSV compilation, memory measurement) | none (bare `warn`) | on Windows, process memory usage could not be read | runtime condition | none |
+| 35 | `windows_working_set`, for `get_memory_usage` and `get_kept_peak_memory` (#709) | read and after (registry and CSV compilation, memory measurement) | none (bare `warn`) | on Windows, process memory usage could not be read | runtime condition | none |
+| 36 | `resolve_kept_peak_reading` (#709) | detect (`pipeline_detect()`) | none (raised through `notice()` from the start) | on macOS without `BSD::Resource`, the peak the operating system keeps cannot be read, so the reported peak is the highest reading taken between steps | runtime condition | none |
 
 ### Not notices
 
