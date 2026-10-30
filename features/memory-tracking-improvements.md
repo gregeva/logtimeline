@@ -160,7 +160,9 @@ delivered on the issue branch, ahead of drops 2 and 3 by the architect's
 order. #757 (a Linux-specific variant of the cpanfile), which blocked
 delivery plan drop 2, is delivered (PR #763, merged as 9cd76712 on
 2026-10-30): `BSD::Resource` goes to the macOS cpanfile alone, and #709 keeps
-the reading and its fallback (the architect, 2026-10-28). Filed 2026-10-12,
+the reading and its fallback (the architect, 2026-10-28). The issue branch is
+rebased onto `release/0.20.0` at 6dadde32, which carries #757's commits
+(2026-10-30, § Resuming). Filed 2026-10-12,
 found while reading the third `all`-tier benchmark round of 0.19.0.
 - Locked (§ Decisions): D1, the reported peak is the operating system's kept
   high-water mark; D2, macOS reads it from `getrusage` through
@@ -190,21 +192,60 @@ the transient-stores arm (§ P1 results); D3; criterion 11's bounds.
 
 **Done, delivery plan drops 4 and 5 (2026-10-28),** on the issue branch, no
 PR yet: the 38 inventory stores in the map and `MEMORY_FINAL` converged
-(§ Drop 4, `bb4511ac`); grouping's walks per D3 (§ Drop 5, `68385228`);
-criterion 11 checked under one pinned hash seed (`8cba52b3`), after the
+(§ Drop 4, `5f6c9f9c`); grouping's walks per D3 (§ Drop 5, `3eda9545`);
+criterion 11 checked under one pinned hash seed (`637a1280`), after the
 finding that the message store's size follows the per-process hash seed.
+
+**Done, the rebase (2026-10-30).** The issue branch was rebased from
+`b24b8589` onto `release/0.20.0` at 6dadde32, which carries #757's commits
+(the generator that routes `BSD::Resource` to `build/cpanfile.macos` alone)
+and #759's (the duration precision rendering). No conflict; each of the 11
+commits carries the same patch as before. This record cites the rebased
+commits; the issue's comments before the rebase cite the earlier ones:
+
+| Commit | Before the rebase | After |
+|---|---|---|
+| version stamp `0.20.0-709` | `3e4cbf91` | `41e80935` |
+| P1 instruments | `33bec43f` | `8d249340` |
+| P1 qualification | `e77d7581` | `a1aa5356` |
+| P1 timed runner | `5806fe33` | `0234bf29` |
+| P1 timed runs: results and findings | `c80a55b0` | `9d886aeb` |
+| P1 transient-stores arm | `d4929677` | `75f66efb` |
+| P1 transient-stores arm: results and findings | `47376618` | `bbf5990b` |
+| P1 every-call reference | `1122a104` | `2c678ab6` |
+| drop 4 | `bb4511ac` | `5f6c9f9c` |
+| drop 5 | `68385228` | `3eda9545` |
+| criterion 11 under one pinned hash seed | `8cba52b3` | `637a1280` |
+
+P1, drops 4 and 5 and criterion 11 were measured on code based on
+`b24b8589`.
+
+The `before` benchmark was captured again on the new base, because `ltl`
+changed by 10 commits between the two bases: the four tests of criterion 13,
+six rounds from the release worktree, the machine's load average near 2
+throughout and no other `ltl` running. Against the fastest round (5), the
+reading stage ran +29.2 %, +4.1 %, +7.2 %, +1.2 % and +4.6 % in rounds 1 to
+4 and 6. Only rounds 4 and 5 are as close as the first base's three rounds,
+which came within 1.2 % of each other. A median over these six would sit
+about 4 % above the quiet rounds, enough to hide a regression of that size,
+so they are not used as the `before`. Against the first base, round 5
+differed by −1.5 % to +0.2 % per test, within run-to-run variation, as
+#759's own gate measured on the standard case.
+
+At drop 6 the `before` and the `after` run interleaved instead, round by
+round in one session, as #759's gate ran them: the four tests of criterion
+13, at least three rounds a side, from a worktree at the issue branch's base
+beside the issue worktree, so that a disturbance falls on both sides alike;
+medians with ranges.
 
 **Next:**
 - Drop 2, the kept peak (D1, D2).
-  - The issue branch needs #757's commits from `release/0.20.0` (merged as
-    9cd76712): the generator that routes `BSD::Resource` to
-    `build/cpanfile.macos` alone. The `require BSD::Resource` this drop adds to
-    `ltl` enters that file when the cpanfiles are regenerated
+  - The `require BSD::Resource` this drop adds to `ltl` enters
+    `build/cpanfile.macos` when the cpanfiles are regenerated
     (`./build/generate-cpanfile.sh ltl all`), and the regenerated file is
     committed with the drop.
-  - `BSD::Resource` 1.2911 is installed in the first macOS development host's
-    Perl (5.44), from a macOS cpanfile naming it, for criterion 1; criterion
-    6's fallback scenario hides it.
+  - `BSD::Resource` 1.2911 is in the first macOS development host's Perl
+    (5.44), for criterion 1; criterion 6's fallback scenario hides it.
   - Criterion 7's other half, the packaged macOS binary reporting the kept
     peak, comes back from #757 with the reading (§ Acceptance criteria).
   - Criterion 1 also runs on the Windows development host and in a Linux
@@ -216,19 +257,21 @@ finding that the message store's size follows the per-process hash seed.
   issue worktree. Its reference marks (`results/criterion-11-reference.tsv`)
   were made with this host's Perl 5.44. On another Perl, regenerate them first
   with `criterion-11.sh reference`, from drop 4's code (`git show
-  bb4511ac:ltl`).
+  5f6c9f9c:ltl`).
 - Then drop 6:
   - restore `$version_number` to `0.20.0`;
-  - run the `after` benchmark (criterion 13) from the issue worktree, against
-    the `before` TSVs below;
+  - run the `before` and `after` benchmarks (criterion 13) interleaved, from
+    a worktree at the branch's base and the issue worktree (§ Done, the
+    rebase);
   - run the completion gate;
   - open the one PR.
 
 **Kept outside the repository, on the first macOS development host:**
-- `tests/baseline/results/709-before-1.tsv`, `-2.tsv` and `-3.tsv`, untracked,
-  in the `release/0.20.0` worktree (`.claude/worktrees/release-0.20.0`),
-  captured at `b24b8589`; compared only with an `after` captured on that
-  machine, from the issue worktree beside it.
+- `tests/baseline/results/709-before-1.tsv` to `-3.tsv` (at `b24b8589`, the
+  first base) and `709-before-6dadde32-1.tsv` to `-6.tsv` (at 6dadde32),
+  untracked, in the `release/0.20.0` worktree
+  (`.claude/worktrees/release-0.20.0`): the evidence of § Done, the rebase,
+  superseded by drop 6's interleaved runs and deleted at close-out.
 - The issue worktree, `.claude/worktrees/709-memory-peak-and-unmeasured-stores`.
 
 **Where it can block or move hosts:**
@@ -865,12 +908,12 @@ background. The architect confirmed this plan on 2026-10-28, and its timed matri
 
 **Started.** The branch `709-memory-peak-and-unmeasured-stores` was cut from
 `release/0.20.0` at `b24b8589`, in its own worktree, with `$version_number`
-set to `0.20.0-709` (`3e4cbf91`). The `before` benchmark ran at `b24b8589`
+set to `0.20.0-709` (`41e80935` since the rebase). The `before` benchmark ran at `b24b8589`
 from the release worktree: the four tests of criterion 13, three interleaved
 rounds, in 80 s.
 
 **The instruments,** in `prototype/709-memory-peak/` on the issue branch
-(`33bec43f`):
+(`8d249340`):
 - `make-arms.pl` generates every arm from `ltl` by substitutions it counts, so
   a moved base fails. Every arm but the floor carries the 38 stores of
   § Store inventory in the map, and times each walk per reading site.
@@ -955,7 +998,7 @@ qualified. The walk sites are reached as follows (`ltl` at `b24b8589`):
   to the width is the progress line, and `-g` cuts every key at 350
   characters.
 
-**The method.** `prototype/709-memory-peak/qualify.sh` (`e77d7581`) runs each
+**The method.** `prototype/709-memory-peak/qualify.sh` (`a1aa5356`) runs each
 candidate of `candidates.txt` twice, untimed, on macOS:
 - *a census run:* `ltl` as tracked, without `-mem`, under `-V
   message-grouping`, for the checkpoints each group fired, its final-pass
@@ -1029,7 +1072,7 @@ keys built a 4.0 MB index, and the next, holding 5,406, a 111.0 MB one.
 The approved matrix ran: eight inputs, five arms, three rounds, 120 runs in
 41 minutes on macOS. Every run exited 0, and no run's stderr carries ` at
 <file> line <N>`. The findings report, with the per-run figures, is
-`prototype/709-memory-peak/findings.md` on the issue branch (`c80a55b0`).
+`prototype/709-memory-peak/findings.md` on the issue branch (`9d886aeb`).
 
 **Cost is read from the wall clock.** `-V benchmark-data`'s `TIMING total`
 sums the stages, so it leaves out the phase-boundary walks, which run between
@@ -1090,7 +1133,7 @@ second set of three rounds beside the floor and the every-call arm: 72 runs
 in 25 minutes, every one exiting 0, with no ` at <file> line <N>` on stderr.
 The set ran noisier than the first (the floor's range on 15 masked days was
 39.5 to 49.0 s), so its arms are compared with each other only
-(`prototype/709-memory-peak/findings.md`, at `47376618` on the issue branch).
+(`prototype/709-memory-peak/findings.md`, at `bbf5990b` on the issue branch).
 
 | Input | Floor | Every call | Transient stores only | Walks inside grouping: every call → transient |
 |---|---|---|---|---|
@@ -1114,7 +1157,7 @@ The set ran noisier than the first (the floor's range on 15 masked days was
 
 ### Drop 4: the inventory stores join the map (2026-10-28)
 
-Delivered at `bb4511ac` on the issue branch: `named_structures()` maps 67
+Delivered at `5f6c9f9c` on the issue branch: `named_structures()` maps 67
 stores by name to a reference, the 29 the map had and the 38 of § Store
 inventory; `named_structure_sizes()` walks it whole or for the names given;
 `MEMORY_FINAL` carries one row per store of the map.
@@ -1161,14 +1204,14 @@ Every other harness scenario that runs `-mem` or reads a `MEMORY` row passes:
 
 ### Drop 5: grouping's walks per D3 (2026-10-28)
 
-Delivered at `68385228` on the issue branch. Under `-mem`,
+Delivered at `3eda9545` on the issue branch. Under `-mem`,
 `measure_memory_structures()` walks `grouping_structure_names()`, the 15
 `consolidation_*` stores of the map, at the `grouping_checkpoint` and
 `grouping_final_pass` sites, and every store at the phase boundaries. The two
 grouping call sites are unchanged.
 
 **Criterion 11 met under one pinned hash seed** (the architect, 2026-10-28;
-`prototype/709-memory-peak/criterion-11.sh`, at `8cba52b3` on the issue
+`prototype/709-memory-peak/criterion-11.sh`, at `637a1280` on the issue
 branch, output in `results/criterion-11-d5.txt`, macOS):
 - *Capture:* on the eight P1 inputs every grouping store of 1 MB or more is
   within 5 % of the reference, the message store included.
