@@ -230,8 +230,9 @@ about anything else, these still hold.
       runs once, as the completion gate, through `tests/run-suite.sh` and
       nothing else; the Bash guard refuses it outside the gate. Before
       launching any gate: name the behaviour this change could have altered;
-      if none, there is nothing to prove; and confirm no test the architect
-      said he would run is still outstanding.
+      if none, there is nothing to prove; confirm no test the architect
+      said he would run is still outstanding; and confirm every acceptance
+      criterion is validated, on every host it names (`docs/process/workflow.md` § 3).
 - [ ] Every `ltl` invocation in a test is shaped to the assertion that reads it:
       smallest fixture carrying the signal, everything unread switched off via
       documented options (`-bs 1440 -oe` for detection and selection assertions).

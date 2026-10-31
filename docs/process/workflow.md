@@ -146,6 +146,12 @@ last drop is pushed, and the gate starts only once he has accepted it: his test
 takes minutes and the suite half an hour, and a finding from his test is a new
 commit that a gate run before it would have to repeat.
 
+The gate starts only when the work is ready to merge: every drop delivered,
+and every acceptance criterion in the feature doc validated and recorded, on
+every machine, platform and CI run its validation method names. A criterion
+still to validate anywhere, on another host included, means the work is not
+ready; it is validated first, and the gate waits for it.
+
 ### Scope test, applied to the diff
 
 | The diff touches | Before/after benchmark | Full harness suite |
