@@ -270,15 +270,14 @@ ltl <work dir>`, from the issue worktree, the before from `git show
 made with this host's Perl 5.44. On another Perl, regenerate them first with
 `criterion-11.sh reference`, from drop 4's code (`git show 5f6c9f9c:ltl`).
 
+**Done, drop 6's `after` benchmark (2026-10-31):** `$version_number`
+restored to `0.20.0` and the temporary checks' workflow removed
+(`bbad014a`); criterion 13 met, the base and the after interleaved in one
+session (§ Drop 6).
+
 **Next:**
 - Criterion 1 on the Windows development host.
-- Then drop 6:
-  - restore `$version_number` to `0.20.0`;
-  - run the `after` benchmark (criterion 13) from the issue worktree, three
-    interleaved rounds on a quiet machine, against the `before` captured at
-    6dadde32 (§ Done, the rebase);
-  - run the completion gate;
-  - open the one PR.
+- The completion gate's harness suite, then the one PR.
 
 **Kept outside the repository, on the first macOS development host:**
 - `tests/baseline/results/709-before-1.tsv` to `-3.tsv` (at `b24b8589`, the
@@ -287,9 +286,13 @@ made with this host's Perl 5.44. On another Perl, regenerate them first with
   (`.claude/worktrees/release-0.20.0`): the evidence of § Done, the rebase,
   superseded by the capture at 6dadde32 on a quiet machine, and deleted at
   close-out.
-- The `before`: `tests/baseline/results/709-before-6dadde32-quiet-1.tsv` to
+- The `before`: `tests/baseline/results/709-before-6dadde32-s2-1.tsv` to
+  `-3.tsv`, and the first capture `709-before-6dadde32-quiet-1.tsv` to
   `-3.tsv`, untracked, in `.claude/worktrees/709-base-6dadde32`, a detached
   worktree at 6dadde32 kept until close-out.
+- The `after`: `tests/baseline/results/709-after-s2-1.tsv` to `-3.tsv`, and
+  the first run alone `709-after-1.tsv` to `-3.tsv`, untracked, in the issue
+  worktree; deleted at close-out with the `before`.
 - The issue worktree, `.claude/worktrees/709-memory-peak-and-unmeasured-stores`.
 
 **Where it can block or move hosts:**
@@ -1652,6 +1655,45 @@ about 11 ms each. Even a reading that cost nothing would take only the 0.45 s
 of the `-mem` run's 39 readings off it, about 0.9 of a point, which leaves
 drop 3's three measurements (with § Criteria 7 and 11 after drop 3) at
 11.7 % to 12.6 %.
+
+### Drop 6: the `after` benchmark (2026-10-31)
+
+**Criterion 13 met: no benchmark test runs slower.** The four tests of
+criterion 13, each run by `run-benchmark.sh` (which runs `ltl` with `-mem -V
+benchmark-data`), from two worktrees side by side: the base at 6dadde32
+(`.claude/worktrees/709-base-6dadde32`) and the issue branch at `bbad014a`,
+version `0.20.0`. Three rounds, before and after interleaved per test, the
+order reversed in round 2; 18:31 to 18:34, the load average 1.8 to 2.5, no
+other `ltl` running. Medians with ranges:
+
+| Test | Stage | Before | After | After against before |
+|---|---|---|---|---|
+| `single-day-access-log-standard` | total | 5.160 s [5.149–5.272] | 5.109 s [5.054–5.328] | −1.0 % |
+| | reading | 5.056 s [5.049–5.158] | 5.003 s [4.952–5.221] | −1.0 % |
+| `single-day-access-log-top25-consolidate` | total | 6.739 s [6.624–6.949] | 6.571 s [6.490–7.066] | −2.5 % |
+| | reading | 6.037 s [5.923–6.208] | 5.913 s [5.852–6.384] | −2.1 % |
+| | grouping | 0.583 s [0.583–0.620] | 0.539 s [0.518–0.559] | −7.5 % |
+| `single-day-access-log-heatmap-histogram-consolidate` | total | 9.234 s [9.105–9.488] | 9.188 s [9.158–9.459] | −0.5 % |
+| | reading | 8.582 s [8.466–8.801] | 8.545 s [8.531–8.773] | −0.4 % |
+| | grouping | 0.534 s [0.528–0.563] | 0.523 s [0.509–0.548] | −2.1 % |
+| `humungous-log-uniqueness-top25-consolidate` | total | 3.540 s [3.445–3.560] | 3.451 s [3.425–3.504] | −2.5 % |
+| | reading | 2.755 s [2.654–2.759] | 2.662 s [2.635–2.698] | −3.4 % |
+| | grouping | 0.766 s [0.762–0.774] | 0.767 s [0.766–0.782] | +0.1 % |
+
+The `rss_peak` the runs report rises 0.2 % to 0.6 % (0.3 to 0.5 MB), from
+106.92 to 107.25 MB on the standard test: it is now the operating system's
+kept peak (drop 2, criterion 1), which no reading between steps exceeds,
+and the process carries `BSD::Resource`.
+
+**A run not used as the comparison.** The `after` was first run alone,
+three rounds, 18:29 to 18:31, straight after the 18 minutes of criterion
+11's runs, and compared with the `before` captured on 2026-10-30 (§ Done,
+the rebase): its totals came out 3.3 % to 5.0 % above that `before`, all of
+it in the reading stage. Two minutes later, interleaved with the base, the
+same code read 0.4 % to 3.4 % faster than the base beside it, and the base
+measured within 1.3 % of its capture of 2026-10-30 on every test's total.
+The first run's excess followed the moment it ran, not the code; only runs
+interleaved in one session are compared (`docs/process/workflow.md` § 3).
 
 ### Delivery plan
 
