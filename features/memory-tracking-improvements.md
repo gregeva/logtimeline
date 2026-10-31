@@ -262,18 +262,16 @@ criteria 3, 4, 6, 12 and 14 met, and criterion 1 on macOS.
 **Done, delivery plan drop 3 (2026-10-30),** on the issue branch (§ Drop 3,
 `4b30ab6a`): without `-mem`, no reading between steps; criterion 5 met.
 
+**Done, criterion 11 after drop 3 (2026-10-31):** rewritten as a before and
+after of the same run, and met (§ Criterion 11's cost on a quiet machine).
+To re-run it: `prototype/709-memory-peak/criterion-11.sh check <before ltl>
+ltl <work dir>`, from the issue worktree, the before from `git show
+6dadde32:ltl`. Its reference marks (`results/criterion-11-reference.tsv`) were
+made with this host's Perl 5.44. On another Perl, regenerate them first with
+`criterion-11.sh reference`, from drop 4's code (`git show 5f6c9f9c:ltl`).
+
 **Next:**
-- Criterion 11's cost half: measured and attributed on a quiet machine
-  (§ Criterion 11's cost on a quiet machine); the architect's decision on
-  its bound comes before drop 6.
 - Criterion 1 on the Windows development host.
-- After drop 3, which changes `measure_memory_structures()` (drop 2 left it
-  unchanged), re-run criterion 11:
-  `prototype/709-memory-peak/criterion-11.sh check ltl <work dir>`, from the
-  issue worktree. Its reference marks (`results/criterion-11-reference.tsv`)
-  were made with this host's Perl 5.44. On another Perl, regenerate them first
-  with `criterion-11.sh reference`, from drop 4's code (`git show
-  5f6c9f9c:ltl`).
 - Then drop 6:
   - restore `$version_number` to `0.20.0`;
   - run the `after` benchmark (criterion 13) from the issue worktree, three
@@ -864,7 +862,7 @@ check covers every store all of the time (2026-10-27). It is recorded in
 | 8 | Moved to #757 by the architect, 2026-10-28: `build/generate-cpanfile.sh` names `BSD::Resource` for macOS only, in no Linux or Windows cpanfile. Met by #757 (PR #763, its criterion 4) | — | #757 |
 | 9 | Every store of § Store inventory is in `named_structure_sizes()`: under `-mem`, `-V benchmark-data` carries a `MEMORY` row for each of the 38, and on the one-day log with `-hg -hgdm raw -h HTTP` the highlighted raw values' row reads about 70 MB | assertable | The row names of one `-mem -V benchmark-data` run against the 38; the premise case for the size |
 | 10 | `unattributed` equals the peak less the sum of every store's `MEMORY` row, floored at zero, in both surfaces; `MEMORY_FINAL` carries one row per store of the map, under the `MEMORY` rows' names | assertable | A harness scenario on one `-mem -V benchmark-data` run |
-| 11 | Under `-mem`, each grouping checkpoint and final-pass window walks only the 15 `consolidation_*` stores (D3): every grouping store of 1 MB or more reports a `MEMORY` row within 5 % of the every-call reference, and the run on 15 unmasked days is at most 12 % slower in wall clock than the same run without `-mem` (P1: +9.1 %) | assertable (bounds from P1, 2026-10-28) | `prototype/709-memory-peak/criterion-11.sh check <ltl>`: the eight P1 inputs (`candidates.txt`) with `-mem -V benchmark-data`, their rows against `results/criterion-11-reference.tsv`; 15 unmasked days (`-bs 1440 -g`) with and without `-mem`, three runs each under `/usr/bin/time -l`, medians. Every run, and the reference, hashes under one pinned `PERL_HASH_SEED` (the architect, 2026-10-28), since the message store's size follows the hash seed (§ Drop 5, the finding); the checker refuses a run that does not show it |
+| 11 | Under `-mem`, each grouping checkpoint and final-pass window walks only the 15 `consolidation_*` stores (D3): every grouping store of 1 MB or more reports a `MEMORY` row within 5 % of the every-call reference, and the run on 15 unmasked days is at most 1 % slower in wall clock than the same run of the base code, with `-mem` and without it (a before and after compares the same run, the architect, 2026-10-31) | assertable (the capture bound from P1, 2026-10-28) | `prototype/709-memory-peak/criterion-11.sh check <before ltl> <after ltl>`: the eight P1 inputs (`candidates.txt`) with `-mem -V benchmark-data`, their rows against `results/criterion-11-reference.tsv`; 15 unmasked days (`-bs 1440 -g`), the before and the after each with and without `-mem`, five rounds interleaved under `/usr/bin/time -l`, medians. Every run, and the reference, hashes under one pinned `PERL_HASH_SEED` (the architect, 2026-10-28), since the message store's size follows the hash seed (§ Drop 5, the finding); the checker refuses a run that does not show it |
 | 12 | `-V memory-usage` keeps its section contract, with the kept-peak site in its fixed order, and every consumer of the memory output still asserts | assertable | Each consumer listed above |
 | 13 | No benchmark test runs slower beyond run-to-run variation | assertable (a measurement, recorded under Results) | Before and after, three runs each, medians with ranges: `single-day-access-log-standard`, and the tests that reach grouping's walks, `single-day-access-log-top25-consolidate`, `single-day-access-log-heatmap-histogram-consolidate` and `humungous-log-uniqueness-top25-consolidate` (the most checkpoints) |
 | 14 | No ` at <file> line <N>` on stderr in any run above | assertable | Captured stderr grepped |
@@ -1576,8 +1574,37 @@ Next: the cost half and its attribution, on a quiet machine.
 
 ### Criterion 11's cost on a quiet machine (2026-10-31)
 
-**Drop 3's cost is above the 12 % bound in every session; no code change
-under `-mem` explains it.** Three sessions on the architect's word that the
+**A before and after compares the same run** (the architect, 2026-10-31):
+the run with `-mem` against the base code's run with `-mem`, and the run
+without it likewise. A change that slows the run with `-mem` against its
+before is what matters; the ratio of the run with `-mem` to the run without
+it does not. Criterion 11's cost half is rewritten to that (§ Acceptance
+criteria), and `criterion-11.sh check` with it (`5e93c2f8`): the after at
+most 1 % above the before in each mode, the bound `docs/process/workflow.md`
+§ 3 sets for a regression.
+
+**Met.** The 15 unmasked days, the base code (6dadde32) against drop 3's
+(`f8ff503b`, whose `ltl` is `4b30ab6a`'s), each with and without `-mem`, five
+rounds interleaved, 18:08 to 18:26, the load average 2.0 to 2.8, no other
+`ltl` running. The runs were made by a script in the scratchpad with
+`run-arms.sh`'s invocation and rotation, and judged by the rewritten
+`check-criterion-11.py`, which also judged the capture of 2026-10-30 met.
+With the before and after swapped it reports the criterion not met.
+
+| Mode | Before | After | After against before |
+|---|---|---|---|
+| without `-mem` | 48.55 s [48.33–49.16] | 48.18 s [47.63–49.10] | −0.8 % (−0.37 s) |
+| with `-mem` | 65.90 s [65.26–66.36] | 53.77 s [53.41–54.82] | −18.4 % (−12.13 s) |
+
+From the runs' stage timings, with `-mem`: reading 37.79 s → 33.81 s,
+grouping 19.65 s → 11.57 s, the time outside the timed stages 6.58 s →
+6.54 s. Without `-mem` the readings fall from 0.44 s to 0.008 s (drop 3).
+The process's peak is unchanged: 1,403 MB without `-mem` on both, 1,415 MB
+and 1,417 MB with it.
+
+**The ratio the criterion judged before the direction.** Drop 3's cost is
+above the 12 % bound in every session; no code change under `-mem` explains
+it. Three sessions on the architect's word that the
 machine was quiet, the load average 1.8 to 3.0, no other `ltl` running. Each
 run is criterion 11's: 15 unmasked days, `-bs 1440 -g -V
 benchmark-data,memory-usage`, from an empty directory under `/usr/bin/time
