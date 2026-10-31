@@ -151,6 +151,9 @@ about anything else, these still hold.
 - [ ] No closing commentary ("worth keeping in mind", "one caveat"). A caveat
       that matters was raised before the decision.
 - [ ] His setup is not restated to him (gitignore, layout, what is generated).
+- [ ] A request carried out is answered with that it is done, nothing more:
+      no recap of what was written, no file, section or commit it went to,
+      no restatement of steps or content now recorded for a later session.
 - [ ] Claude's vocabulary is not attributed to him; say *format name*, not *slug*.
 - [ ] A waiver question lists every decision that depends on the step being waived.
 - [ ] A claim about tool output was read from the tool's output, not derived
