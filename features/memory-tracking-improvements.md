@@ -157,12 +157,11 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 **Status (2026-10-31):** in progress since 2026-10-27. Every drop of the
 delivery plan is delivered on the issue branch
 `709-memory-peak-and-unmeasured-stores`, pushed at `bbad014a` with
-`$version_number` restored to `0.20.0`. Every acceptance criterion is met
-except criterion 1 on Windows (the reported peak against the operating
-system's), which has not run: drop 2's Windows reading of the kept peak,
-`windows_working_set()`, has never run on Windows. It runs next, on the
-Windows development host (§ Resuming, Next); the completion gate's harness
-suite and the PR wait for it. #757 (a Linux-specific variant of the
+`$version_number` restored to `0.20.0`. Every acceptance criterion is met,
+criterion 1 on Windows last (the reported peak against the operating
+system's, on the Windows development host, 2026-10-31). The completion gate's
+harness suite and the PR run next, on the first macOS development host
+(§ Resuming, Next). #757 (a Linux-specific variant of the
 cpanfile), which blocked drop 2, is delivered (PR #763, merged as 9cd76712
 on 2026-10-30), and the issue branch is rebased onto `release/0.20.0` at
 6dadde32, which carries it. Filed 2026-10-12, found while reading the third
@@ -283,40 +282,21 @@ session (§ Drop 6).
 
 | Criterion | State |
 |---|---|
-| 1, the reported peak against the operating system's | met on macOS (§ Drop 2) and on Linux (D4); **Windows not run** |
+| 1, the reported peak against the operating system's | met on macOS (§ Drop 2), on Linux (D4) and on Windows (§ Drop 2 › Criterion 1 on Windows) |
 | 2, the 32-bit Windows offset | unassertable, a recorded gap |
-| 3, 4, 6, 12, 14 | met (§ Drop 2); 14 also to check on the Windows runs |
+| 3, 4, 6, 12, 14 | met (§ Drop 2); 14 also on the Windows runs |
 | 5, no readings between steps without `-mem` | met (§ Drop 3) |
 | 7, 8 | moved to #757 and met there; 7's other half met by the release-built macOS binary (§ Criteria 7 and 11 after drop 3) |
 | 9, 10, the stores in the map and `MEMORY_FINAL` | met (§ Drop 4) |
 | 11, grouping's walks: capture, and the run before and after | met (§ Criterion 11's cost on a quiet machine) |
 | 13, no benchmark test slower | met (§ Drop 6) |
 
-**Next, on the Windows development host: criterion 1 on Windows.**
-1. Sync the issue branch `709-memory-peak-and-unmeasured-stores` from origin
-   (`bbad014a` or later) and run `ltl` from it, with the Strawberry Perl x64
-   that `build/windows-setup.ps1` sets up (`Win32::API` reads both the
-   current size and the peak).
-2. On the one-day web application access log (148 MB, 761,698 lines; the
-   file of the benchmark selection `single-day-access-log` in
-   `tests/baseline/run-benchmark.sh`), run `ltl --disable-progress -hg -hgdm
-   raw -h HTTP -V benchmark-data,memory-usage,notices`, once without `-mem`
-   and once with it, stdout and stderr captured apart.
-3. Launch each run from PowerShell and sample the process's
-   `PeakWorkingSet64` every 100 ms until it exits, as § Issue #146 › Results
-   did. The last sample is the operating system's peak.
-4. Each run meets criterion 1 when `MEMORY rss_peak` and MAXIMUM MEMORY USED
-   are not above that peak and within 1 % below it. It also shows
-   `site: kept_peak` under `-V memory-usage`, no `memory-unreadable` notice,
-   and no ` at <file> line <N>` on stderr (criterion 14). A sample taken
-   every 100 ms can miss a rise just before exit, so a `rss_peak` above the
-   last sample is first checked against when the run's peak was reached.
-5. Record the two runs here, under § Drop 2, in a table like § Issue #146 ›
-   Results; commit and push to `release/0.20.0`, and point the issue at it.
-   A failure is a finding for the architect, and its fix is a commit on the
-   issue branch, after which drop 6's `after` benchmark runs again.
+**Done, criterion 1 on Windows (2026-10-31),** on the Windows development
+host, at `bbad014a`: `rss_peak` equals the operating system's peak working set
+to the byte, without and with `-mem`; no notice, no runtime warning (§ Drop 2 ›
+Criterion 1 on Windows). The issue branch took no new commit.
 
-**Then, on the first macOS development host:** the completion gate's harness
+**Next, on the first macOS development host:** the completion gate's harness
 suite, `./tests/run-suite.sh <scratch dir>` from the issue worktree, on the
 commit being merged; then the one PR. The `after` benchmark (§ Drop 6) stands
 for `bbad014a` while the issue branch takes no new commit.
@@ -337,8 +317,7 @@ for `bbad014a` while the issue branch takes no new commit.
   worktree; deleted at close-out with the `before`.
 - The issue worktree, `.claude/worktrees/709-memory-peak-and-unmeasured-stores`.
 
-**Where it moves hosts:** criterion 1 on Windows runs on the Windows
-development host; the completion gate and the PR come back to the first
+**Where it moves hosts:** the completion gate and the PR run on the first
 macOS development host, where the `before` and `after` were captured.
 
 **The specification stage kept nothing outside the repository.** Its scratch
@@ -1392,7 +1371,7 @@ above it still raises it until the next moment reads the kept peak again.
 |---|---|---|
 | macOS | `ru_maxrss` from `BSD::Resource::getrusage()` | in bytes: 6,291,456 at a script's start against `ps`'s 6,144 KB |
 | Linux | `VmHWM` in `/proc/self/status`, in kB | not run in this drop (below) |
-| Windows | `PeakWorkingSetSize` at offset 8 of `PROCESS_MEMORY_COUNTERS` | the call is now `windows_working_set()`, shared with the current reading; not run in this drop |
+| Windows | `PeakWorkingSetSize` at offset 8 of `PROCESS_MEMORY_COUNTERS` | the call is now `windows_working_set()`, shared with the current reading; not run in this drop, then on the Windows development host (below) |
 
 - `-V memory-usage` lists the readings under `kept_peak`, first in the
   section's order (§ -V memory-usage section contract).
@@ -1487,7 +1466,8 @@ two producers (rows 35 and 36); `docs/architecture-patterns.md` § Run-scoped
 activation flags names the new flag's consumption site.
 
 **Not run on this host**, for drop 2's remaining criteria:
-- Criterion 1 on Windows: the Windows development host.
+- Criterion 1 on Windows: the Windows development host (§ Criterion 1 on
+  Windows below).
 - Criterion 1 on Linux: no container runtime starts on the first macOS
   development host, a virtual machine without hypervisor support
   (`kern.hv_support` 0; `features/757-linux-cpanfile.md` § Acceptance
@@ -1544,6 +1524,30 @@ less `time -v`'s figure, in bytes, the peak near 81.3 MB:
 - Decided by the architect, 2026-10-30: D4, criterion 1 on Linux holds within
   1 % either side, and the reading is unchanged. Every run above is within it,
   so criterion 1 is met on Linux.
+
+**Criterion 1 on Windows (2026-10-31).** The issue branch at `bbad014a`,
+Strawberry Perl 5.42.3 x64 (`MSWin32-x64-multi-thread`, `Win32::API` 0.84) on
+the Windows 11 ARM64 development host, main checkout. One day of a web
+application access log (148 MB, 761,698 lines), `-hg -hgdm raw -h HTTP
+-V benchmark-data,memory-usage,notices`, one run each. Each run was launched
+from PowerShell, which sampled the process's `PeakWorkingSet64` every 100 ms
+until it exited, as § Issue #146 › Results did; the last sample is the
+operating system's peak.
+
+| `-mem` | OS peak working set | `rss_peak` | Below it | MAXIMUM MEMORY USED | Peak last rose | Run |
+|---|---|---|---|---|---|---|
+| no | 359,747,584 | 359,747,584 | 0 | 359.7 MB | 67.0 s | 70.9 s |
+| yes | 362,029,056 | 362,029,056 | 0 | 362 MB | 50.1 s | 54.2 s |
+
+- Criterion 1 is met on Windows: `rss_peak` equals the operating system's
+  peak to the byte on both runs, as on macOS. The peak stopped rising about
+  4 s before each run exited, so no sample missed a late rise.
+- `-V memory-usage` names `kept_peak` on both runs, 2 readings (586 and
+  814 µs in all), and `format_scan_compile` (2 readings). Without `-mem` no
+  `phase_boundary` reading is taken; with it, 6. This matches criterion 5
+  on Windows.
+- No notice was raised, so there was no `memory-unreadable`. Both runs' stderr is empty,
+  with no ` at <file> line <N>` (criterion 14).
 
 **Not caused by this issue: `benchmark-rows` fails on Linux.** Its check
 "comparison marks the reading time within parent" (`compare-results.sh`
