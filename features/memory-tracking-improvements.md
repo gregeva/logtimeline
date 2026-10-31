@@ -263,8 +263,9 @@ criteria 3, 4, 6, 12 and 14 met, and criterion 1 on macOS.
 `4b30ab6a`): without `-mem`, no reading between steps; criterion 5 met.
 
 **Next:**
-- Criterion 11's cost half and its attribution, on a quiet machine, on the
-  architect's word (§ Criteria 7 and 11 after drop 3).
+- Criterion 11's cost half: measured and attributed on a quiet machine
+  (§ Criterion 11's cost on a quiet machine); the architect's decision on
+  its bound comes before drop 6.
 - Criterion 1 on the Windows development host.
 - After drop 3, which changes `measure_memory_structures()` (drop 2 left it
   unchanged), re-run criterion 11:
@@ -1572,6 +1573,58 @@ attributed.** `prototype/709-memory-peak/criterion-11.sh check` on drop 3's
   affected by that work: when it began is not known.
 
 Next: the cost half and its attribution, on a quiet machine.
+
+### Criterion 11's cost on a quiet machine (2026-10-31)
+
+**Drop 3's cost is above the 12 % bound in every session; no code change
+under `-mem` explains it.** Three sessions on the architect's word that the
+machine was quiet, the load average 1.8 to 3.0, no other `ltl` running. Each
+run is criterion 11's: 15 unmasked days, `-bs 1440 -g -V
+benchmark-data,memory-usage`, from an empty directory under `/usr/bin/time
+-l`, `PERL_HASH_SEED` pinned, Homebrew Perl 5.44. The versions are run in
+turn within each round, their order rotated per round. Wall clock, medians
+with ranges:
+
+| Session | Code | Without `-mem` | With `-mem` | Cost |
+|---|---|---|---|---|
+| 1, three rounds | drop 5 on the first base (`8cba52b3`) | 49.77 s [49.07–50.21] | 53.91 s [53.46–54.70] | +8.3 % |
+| 1 | drop 5 rebased (`637a1280`) | 49.40 s [49.33–50.03] | 53.79 s [53.65–54.20] | +8.9 % |
+| 1 | drop 3 (`4b30ab6a`) | 48.49 s [47.65–49.96] | 54.60 s [54.33–55.15] | +12.6 % |
+| 3, five rounds | drop 5 rebased | 48.53 s [48.24–49.49] | 54.13 s [53.62–58.52] | +11.5 % |
+| 3 | drop 3 | 48.38 s [47.71–48.55] | 54.95 s [54.08–57.32] | +13.6 % |
+
+Session 2, three rounds with `-mem` only, to find what could slow the `-mem`
+run: drop 5 rebased 54.51 s [54.18–54.82]; the same with `BSD::Resource`
+loaded at startup (`PERL5OPT=-mBSD::Resource`) 53.61 s [53.49–55.33]; drop 2
+(`83f88bce`) 53.70 s [53.27–55.47]; drop 3 53.60 s [53.52–53.76]; drop 3 with
+`BSD::Resource` refused, so no kept peak is read 53.95 s [53.54–55.26].
+
+What moves the ratio:
+- *Drop 3 takes the readings out of the run without `-mem`, as criterion 5
+  asks.* That run's readings take 0.008 s on drop 3 against 0.42 s on drop 5,
+  in both sessions with that run; the run with `-mem` takes 0.43 to 0.45 s of
+  readings on both. On a floor of about 48.4 s, 0.42 s is 0.9 of a percentage
+  point of the ratio.
+- *The run with `-mem` is no slower on drop 3 by any measurable change.*
+  Against drop 5 rebased it took +0.81 s in session 1, −0.91 s in session 2
+  and +0.82 s in session 3. Between the two, the run with `-mem` gains two
+  kept-peak readings (2.5 ms) and the load of `BSD::Resource` (5.7 to 7.1 ms,
+  § Drop 2); loading the module or refusing it moved nothing beyond the
+  others' spread in session 2.
+- *Identical code measures differently between sessions.* Drop 5 rebased
+  came out at +8.9 % in session 1 and +11.5 % in session 3, 30 minutes
+  apart; its `-mem` run in session 3 had one round at 58.52 s.
+- *Where `-mem`'s time goes* (session 3, drop 3): the stage timings' total
+  grows from 46.98 s to 48.33 s, 0.45 s of it the readings; the time outside
+  the timed stages grows from 1.29 s to 6.62 s. There run the whole-map walk
+  after each stage (`measure_memory_structures('phase_boundary')`, called
+  after each stage's timer stops) and the `MEMORY_FINAL` walk.
+
+On macOS a reading of the current size forks `ps` (`get_memory_usage()`),
+about 11 ms each. Even a reading that cost nothing would take only the 0.45 s
+of the `-mem` run's 39 readings off it, about 0.9 of a point, which leaves
+drop 3's three measurements (with § Criteria 7 and 11 after drop 3) at
+11.7 % to 12.6 %.
 
 ### Delivery plan
 
