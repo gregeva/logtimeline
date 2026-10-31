@@ -154,24 +154,28 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 
 ## Issue #709: unmeasured stores and a peak that misses working memory
 
-**Status:** in progress since 2026-10-27. The specification and prototype
-stages are complete (2026-10-28), and delivery plan drops 4 and 5 are
-delivered on the issue branch, ahead of drops 2 and 3 by the architect's
-order. #757 (a Linux-specific variant of the cpanfile), which blocked
-delivery plan drop 2, is delivered (PR #763, merged as 9cd76712 on
-2026-10-30): `BSD::Resource` goes to the macOS cpanfile alone, and #709 keeps
-the reading and its fallback (the architect, 2026-10-28). The issue branch is
-rebased onto `release/0.20.0` at 6dadde32, which carries #757's commits
-(2026-10-30, § Resuming). Filed 2026-10-12,
-found while reading the third `all`-tier benchmark round of 0.19.0.
+**Status (2026-10-31):** in progress since 2026-10-27. Every drop of the
+delivery plan is delivered on the issue branch
+`709-memory-peak-and-unmeasured-stores`, pushed at `bbad014a` with
+`$version_number` restored to `0.20.0`. Every acceptance criterion is met
+except criterion 1 on Windows (the reported peak against the operating
+system's), which has not run: drop 2's Windows reading of the kept peak,
+`windows_working_set()`, has never run on Windows. It runs next, on the
+Windows development host (§ Resuming, Next); the completion gate's harness
+suite and the PR wait for it. #757 (a Linux-specific variant of the
+cpanfile), which blocked drop 2, is delivered (PR #763, merged as 9cd76712
+on 2026-10-30), and the issue branch is rebased onto `release/0.20.0` at
+6dadde32, which carries it. Filed 2026-10-12, found while reading the third
+`all`-tier benchmark round of 0.19.0.
 - Locked (§ Decisions): D1, the reported peak is the operating system's kept
   high-water mark; D2, macOS reads it from `getrusage` through
   `BSD::Resource`; D3, under `-mem` grouping's checkpoints and windows walk
   only the `consolidation_*` stores; D4, on Linux criterion 1 holds within
   1 % of GNU `time`'s peak either side.
 - The prototype stage is complete (2026-10-28).
-- The acceptance criteria are agreed, criterion 11's bounds written from P1,
-  and the delivery plan confirmed.
+- The acceptance criteria are agreed and the delivery plan confirmed;
+  criterion 11's capture bound is written from P1, and its cost half is a
+  before and after of the same run (the architect, 2026-10-31).
 
 ### Resuming
 
@@ -275,9 +279,47 @@ restored to `0.20.0` and the temporary checks' workflow removed
 (`bbad014a`); criterion 13 met, the base and the after interleaved in one
 session (§ Drop 6).
 
-**Next:**
-- Criterion 1 on the Windows development host.
-- The completion gate's harness suite, then the one PR.
+**Where each criterion stands:**
+
+| Criterion | State |
+|---|---|
+| 1, the reported peak against the operating system's | met on macOS (§ Drop 2) and on Linux (D4); **Windows not run** |
+| 2, the 32-bit Windows offset | unassertable, a recorded gap |
+| 3, 4, 6, 12, 14 | met (§ Drop 2); 14 also to check on the Windows runs |
+| 5, no readings between steps without `-mem` | met (§ Drop 3) |
+| 7, 8 | moved to #757 and met there; 7's other half met by the release-built macOS binary (§ Criteria 7 and 11 after drop 3) |
+| 9, 10, the stores in the map and `MEMORY_FINAL` | met (§ Drop 4) |
+| 11, grouping's walks: capture, and the run before and after | met (§ Criterion 11's cost on a quiet machine) |
+| 13, no benchmark test slower | met (§ Drop 6) |
+
+**Next, on the Windows development host: criterion 1 on Windows.**
+1. Sync the issue branch `709-memory-peak-and-unmeasured-stores` from origin
+   (`bbad014a` or later) and run `ltl` from it, with the Strawberry Perl x64
+   that `build/windows-setup.ps1` sets up (`Win32::API` reads both the
+   current size and the peak).
+2. On the one-day web application access log (148 MB, 761,698 lines; the
+   file of the benchmark selection `single-day-access-log` in
+   `tests/baseline/run-benchmark.sh`), run `ltl --disable-progress -hg -hgdm
+   raw -h HTTP -V benchmark-data,memory-usage,notices`, once without `-mem`
+   and once with it, stdout and stderr captured apart.
+3. Launch each run from PowerShell and sample the process's
+   `PeakWorkingSet64` every 100 ms until it exits, as § Issue #146 › Results
+   did. The last sample is the operating system's peak.
+4. Each run meets criterion 1 when `MEMORY rss_peak` and MAXIMUM MEMORY USED
+   are not above that peak and within 1 % below it. It also shows
+   `site: kept_peak` under `-V memory-usage`, no `memory-unreadable` notice,
+   and no ` at <file> line <N>` on stderr (criterion 14). A sample taken
+   every 100 ms can miss a rise just before exit, so a `rss_peak` above the
+   last sample is first checked against when the run's peak was reached.
+5. Record the two runs here, under § Drop 2, in a table like § Issue #146 ›
+   Results; commit and push to `release/0.20.0`, and point the issue at it.
+   A failure is a finding for the architect, and its fix is a commit on the
+   issue branch, after which drop 6's `after` benchmark runs again.
+
+**Then, on the first macOS development host:** the completion gate's harness
+suite, `./tests/run-suite.sh <scratch dir>` from the issue worktree, on the
+commit being merged; then the one PR. The `after` benchmark (§ Drop 6) stands
+for `bbad014a` while the issue branch takes no new commit.
 
 **Kept outside the repository, on the first macOS development host:**
 - `tests/baseline/results/709-before-1.tsv` to `-3.tsv` (at `b24b8589`, the
@@ -295,9 +337,9 @@ session (§ Drop 6).
   worktree; deleted at close-out with the `before`.
 - The issue worktree, `.claude/worktrees/709-memory-peak-and-unmeasured-stores`.
 
-**Where it can block or move hosts:**
-- Criterion 1 in drop 2 also runs on the Windows development host and in a
-  Linux container.
+**Where it moves hosts:** criterion 1 on Windows runs on the Windows
+development host; the completion gate and the PR come back to the first
+macOS development host, where the `before` and `after` were captured.
 
 **The specification stage kept nothing outside the repository.** Its scratch
 copies of `ltl`, and the scratch library `BSD::Resource` was built into, were
