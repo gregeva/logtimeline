@@ -2,8 +2,8 @@
 # #709 P1: the timed runs. Rounds, then inputs, then arms, the arm order
 # rotated each round so no arm always runs first or last on an input. Every
 # run under /usr/bin/time -l, from an empty directory, with
-# --disable-progress -V benchmark-data,memory-usage; -mem on every arm but the
-# floor (ltl-tracked). summarise.py reads the output tree.
+# --disable-progress -V benchmark-data,memory-usage; -mem on every arm but a
+# floor (ltl-tracked, or an arm named *-floor). summarise.py reads the output tree.
 #
 #   usage: run-arms.sh <arms dir> <output dir> <candidates file> <rounds> <input ...>
 #   ARMS overrides the arm list (default: tracked every boundaries grouponly cond-either-0)
@@ -33,7 +33,7 @@ for (( r = 1; r <= rounds; r++ )); do
         mkdir -p "$out/r$r/$input"
         for (( i = 0; i < n; i++ )); do
             arm="${arm_list[$(( (i + r - 1) % n ))]}"
-            mem="-mem"; [[ "$arm" == tracked ]] && mem=""
+            mem="-mem"; [[ "$arm" == tracked || "$arm" == *-floor ]] && mem=""
             # word lists, unquoted on purpose
             ( cd "$out/cwd" && /usr/bin/time -l "$arms/ltl-$arm" --disable-progress \
                 -V benchmark-data,memory-usage $mem ${opts[$input]} ${files[$input]} \

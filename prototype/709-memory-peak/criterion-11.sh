@@ -10,12 +10,19 @@
 #
 #   reference <ltl> <work dir>   one run per input of an ltl walking every store
 #                                at every site; writes results/criterion-11-reference.tsv
-#   check <ltl> <work dir>       one capture run per input with -mem, and three
-#                                rounds on 15 unmasked days with and without -mem;
-#                                then the check against the reference
+#   check <before ltl> <after ltl> <work dir>
+#                                one capture run per input of the after with -mem
+#                                against the reference; five rounds on 15 unmasked
+#                                days of the before and the after, each with and
+#                                without -mem, the after against the before in
+#                                each mode
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
-mode="$1"; ltl="$2"; work="$3"
+mode="$1"
+case "$mode" in
+check) before="$2"; ltl="$3"; work="$4" ;;
+*)     ltl="$2"; work="$3" ;;
+esac
 export PERL_HASH_SEED=0xcb7f69e1ad7b89b8a97db9af9d749f5c1ede2a51b28dc5f4107d65e2a17c8cb5
 export PERL_PERTURB_KEYS=0
 export PERL_HASH_SEED_DEBUG=1
@@ -31,11 +38,13 @@ reference)
     echo "wrote $reference_tsv ($(grep -vc '^#' "$reference_tsv") rows)"
     ;;
 check)
-    cp "$ltl" "$work/arms/ltl-checked" && cp "$ltl" "$work/arms/ltl-tracked" && chmod +x "$work/arms"/ltl-*
+    cp "$ltl" "$work/arms/ltl-checked"
+    for m in floor mem; do cp "$before" "$work/arms/ltl-before-$m"; cp "$ltl" "$work/arms/ltl-after-$m"; done
+    chmod +x "$work/arms"/ltl-*
     ARMS=checked "$here/run-arms.sh" "$work/arms" "$work/capture" "$here/candidates.txt" 1 "${INPUTS[@]}" || exit 1
-    ARMS="tracked checked" "$here/run-arms.sh" "$work/arms" "$work/cost" "$here/candidates.txt" 3 tc-g-d15 || exit 1
+    ARMS="before-floor before-mem after-floor after-mem" "$here/run-arms.sh" "$work/arms" "$work/cost" "$here/candidates.txt" 5 tc-g-d15 || exit 1
     python3 "$here/check-criterion-11.py" check "$work/capture" "$work/cost" checked "$PERL_HASH_SEED" "$reference_tsv"
     ;;
 *)
-    echo "usage: criterion-11.sh reference|check <ltl> <work dir>" >&2; exit 2 ;;
+    echo "usage: criterion-11.sh reference <ltl> <work dir> | check <before ltl> <after ltl> <work dir>" >&2; exit 2 ;;
 esac

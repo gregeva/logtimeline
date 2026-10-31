@@ -4,8 +4,9 @@
   capture  on each input, every grouping store (consolidation_* and the message
            store) whose reference mark is 1 MB or more reports a MEMORY row
            within 5 % of it
-  cost     on 15 unmasked days (tc-g-d15), the median wall clock with -mem is
-           at most 12 % above the median without it (P1 measured +9.1 %)
+  cost     on 15 unmasked days (tc-g-d15), the after's median wall clock is
+           no more than 1 % above the before's, with -mem and without it, each
+           against the same run of the before
 
 Every run compared is made under one pinned hash seed (criterion-11.sh): the
 message store's size follows Perl's per-process hash seed by 64 bytes an entry
@@ -22,7 +23,7 @@ import sys
 
 MB = 1e6
 CAPTURE_FLOOR = 0.95  # criterion 11: within 5 % of the reference
-COST_CEILING = 0.12   # criterion 11: at most 12 % above the floor
+COST_CEILING = 0.01   # criterion 11: the after at most 1 % above the before, per mode (docs/process/workflow.md § 3)
 GROUPING = re.compile(r"^(consolidation_|log_messages)")
 
 
@@ -97,19 +98,20 @@ def check(capture_dir, cost_dir, arm, seed, ref_path):
         print(f"  {inp:16s} {len(big)} stores, {exact} byte-equal: " + ("; ".join(short) if short else "all within 5 %"))
         ok &= not short
     rs = rounds(cost_dir)
-    print(f"cost (tc-g-d15, wall clock, median [range] of {len(rs)} rounds):")
-    med = {}
-    for a in ("tracked", arm):
-        w = []
-        for r in rs:
-            base = os.path.join(cost_dir, r, "tc-g-d15", a)
-            if not seeded(base + ".err", seed):
-                sys.exit(f"refused: {base}.err does not show HASH_SEED = {seed}")
-            w.append(wall(base + ".err"))
-        med[a] = statistics.median(w)
-        print(f"  {a:8s} {med[a]:.2f} s [{min(w):.2f}-{max(w):.2f}]"
-              + (f"  {100 * (med[a] / med['tracked'] - 1):+.1f} % against the floor" if a != "tracked" else ""))
-    ok &= med[arm] / med["tracked"] - 1 <= COST_CEILING
+    print(f"cost (tc-g-d15, wall clock, median [range] of {len(rs)} rounds, the after against the before):")
+    for mode in ("floor", "mem"):
+        med = {}
+        for side in ("before", "after"):
+            w = []
+            for r in rs:
+                base = os.path.join(cost_dir, r, "tc-g-d15", f"{side}-{mode}")
+                if not seeded(base + ".err", seed):
+                    sys.exit(f"refused: {base}.err does not show HASH_SEED = {seed}")
+                w.append(wall(base + ".err"))
+            med[side] = statistics.median(w)
+            print(f"  {'with -mem' if mode == 'mem' else 'without -mem':12s} {side:6s} {med[side]:.2f} s [{min(w):.2f}-{max(w):.2f}]"
+                  + (f"  {100 * (med['after'] / med['before'] - 1):+.1f} %" if side == "after" else ""))
+        ok &= med["after"] / med["before"] - 1 <= COST_CEILING
     print(f"criterion 11: {'met' if ok else 'NOT met'}")
     sys.exit(0 if ok else 1)
 
