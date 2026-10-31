@@ -8,8 +8,9 @@
 # totals, the format-registry compile count the compile callers are measured
 # against, and the comparison tool's treatment of the reading time.
 #
-# Every run passes -mem: on Windows a run without it takes no reading, so the
-# counts asserted here would not be reached there.
+# The runs that count readings between steps pass -mem: without it, where the
+# peak the operating system keeps can be read, no reading is taken between
+# steps (no-mem-readings asserts that).
 #
 # Each assertion records, per tests/HARNESS-DESIGN.md § Self-documenting
 # assertions: asserts, produced_by (function name), contract. All three are
@@ -29,6 +30,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 neutralize_colour_env
 
@@ -40,6 +43,31 @@ C_SECTION="$DOC § -V memory-usage section contract; criterion 8"
 C_GATE="$DOC § -V memory-usage section contract (the activation flag); criteria 9 and 17"
 C_DEBUG="$DOC § Decisions D5, D6 and the section contract; criteria 10 and 11"
 C_BENCH="$DOC § -V memory-usage section contract (benchmark-data); criterion 12"
+C_MAP="$DOC § Issue #709 › Acceptance criteria 9 and 10, § Store inventory; § Issue #356 Specification S3 and S5; features/memory-baseline-profiling.md DD-03"
+C_PEAK="$DOC § Issue #709 › Decisions D1 and D2; Acceptance criteria 3, 4, 6 and 12; § -V memory-usage section contract"
+C_NOMEM="$DOC § Issue #709 › Decisions (following from D1 and D2: without -mem, no reading is taken between steps); Acceptance criterion 5"
+
+# The callers of the section contract, in the order their lines print.
+SITE_ORDER="kept_peak,phase_boundary,grouping_checkpoint,grouping_final_pass,format_scan_compile,csv_block_compile,debug_decomposition,debug_sample"
+
+# The stores § Issue #709 › Store inventory found growing with the input
+# outside the map, each under its variable's name.
+INVENTORY_STORES=(
+    histogram_values_hl histogram_buckets histogram_buckets_hl histogram_stats
+    histogram_stats_hl histogram_boundaries heatmap_percentiles
+    consolidation_cat_stats consolidation_category_unmatched_count
+    consolidation_pattern_generation consolidation_key_generation
+    consolidation_key_checkpoint_count consolidation_absorption_ema
+    consolidation_streaming_absorbed consolidation_final_pass_skipped
+    consolidation_cliff_edge
+    files_processed in_files_matched index_file_data index_preseed
+    index_aggregated format_detection format_detection_evidence
+    format_detection_sample timestamp_date_cache unregistered_levels
+    unregistered_levels_by_file
+    verbose_output verbose_section_buffer section_rows category_totals
+    progress_history notice_records memory_debug_records bin_counter_telemetry
+    stats_demand_telemetry udm_skipped_lines numeric_filter_no_metric
+)
 
 pass=0
 fail=0
@@ -77,14 +105,15 @@ check() {
     fi
 }
 
-# run_ltl <tag> <args...>: one ltl run in the harness's own directory; stdout
-# and stderr land in $TMP_DIR/<tag>.out and .err, the exit status in .rc. A
-# Perl runtime warning on stderr, a non-zero exit, or an empty standard output
-# is a failure.
+# run_ltl <tag> <args...>: one ltl run in the harness's own directory, or in
+# $RUN_IN when set (a run whose files another run must not see); stdout and
+# stderr land in $TMP_DIR/<tag>.out and .err, the exit status in .rc. A Perl
+# runtime warning on stderr, a non-zero exit, or an empty standard output is
+# a failure.
 run_ltl() {
     local tag="$1"; shift
     local rc=0
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$TMP_DIR/$tag.out" 2> "$TMP_DIR/$tag.err" || rc=$?
+    ( cd "${RUN_IN:-$TMP_DIR}" && "$LTL" --disable-progress -ni "$@" ) > "$TMP_DIR/$tag.out" 2> "$TMP_DIR/$tag.err" || rc=$?
     echo "$rc" > "$TMP_DIR/$tag.rc"
     if [[ "$rc" -ne 0 ]]; then
         fail=$((fail + 1)); failures+=("$current_scenario :: $tag exit $rc")
@@ -311,13 +340,240 @@ scenario_benchmark_rows() {
         'is_contained() in tests/baseline/compare-results.sh' "$C_BENCH"
 }
 
+# ---------------------------------------------------------------------------
+# The memory map: under -mem a MEMORY row per store of the map, every store of
+# the inventory among them; unattributed is the peak less the sum of the rows;
+# MEMORY_FINAL carries one row per store of the map; the breakdown lists each
+# store of 1 KB or more, then unattributed. -bs 1440 -oe: no check reads the
+# time axis.
+# ---------------------------------------------------------------------------
+# rows <tag> <type>: the names of a run's benchmark-data rows of one type, one per line, sorted.
+rows() {
+    awk -F'\t' -v t="$2" '/^=== benchmark-data ===$/ { in_s = 1; next } /^=== END benchmark-data ===$/ { in_s = 0 }
+        in_s && $1 == t { print $2 }' "$TMP_DIR/$1.out" | LC_ALL=C sort
+}
+# breakdown <tag>: the -mem breakdown's rows beneath MAXIMUM MEMORY USED, "name<TAB>value unit".
+breakdown() {
+    awk '/MAXIMUM MEMORY USED/ { in_b = 1; next }
+         in_b && match($0, /^ +[a-z0-9_]+ +\( *[<0-9]+%\) +[0-9.]+ [A-Za-z]+ *$/) { n = split($0, f, " "); print f[1] "\t" f[n-1] " " f[n]; next }
+         in_b { exit }' "$TMP_DIR/$1.out"
+}
+scenario_memory_map() {
+    current_scenario="memory-map"
+    echo "[$current_scenario]"
+    run_ltl map -bs 1440 -oe -mem -V benchmark-data "$ACCESS_FIXTURE"
+    produced map $'^MEMORY\trss_peak\t' 'memory map rows' || return 0
+
+    local missing
+    missing=$(comm -23 <(printf '%s\n' "${INVENTORY_STORES[@]}" | LC_ALL=C sort) <(rows map MEMORY) | paste -sd, -)
+    check "every inventory store has a MEMORY row" "${missing:-none}" "none" \
+        'Under -mem, each store the inventory found growing with the input is in the named-structure map, so benchmark-data carries a MEMORY row for it' \
+        'named_structure_sizes() and print_verbose_output() in ltl' "$C_MAP"
+
+    local expected
+    expected=$(awk -F'\t' '/^=== benchmark-data ===$/ { in_s = 1; next } /^=== END benchmark-data ===$/ { in_s = 0 }
+        in_s && $1 == "MEMORY" && $2 == "rss_peak" { peak = $3; p = 1; next }
+        in_s && $1 == "MEMORY" && $2 != "unattributed" { sum += $3 }
+        END { if (p) { u = peak - sum; print (u < 0 ? 0 : u) } }' "$TMP_DIR/map.out")
+    check "unattributed is the peak less every row" "$(bench map MEMORY unattributed)" "$expected" \
+        'MEMORY unattributed equals rss_peak less the sum of every other MEMORY row, floored at zero' \
+        'print_verbose_output() in ltl' "$C_MAP"
+
+    check "MEMORY_FINAL carries the map's stores" "$(rows map MEMORY_FINAL | paste -sd, -)" \
+        "$(rows map MEMORY | grep -vxE 'rss_peak|unattributed|format_scan_subs' | paste -sd, -)" \
+        'MEMORY_FINAL has one row per store of the named-structure map, under the MEMORY rows names: every MEMORY row but rss_peak, unattributed and the format_scan_subs compile-boundary figure' \
+        'print_verbose_output() in ltl, through named_structure_sizes()' "$C_MAP"
+
+    # The breakdown prints after the benchmark block and after further walks, so
+    # its high-water marks can exceed the block's: it is checked against its own
+    # figures, not the block's rows.
+    local stray
+    stray=$(comm -23 <(breakdown map | cut -f1 | awk '$0 != "unattributed"' | LC_ALL=C sort) <(rows map MEMORY) | paste -sd, -)
+    check "the breakdown lists stores of the map, then unattributed" "${stray:-none}|$(breakdown map | tail -1 | cut -f1)" "none|unattributed" \
+        'Every row of the -mem breakdown is a store of the named-structure map, and the last row is unattributed' \
+        'print_summary_table() in ltl' "$C_MAP"
+
+    # unattributed is MAXIMUM MEMORY USED less the full sum of high-water marks.
+    # The breakdown renders two or three significant figures and hides the stores
+    # under 1 KB, so the check holds within the precision of every figure it reads
+    # plus 1 KB for each store the breakdown does not list.
+    local verdict
+    verdict=$(breakdown map | awk -F'\t' -v peak="$(sed -nE 's/^ *MAXIMUM MEMORY USED +([0-9.]+ [A-Za-z]+) *$/\1/p' "$TMP_DIR/map.out" | head -1)" \
+                                         -v stores="$(rows map MEMORY | grep -cvxE 'rss_peak|unattributed' || true)" '
+        function unit(u) { return u == "B" ? 1 : u == "kB" ? 1e3 : u == "MB" ? 1e6 : u == "GB" ? 1e9 : -1 }
+        function bytes(t,   p) { split(t, p, " "); return unit(p[2]) < 0 ? -1 : p[1] * unit(p[2]) }
+        function step(t,   p, d) { split(t, p, " "); d = index(p[1], ".") ? length(p[1]) - index(p[1], ".") : 0
+            return unit(p[2]) * 0.5 * 10 ^ -d }
+        $1 == "unattributed" { row = $2; next }
+        { if (bytes($2) < 0) bad = $2; sum += bytes($2); slack += step($2); listed++ }
+        END { if (row == "" || peak == "" || bad != "" || bytes(row) < 0 || bytes(peak) < 0) { print "unreadable (row=" row ", peak=" peak ", figure=" bad ")"; exit }
+              want = bytes(peak) - sum; if (want < 0) want = 0
+              diff = bytes(row) - want; if (diff < 0) diff = -diff
+              slack += step(row) + step(peak) + 1024 * (stores - listed)
+              print (diff <= slack) ? "yes" : "no (unattributed " row ", peak " peak " less " sum " bytes listed, off by " diff ", allowed " slack ")" }')
+    check "the breakdown's unattributed is MAXIMUM MEMORY USED less every store" "$verdict" "yes" \
+        'The breakdown unattributed row equals MAXIMUM MEMORY USED less the sum of every store high-water mark, floored at zero, within the precision of the rendered figures and the stores under 1 KB it hides' \
+        'print_summary_table() in ltl' "$C_MAP"
+}
+
+# ---------------------------------------------------------------------------
+# The peak: the high-water mark the operating system keeps for the process,
+# read once at each moment a peak is reported (-V benchmark-data, before the
+# summary, the run index), so every consumer reports it at its moment. On
+# macOS without BSD::Resource the run reports the readings' peak and says so.
+# -bs 1440 -oe: no check reads the time axis.
+# ---------------------------------------------------------------------------
+# index_memory_used <dir>: the run index's memory_used, from its selection row.
+index_memory_used() {
+    [[ -f "$1/ltl-index.csv" ]] || return 0
+    perl -MText::CSV -e 'my $c = Text::CSV->new({ binary => 1 }); open my $f, "<", $ARGV[0] or exit;
+        my $h = $c->getline($f); my %i; @i{@$h} = 0 .. $#$h;
+        while (my $r = $c->getline($f)) { print $r->[$i{memory_used}], "\n" if $r->[$i{entry_type}] eq "selection" }' "$1/ltl-index.csv"
+}
+# in_order <names> <order>: yes when the comma-separated names appear in the
+# comma-separated order, each at most once.
+in_order() {
+    awk -v names="$1" -v order="$2" 'BEGIN { n = split(order, o, ","); for (i = 1; i <= n; i++) pos[o[i]] = i
+        m = split(names, s, ","); last = 0
+        for (i = 1; i <= m; i++) { if (!(s[i] in pos) || pos[s[i]] <= last) { print "no (" names ")"; exit } last = pos[s[i]] }
+        print (m ? "yes" : "no (no site)") }'
+}
+
+scenario_peak_consumers() {
+    current_scenario="peak-consumers"
+    echo "[$current_scenario]"
+    mkdir -p "$TMP_DIR/consumers"
+    RUN_IN="$TMP_DIR/consumers" run_ltl consumers -bs 1440 -oe -mem -o -idx -V benchmark-data,memory-usage,notices "$ACCESS_FIXTURE"
+    produced consumers $'^MEMORY\trss_peak\t' 'the peak consumers' || return 0
+
+    local peak exported
+    peak=$(sed -E 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/consumers.out" | sed -nE 's/^ *MAXIMUM MEMORY USED +(.*[^ ]) *$/\1/p' | head -1 || true)
+    exported=$(sed -nE 's/^ *max_memory_used: *//p' "$TMP_DIR/consumers"/*.yaml 2>/dev/null | head -1 || true)
+    check "MAXIMUM MEMORY USED and the export carry one value" "$peak" "${exported:-MISSING-ANCHOR}" \
+        'The summary and the aggregate export report the peak read once before the summary' \
+        'pipeline_render(), print_summary_table() and write_aggregate_export() in ltl' "$C_PEAK"
+
+    local rss used
+    rss=$(bench consumers MEMORY rss_peak); used=$(index_memory_used "$TMP_DIR/consumers" | head -1)
+    check "the index's peak is the lifetime peak, not below rss_peak" "$([[ -n "$rss" && -n "$used" && "$rss" -gt 0 && "$used" -ge "$rss" ]] && echo yes || echo "no (rss_peak=${rss:-absent} memory_used=${used:-absent})")" "yes" \
+        'rss_peak and the index memory_used each read the peak at their moment; the index is written last, so its peak is at or above rss_peak' \
+        'print_verbose_output() and write_index_file() in ltl' "$C_PEAK"
+
+    # One kept-peak reading at each reporting moment: benchmark-data, the
+    # summary, the index. A run that cannot read it says so and reads none.
+    local unreadable expected
+    unreadable=$(notice_kind_count "$TMP_DIR/consumers.out" memory-unreadable)
+    if [[ "$unreadable" == 0 ]]; then expected=3; else expected=""; fi
+    check "kept-peak readings, one per reporting moment" "$(site consumers kept_peak readings)|$unreadable" "$expected|$unreadable" \
+        'Where the kept peak is readable it is read once for benchmark-data, once before the summary and once for the index; where it is not, the memory-unreadable notice says so and no kept-peak reading is counted' \
+        'read_run_peak_memory() and get_kept_peak_memory() in ltl' "$C_PEAK"
+}
+
+scenario_peak_not_below_readings() {
+    current_scenario="peak-not-below-readings"
+    echo "[$current_scenario]"
+    mkdir -p "$TMP_DIR/readings"
+    # -g: the grouping callers read too, so the order check sees them.
+    RUN_IN="$TMP_DIR/readings" run_ltl readings -bs 1440 -oe -g -mem debug -idx -V benchmark-data "$ACCESS_FIXTURE"
+    produced readings $'^decomposition\t' 'the readings against the peak' || return 0
+
+    # benchmark-data prints after the after_normalize record and before the next.
+    local rss used
+    rss=$(bench readings MEMORY rss_peak); used=$(index_memory_used "$TMP_DIR/readings" | head -1)
+    check "no reading before rss_peak is above it" "$(debug_records readings | awk -F'\t' -v peak="${rss:-0}" '
+        $4 != "-" && !done { n++; if ($4 > peak) bad = bad " " $3 "=" $4 }
+        $1 == "decomposition" && $3 == "after_normalize" { done = 1 }
+        END { print (peak > 0 && n > 0 && bad == "") ? "yes" : "no (rss_peak=" peak ", readings=" n ", above:" bad ")" }')" "yes" \
+        'The peak benchmark-data reports is never below a reading the run took before it' \
+        'read_run_peak_memory() from print_verbose_output() in ltl' "$C_PEAK"
+    check "no reading is above the index's peak" "$(debug_records readings | awk -F'\t' -v peak="${used:-0}" '
+        $4 != "-" { n++; if ($4 > peak) bad = bad " " $3 "=" $4 }
+        END { print (peak > 0 && n > 0 && bad == "") ? "yes" : "no (memory_used=" peak ", readings=" n ", above:" bad ")" }')" "yes" \
+        'The peak the index records, read after the last diagnostic reading, is never below any reading the run took' \
+        'read_run_peak_memory() from write_index_file() in ltl' "$C_PEAK"
+    check "callers in the contract's order" "$(in_order "$(site_names readings)" "$SITE_ORDER")" "yes" \
+        'The site lines print in the fixed order of the section contract, the kept-peak caller first' \
+        'emit_memory_usage_verbose() in ltl (@memory_reading_sites)' "$C_PEAK"
+}
+
+scenario_peak_fallback() {
+    current_scenario="peak-fallback"
+    echo "[$current_scenario]"
+    if [[ "$(uname -s)" != Darwin ]]; then
+        echo "  SKIP  $current_scenario :: macOS only: BSD::Resource is read on macOS alone"
+        return 0
+    fi
+    # An @INC hook, given at invocation, that refuses BSD::Resource.
+    mkdir -p "$TMP_DIR/hide"
+    printf '%s\n' 'package hide_bsd_resource;' \
+        'unshift @INC, sub { die "Can'"'"'t locate BSD/Resource.pm in \@INC (hidden by the harness)\n" if $_[1] eq "BSD/Resource.pm"; return };' \
+        '1;' > "$TMP_DIR/hide/hide_bsd_resource.pm"
+    # Without -mem: the readings between steps are taken for the fallback alone.
+    PERL5OPT="-I$TMP_DIR/hide -Mhide_bsd_resource" run_ltl hidden -bs 1440 -oe -V benchmark-data,memory-usage,notices "$ACCESS_FIXTURE"
+    produced hidden $'^MEMORY\trss_peak\t' 'the fallback' || return 0
+
+    check "the notice, once, in the panel" "$(notice_kind_count "$TMP_DIR/hidden.out" memory-unreadable)|$(notice_field "$TMP_DIR/hidden.out" memory-unreadable evidence | grep -c 'BSD::Resource module.*is not installed' || true)|$(notice_field "$TMP_DIR/hidden.out" memory-unreadable stage)|$(notice_field "$TMP_DIR/hidden.out" memory-unreadable shown)" "1|1|detect|panel" \
+        'Without BSD::Resource on macOS the run raises the memory-unreadable notice once, naming the module, as the pipeline starts, and draws it in the panel rather than in the options review' \
+        'resolve_kept_peak_reading() from pipeline_detect() in ltl' "$C_PEAK"
+    check "the readings' peak, from the readings between steps" "$(site hidden kept_peak readings)|$(site hidden phase_boundary readings)|$([[ "$(bench hidden MEMORY rss_peak)" -gt 0 ]] && echo peak || echo no-peak)" "|5|peak" \
+        'The fallback reads no kept peak; the readings between steps are taken, without -mem too, and their peak is reported' \
+        'read_run_peak_memory() and measure_memory_structures() in ltl' "$C_PEAK"
+}
+
+# ---------------------------------------------------------------------------
+# Without -mem no reading is taken between steps: the kept peak is read once
+# at each reporting moment, and the compile readings stay where a memory
+# surface armed them. Where the kept peak cannot be read (the notice says so),
+# the readings between steps are the run's peak and are taken.
+# -bs 1440 -oe: no check reads the time axis.
+# ---------------------------------------------------------------------------
+# between_steps <tag>: the phase-boundary and grouping callers listed.
+between_steps() { site_names "$1" | tr ',' '\n' | awk '/^(phase_boundary|grouping_checkpoint|grouping_final_pass)$/' | paste -sd, -; }
+
+scenario_no_mem_readings() {
+    current_scenario="no-mem-readings"
+    echo "[$current_scenario]"
+    local tag unreadable want_steps want_peak
+    for tag in plain grouped; do
+        if [[ "$tag" == plain ]]; then
+            run_ltl "nomem-$tag" -bs 1440 -oe -V memory-usage,notices "$ACCESS_FIXTURE"
+        else
+            run_ltl "nomem-$tag" -bs 1440 -oe -g -V memory-usage,notices "$ACCESS_FIXTURE"
+        fi
+        produced "nomem-$tag" '^=== memory-usage ===$' "readings without -mem ($tag)" || continue
+        unreadable=$(notice_kind_count "$TMP_DIR/nomem-$tag.out" memory-unreadable)
+        # The summary is the one reporting moment of these runs.
+        if [[ "$unreadable" == 0 ]]; then want_steps=""; want_peak=1
+        elif [[ "$tag" == grouped ]]; then want_steps="phase_boundary,grouping_checkpoint,grouping_final_pass"; want_peak=""
+        else want_steps=phase_boundary; want_peak=""; fi
+        check "no reading between steps, one kept peak ($tag)" "$(between_steps "nomem-$tag")|$(site "nomem-$tag" kept_peak readings)" "$want_steps|$want_peak" \
+            'Without -mem the run takes no phase-boundary or grouping reading and reads the kept peak once, before the summary; where the kept peak is unreadable it takes the readings between steps instead' \
+            'measure_memory_structures() and read_run_peak_memory() in ltl' "$C_NOMEM"
+    done
+
+    printf 'timestamp,latency\n2026-06-01 10:00:05,12\n2026-06-01 10:01:05,34\n2026-06-01 10:02:05,56\n' > "$TMP_DIR/nomem-metrics.csv"
+    run_ltl nomem-csv -bs 1440 -oe -udm latency:ms:mean -V memory-usage,benchmark-data,notices "$TMP_DIR/nomem-metrics.csv"
+    if produced nomem-csv '^=== memory-usage ===$' 'readings without -mem (csv)'; then
+        unreadable=$(notice_kind_count "$TMP_DIR/nomem-csv.out" memory-unreadable)
+        if [[ "$unreadable" == 0 ]]; then want_steps=""; want_peak=2; else want_steps=phase_boundary; want_peak=""; fi
+        check "the compile readings stay, the steps take none (csv)" "$(between_steps nomem-csv)|$(site nomem-csv kept_peak readings)|$(site nomem-csv csv_block_compile readings)" "$want_steps|$want_peak|2" \
+            'Without -mem, under -V benchmark-data, the CSV block compile still reads before and after, the kept peak is read for benchmark-data and the summary, and no reading is taken between steps' \
+            'compile_csv_block(), measure_memory_structures() and read_run_peak_memory() in ltl' "$C_NOMEM"
+    fi
+}
+
 scenario_register phase-boundary \
                   grouping \
                   compiles \
                   section-off \
                   debug \
                   debug-samples \
-                  benchmark-rows
+                  benchmark-rows \
+                  memory-map \
+                  peak-consumers \
+                  peak-not-below-readings \
+                  peak-fallback \
+                  no-mem-readings
 scenario_parse_args "$@"
 
 if [[ ! -x "$LTL" ]]; then
@@ -338,6 +594,11 @@ while read -r _scenario; do
         debug          ) scenario_debug ;;
         debug-samples  ) scenario_debug_samples ;;
         benchmark-rows ) scenario_benchmark_rows ;;
+        memory-map     ) scenario_memory_map ;;
+        peak-consumers ) scenario_peak_consumers ;;
+        peak-not-below-readings ) scenario_peak_not_below_readings ;;
+        peak-fallback  ) scenario_peak_fallback ;;
+        no-mem-readings ) scenario_no_mem_readings ;;
     esac
 done < <(scenario_selected)
 

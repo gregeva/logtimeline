@@ -721,7 +721,8 @@ which is the cost a flag exists to bound.
 - `adapt_to_command_line_options` :: `$grouping_active = $group_similar_sensitivity ne "none" ? 1 : 0;`
 - `adapt_to_command_line_options` :: `$numeric_filter_active    = quantity_bounds_given('filter')    ? 1 : 0;`
 - `adapt_to_command_line_options` :: `$message_cut_marked = $position eq 'right' ? 0 : 1;`: `-mt left` or `center`, where a cut key carries the ellipsis; read by the grouping passes, which keep it literal in the derived pattern (`keep_ellipsis_in_mask`) and group only keys carrying the same number of them (`cut_markers_match`) (`features/564-message-truncation-position.md`).
-- `adapt_to_command_line_options` :: `$memory_readings_active = section_requested('memory-usage') ? 1 : 0;`: each memory reading is counted and timed only while `-V memory-usage` is armed (`-mem debug` requests it); `get_memory_usage` tests the flag and nothing else (`features/memory-tracking-improvements.md` § -V memory-usage section contract).
+- `adapt_to_command_line_options` :: `$memory_readings_active = section_requested('memory-usage') ? 1 : 0;`: each memory reading is counted and timed only while `-V memory-usage` is armed (`-mem debug` requests it); `get_memory_usage` and `get_kept_peak_memory` test the flag and nothing else (`features/memory-tracking-improvements.md` § -V memory-usage section contract).
+- `pipeline_detect` :: `$kept_peak_readable = resolve_kept_peak_reading();`: whether the peak the operating system keeps for the process can be read, settled once as the pipeline starts rather than with the options, since the notice that it cannot (macOS without `BSD::Resource`) is a runtime condition the options review must not put to the analyst; `read_run_peak_memory` tests it at each moment a peak is reported, and `measure_memory_structures` takes no reading between steps without `-mem` unless the peak is unreadable (`return unless $show_memory || !$kept_peak_readable;`) (`features/memory-tracking-improvements.md` § Issue #709, D1 and D2).
 - `adapt_to_command_line_options` :: `if ($dark_background_given) {`: the background the output is drawn for, a global style setting settled outside any feature's block, `-dbg` over `-lbg` (`features/665-background-setting-global.md`).
 
 **Owning record.** This entry.
@@ -771,13 +772,19 @@ has two emitters and its emitter sub carries an older name (audit, FP.2). The na
 
 ## Named-structure memory map
 
-**Definition.** `named_structure_sizes()` is the one map of the stores `-mem`
-measures: a name per store and its `Devel::Size` size. Under `-mem`,
-`measure_memory_structures()` walks it and keeps each store's high-water mark,
-which the `-mem` breakdown and the `-V benchmark-data` `MEMORY` rows report;
-the peak less their sum is `unattributed`. `-mem debug` walks the same map at
-each phase boundary. A store holding compiled code cannot be walked (the walk
-crashes); the `format_scan_subs` compile-boundary figure stands for it.
+**Definition.** `named_structures()` is the one map of the stores `-mem`
+measures: a name per store and a reference to it. `named_structure_sizes()`
+walks it with `Devel::Size`, every store or the names given, and is the only
+place a store is measured. Under `-mem`, `measure_memory_structures()` keeps
+each store's high-water mark, which the `-mem` breakdown and the
+`-V benchmark-data` `MEMORY` rows report; the peak less their sum is
+`unattributed`. A phase-boundary walk covers every store; a walk at a grouping
+checkpoint or final-pass window covers only `grouping_structure_names()`,
+grouping's `consolidation_*` stores, which peak there. The `MEMORY_FINAL` rows
+measure every store of the map as the block prints, and `-mem debug` walks the
+map at each phase boundary. A store holding compiled code cannot be walked
+(the walk crashes); the `format_scan_subs` compile-boundary figure stands for
+it.
 
 **Intended uses.** A large data store, whether found during an investigation
 or added to the code, joins the map in the same change, under its own name.
@@ -791,22 +798,25 @@ grew. Grouping's transient structures (#171), the message-statistics counter
 store (#346) and the highlighted raw histogram values (#709) were each found
 missing that way. A walk costs time that grows with the stores it measures
 (`features/memory-tracking-improvements.md` § Issue #146, Drop 2), so walks
-run only under `-mem`.
+run only under `-mem`, and inside grouping they leave out the message store,
+whose walk at every checkpoint and window was most of `-mem`'s cost on keys
+that do not group (§ Issue #709, D3).
 
 **Consumption sites.**
-- `measure_memory_structures` :: `my %current_sizes = named_structure_sizes();`
+- `named_structure_sizes` :: `my %stores = named_structures();`
+- `measure_memory_structures` :: `my %current_sizes = named_structure_sizes( $site =~ /^grouping_/ ? grouping_structure_names() : () );`
+- `grouping_structure_names` :: `my %stores = named_structures();`
 - `memory_debug_decomposition` :: `my %sizes = named_structure_sizes();`
 - `run_consolidation_checkpoint` :: `measure_memory_structures('grouping_checkpoint');`
 - `process_final_pass_window` :: `measure_memory_structures('grouping_final_pass');`
 - `print_verbose_output` :: `printf "MEMORY\t%s\t%d\n", $struct, $memory_high_water_marks{$struct};`
+- `print_verbose_output` :: `my %final_sizes = named_structure_sizes();`
 - `print_summary_table` :: `my $unattributed = $reported_max_memory_usage - $total_hwm;`
 
 **Owning record.** `features/memory-tracking-improvements.md` (§ Issue #356
 Specification, S2 to S5, and § Issue #709).
 
-**Status.** Needs refinement: the stores § Issue #709's inventory found
-outside the map, and the walk at each grouping checkpoint and final-pass
-window, whose form #709's prototype chooses.
+**Status.** Established (#709).
 
 ---
 

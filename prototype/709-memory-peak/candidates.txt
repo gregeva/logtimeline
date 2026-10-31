@@ -1,0 +1,33 @@
+# #709 P1 qualification candidates: name|files (globs under logs/)|options
+# One server's month of web application access logs carrying execution time in
+# the duration field (integer milliseconds), its request paths carrying UUIDs;
+# grouped with the UUID mask, as --help advises for such a log, and without it,
+# as -g alone runs; with the benchmark's daily buckets for the month folder.
+tc-mask-d1|AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt|-bs 1440 -g -m uuid
+tc-mask-d7|AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-0[2-8].txt|-bs 1440 -g -m uuid
+tc-mask-d15|AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-0[2-9].txt AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-1[0-6].txt|-bs 1440 -g -m uuid
+tc-g-d1|AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt|-bs 1440 -g
+tc-g-d7|AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-0[2-8].txt|-bs 1440 -g
+tc-g-d15|AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-0[2-9].txt AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-1[0-6].txt|-bs 1440 -g
+# The same 7 days with the heatmap and histogram on, as the benchmark's
+# heatmap-histogram-consolidate scenario runs: more stores in every walk.
+tc-mask-hmhg-d7|AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-0[2-8].txt|-bs 1440 -hm -hg -g -m uuid
+# A day of a PLM application's web server access log (microseconds), most
+# lines signed direct-download requests with fifteen query parameters; the
+# query string dropped from the key, and kept with -xqs, where every key is
+# distinct.
+wc-access|AccessLogs/access.log_2026-05-19_00_00_00|-du us -g
+wc-access-xqs|AccessLogs/access.log_2026-05-19_00_00_00|-du us -g -xqs
+# Application logs, occurrences only: hundreds of thousands of unique error
+# messages (the group-similar specimen), with and without the UUID mask; a
+# security log of near-identical rejections; a large error log; a large
+# general application log.
+uniq|ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log|-g
+uniq-mask|ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log|-g -m uuid
+security|ThingworxLogs/SecurityLog.2025-05-05.1.log|-g
+error|ThingworxLogs/ErrorLog.2025-05-05.1.log|-g
+appl|ThingworxLogs/ApplicationLog.2025-05-05.0.log|-g
+# A script log carrying a duration, bytes and a count on each line.
+script|ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log|-g
+# One node's method server rotations over two days (log4j, user tokens).
+ms-node2|MethodServer/multi-node-prod/04-05Aug2025/Node2/*|-g

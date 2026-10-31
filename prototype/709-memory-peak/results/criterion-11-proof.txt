@@ -1,0 +1,20 @@
+== known-self capture
+capture (checked, under PERL_HASH_SEED=0xcb7f69e1..., grouping stores of 1 MB or more):
+  appl             7 stores, 7 byte-equal: all within 5 %
+  tc-g-d1          7 stores, 7 byte-equal: all within 5 %
+  tc-g-d15         7 stores, 7 byte-equal: all within 5 %
+  tc-g-d7          7 stores, 7 byte-equal: all within 5 %
+  tc-mask-d1       8 stores, 8 byte-equal: all within 5 %
+  tc-mask-d15      8 stores, 8 byte-equal: all within 5 %
+  tc-mask-d7       8 stores, 8 byte-equal: all within 5 %
+  wc-access-xqs    7 stores, 7 byte-equal: all within 5 %
+== known-bad capture
+capture (checked, under PERL_HASH_SEED=0xcb7f69e1..., grouping stores of 1 MB or more):
+  appl             7 stores, 0 byte-equal: consolidation_id_index 111.0 -> 0.0 MB; consolidation_key_trigrams 57.1 -> 33.0 MB; consolidation_key_message 3.2 -> 1.5 MB; consolidation_key_checkpoint_count 1.9 -> 0.9 MB; consolidation_key_generation 1.9 -> 0.9 MB; consolidation_unmatched 1.9 -> 0.9 MB
+  tc-g-d1          7 stores, 1 byte-equal: consolidation_id_index 80.5 -> 0.0 MB; consolidation_key_trigrams 40.7 -> 0.1 MB; consolidation_key_message 1.9 -> 0.1 MB; consolidation_unmatched 1.1 -> 0.1 MB; consolidation_key_checkpoint_count 1.1 -> 0.1 MB; consolidation_key_generation 1.1 -> 0.1 MB
+  tc-g-d15         7 stores, 0 byte-equal: consolidation_id_index 80.5 -> 0.0 MB; consolidation_key_trigrams 40.7 -> 0.1 MB; consolidation_key_message 1.9 -> 0.1 MB; consolidation_unmatched 1.1 -> 0.2 MB; consolidation_key_checkpoint_count 1.1 -> 0.1 MB; consolidation_key_generation 1.1 -> 0.1 MB
+  tc-g-d7          7 stores, 0 byte-equal: consolidation_id_index 80.5 -> 0.0 MB; consolidation_key_trigrams 40.7 -> 0.1 MB; consolidation_key_message 1.9 -> 0.1 MB; consolidation_unmatched 1.1 -> 0.1 MB; consolidation_key_checkpoint_count 1.1 -> 0.1 MB; consolidation_key_generation 1.1 -> 0.1 MB
+  tc-mask-d1       8 stores, 1 byte-equal: consolidation_id_index 51.9 -> 0.0 MB; consolidation_key_trigrams 27.5 -> 0.5 MB; consolidation_clusters 4.1 -> 1.5 MB; consolidation_key_message 1.9 -> 0.2 MB; consolidation_unmatched 1.1 -> 0.2 MB; consolidation_key_checkpoint_count 1.1 -> 0.2 MB; consolidation_key_generation 1.1 -> 0.2 MB
+  tc-mask-d15      8 stores, 1 byte-equal: consolidation_clusters 102.8 -> 59.1 MB; consolidation_id_index 51.9 -> 0.0 MB; consolidation_key_trigrams 27.5 -> 0.5 MB; consolidation_key_message 1.9 -> 0.5 MB; consolidation_unmatched 1.3 -> 0.5 MB; consolidation_key_checkpoint_count 1.2 -> 0.4 MB; consolidation_key_generation 1.2 -> 0.4 MB
+  tc-mask-d7       8 stores, 1 byte-equal: consolidation_id_index 51.9 -> 0.0 MB; consolidation_clusters 41.0 -> 11.3 MB; consolidation_key_trigrams 27.5 -> 1.7 MB; consolidation_key_message 1.9 -> 0.8 MB; consolidation_unmatched 1.1 -> 0.5 MB; consolidation_key_checkpoint_count 1.1 -> 0.5 MB; consolidation_key_generation 1.1 -> 0.5 MB
+  wc-access-xqs    7 stores, 1 byte-equal: consolidation_id_index 209.0 -> 0.0 MB; consolidation_key_trigrams 96.7 -> 0.1 MB; consolidation_key_message 4.0 -> 0.1 MB; consolidation_unmatched 2.2 -> 0.1 MB; consolidation_key_checkpoint_count 2.2 -> 0.1 MB; consolidation_key_generation 2.2 -> 0.1 MB

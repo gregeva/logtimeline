@@ -1,0 +1,13 @@
+capture (checked, under PERL_HASH_SEED=0xcb7f69e1..., grouping stores of 1 MB or more):
+  appl             7 stores, 6 byte-equal: all within 5 %
+  tc-g-d1          7 stores, 7 byte-equal: all within 5 %
+  tc-g-d15         7 stores, 6 byte-equal: all within 5 %
+  tc-g-d7          7 stores, 6 byte-equal: all within 5 %
+  tc-mask-d1       8 stores, 8 byte-equal: all within 5 %
+  tc-mask-d15      8 stores, 8 byte-equal: all within 5 %
+  tc-mask-d7       8 stores, 8 byte-equal: all within 5 %
+  wc-access-xqs    7 stores, 7 byte-equal: all within 5 %
+cost (tc-g-d15, wall clock, median [range] of 3 rounds):
+  tracked  49.83 s [49.24-49.97]
+  checked  54.30 s [54.04-55.71]  +9.0 % against the floor
+criterion 11: met
