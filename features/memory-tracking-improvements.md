@@ -154,18 +154,16 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 
 ## Issue #709: unmeasured stores and a peak that misses working memory
 
-**Status (2026-10-31):** in progress since 2026-10-27. Every drop of the
-delivery plan is delivered on the issue branch
-`709-memory-peak-and-unmeasured-stores`, pushed at `bbad014a` with
-`$version_number` restored to `0.20.0`. Every acceptance criterion is met,
-criterion 1 on Windows last (the reported peak against the operating
-system's, on the Windows development host, 2026-10-31). The completion gate's
-harness suite and the PR run next, on the first macOS development host
-(§ Resuming, Next). #757 (a Linux-specific variant of the
-cpanfile), which blocked drop 2, is delivered (PR #763, merged as 9cd76712
-on 2026-10-30), and the issue branch is rebased onto `release/0.20.0` at
-6dadde32, which carries it. Filed 2026-10-12, found while reading the third
-`all`-tier benchmark round of 0.19.0.
+**Status (2026-10-31):** complete. In progress from 2026-10-27; every drop
+of the delivery plan delivered and every acceptance criterion met, criterion 1
+on Windows last (the reported peak against the operating system's, on the
+Windows development host). The completion gate passed at `bbad014a`: the
+`after` benchmark (§ Drop 6), then the harness suite, 54 harnesses, 54
+passed. Merged into `release/0.20.0` by PR #764 as 19403f08; the release notes
+carry two bullets. #757 (a Linux-specific variant of the cpanfile), which
+blocked drop 2, was delivered by PR #763 (9cd76712, 2026-10-30). Filed
+2026-10-12, found while reading the third `all`-tier benchmark round of
+0.19.0.
 - Locked (§ Decisions): D1, the reported peak is the operating system's kept
   high-water mark; D2, macOS reads it from `getrusage` through
   `BSD::Resource`; D3, under `-mem` grouping's checkpoints and windows walk
@@ -296,29 +294,12 @@ host, at `bbad014a`: `rss_peak` equals the operating system's peak working set
 to the byte, without and with `-mem`; no notice, no runtime warning (§ Drop 2 ›
 Criterion 1 on Windows). The issue branch took no new commit.
 
-**Next, on the first macOS development host:** the completion gate's harness
-suite, `./tests/run-suite.sh <scratch dir>` from the issue worktree, on the
-commit being merged; then the one PR. The `after` benchmark (§ Drop 6) stands
-for `bbad014a` while the issue branch takes no new commit.
-
-**Kept outside the repository, on the first macOS development host:**
-- `tests/baseline/results/709-before-1.tsv` to `-3.tsv` (at `b24b8589`, the
-  first base) and `709-before-6dadde32-1.tsv` to `-6.tsv` (at 6dadde32),
-  untracked, in the `release/0.20.0` worktree
-  (`.claude/worktrees/release-0.20.0`): the evidence of § Done, the rebase,
-  superseded by the capture at 6dadde32 on a quiet machine, and deleted at
-  close-out.
-- The `before`: `tests/baseline/results/709-before-6dadde32-s2-1.tsv` to
-  `-3.tsv`, and the first capture `709-before-6dadde32-quiet-1.tsv` to
-  `-3.tsv`, untracked, in `.claude/worktrees/709-base-6dadde32`, a detached
-  worktree at 6dadde32 kept until close-out.
-- The `after`: `tests/baseline/results/709-after-s2-1.tsv` to `-3.tsv`, and
-  the first run alone `709-after-1.tsv` to `-3.tsv`, untracked, in the issue
-  worktree; deleted at close-out with the `before`.
-- The issue worktree, `.claude/worktrees/709-memory-peak-and-unmeasured-stores`.
-
-**Where it moves hosts:** the completion gate and the PR run on the first
-macOS development host, where the `before` and `after` were captured.
+**Done, the completion gate and the merge (2026-10-31):** the harness suite at
+`bbad014a`, 54 harnesses, 54 passed; PR #764 merged as 19403f08. At close-out
+the issue's `before` and `after` TSVs were deleted, the worktrees
+`.claude/worktrees/709-base-6dadde32` and
+`.claude/worktrees/709-memory-peak-and-unmeasured-stores` removed, and the
+branch deleted, locally and on origin.
 
 **The specification stage kept nothing outside the repository.** Its scratch
 copies of `ltl`, and the scratch library `BSD::Resource` was built into, were
