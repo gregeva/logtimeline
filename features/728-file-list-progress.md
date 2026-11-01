@@ -343,6 +343,36 @@ No ` at ... line ` on standard error in any run. The harnesses do not run on
 Windows; the fix changes nothing where `GLOB_DOSISH` is false, and the
 harnesses that read the plain path run at the gate.
 
+## Completion gate (2026-11-01, 883032ec)
+
+On the macOS development host that took the `before`, `$version_number`
+restored to `0.20.0` at 883032ec. Both sides from a worktree under
+`.claude/worktrees`: `before` from the release worktree, whose `ltl` is
+byte-identical to the base 0153c2a8; `after` from the issue worktree.
+
+**Before/after benchmark.** `single-day-access-log-standard` (the floor) and
+`multi-day-application-logs-standard`, which admits 41 files per run, the most
+of any selection. The benchmark expands each selection's wildcard in the shell
+and passes absolute paths, so every test reaches the changed code the same
+way: one literal path admitted per file, no folder read.
+`compare-results.sh summary`:
+
+| Test | Lines read, included | `TIMING/total` | `MEMORY/rss_peak` |
+|---|---|---|---|
+| `single-day-access-log-standard` | 761,698, 761,698: unchanged | 5.4 s to 5.2 s (-5.1%) | 102.0 MB to 102.3 MB (+0.3%) |
+| `multi-day-application-logs-standard` | 930,031, 930,028: unchanged | 6.8 s to 6.4 s (-5.1%) | 112.5 MB to 112.6 MB (+0.1%) |
+
+The structure rows over 1% are not the change. The path-keyed ones
+(`files_processed`, `in_files_matched`, `index_file_data` and the
+`format_detection_*` rows) grow by 8 bytes per file: the issue worktree's name
+is 8 characters longer than the release worktree's, and the paths are
+absolute; run from the same paths, `files_processed` is 7,426 bytes for both.
+`format_detection` (+5.4 KB, +12.9% on the 41 files) varies from run to run:
+on identical input it measured 48,615 bytes in both base runs and 43,367 then
+48,615 bytes in two runs of the branch. The peak memory gained is the added
+code, about 0.3 MB on identical paths. The time saved is within run-to-run
+variance: the read loop is unchanged.
+
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
 | # | Surface | Contract | Record |
