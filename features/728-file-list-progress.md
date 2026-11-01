@@ -16,49 +16,17 @@ file-list build.
 
 ## Status
 
-Implementation on `728-file-list-progress` (worktree
-`.claude/worktrees/728-file-list-progress`), version `0.20.0-728`. Drop 1 (one
-file listing for both paths, metadata from the admitting check) is committed
-and pushed at 037dead9 and validated (§ Drop 1 record). Drop 2 (the line) is
-committed and pushed at 2f62f740 and validated on macOS (§ Drop 2 record).
-The Windows stage is complete, with one fix to drop 1's reading of a
-drive-relative pattern, committed and pushed at c9500c44 (§ Windows record).
-Next: the completion gate on the macOS host (§ Resuming).
+Complete. Drop 1 (one file listing for both paths, metadata from the admitting
+check, 037dead9), drop 2 (the line, 2f62f740) and the Windows drive-relative fix
+(c9500c44) passed the completion gate at 883032ec (§ Completion gate), were
+merged into `release/0.20.0` by PR #765 (c885f386) and closed out on
+2026-11-01. The issue branch, its worktree and its benchmark TSVs are removed.
 
 ## Resuming
 
-Drops 1 and 2 and the Windows fix are on `728-file-list-progress` at c9500c44,
-version `0.20.0-728`, validated on macOS (§ Drop 1 record, § Drop 2 record) and
-on Windows (§ Windows record). Every criterion is validated; the completion
-gate remains.
-
-### On the macOS development host
-
-The completion gate (`docs/process/workflow.md` § 3), on the host and the kind
-of checkout that took the `before`: pull the branch in the issue worktree
-(c9500c44 was made on Windows); restore `$version_number` to `0.20.0` on the
-branch and push; from the issue worktree,
-`./tests/baseline/run-benchmark.sh single-day-access-log-standard --label 728-after`,
-compared with `728-before.tsv` (below); then `./tests/run-suite.sh <scratch-dir>`;
-then the PR to `release/0.20.0` and the close-out.
-
-### State outside the repository
-
-On the macOS development host:
-
-- The issue worktree `.claude/worktrees/728-file-list-progress`: nothing
-  uncommitted, behind the branch by c9500c44.
-- `tests/baseline/results/728-before.tsv` in the release worktree
-  (`.claude/worktrees/release-0.20.0`), untracked: the gate's `before`, taken
-  2026-11-01 at 0153c2a8.
-- The synthetic fixtures and validation drivers of the macOS stage lived in
-  that session's scratchpad (`728-measure/`, `728-validate/`) and do not
-  outlive it; § Drop 1 record and § Drop 2 record describe them well enough to
-  rebuild.
-
-On the Windows development host: the fixtures of § Windows record under
-`C:\Temp` (`ltl728`, `ltl728sel`, `ltl728f7`), outside the repository; the
-capture scripts and screenshots lived in that session's scratchpad.
+Nothing is open. State outside the repository: on the Windows development host,
+the fixtures of § Windows record under `C:\Temp` (`ltl728`, `ltl728sel`,
+`ltl728f7`), for the next session there to delete.
 
 ## Requirements (architect, 2026-11-01)
 
