@@ -17,7 +17,7 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D10 are locked and the
+contracts are confirmed by the architect; D1 to D11 are locked and the
 acceptance criteria agreed.
 
 ## Requirements (architect, 2026-11-01)
@@ -131,6 +131,18 @@ gate as they always do. Chosen over a hidden option that zeroes the delay and
 the pace for a test, and over a tree of tens of thousands of folders built
 during a test.
 
+**D11 — The shared name matcher is made to agree with `bsd_glob`, and `-r`
+changes where it disagreed** (architect, 2026-11-01). `basename_matches_glob()`
+serves both paths (D3), so the four disagreements that lie in it (F6 rows 1 to
+4) are closed for both: `^` is a literal inside a set and only `!` negates; an
+escaped `]` belongs to a set; a reversed range such as `[z-a]` matches nothing
+instead of stopping the run with a Perl error; and where File::Glob ignores
+case (its default flags carry `GLOB_NOCASE`, as on Windows), the matcher
+ignores it too. `-r` changes in exactly those four cases, towards the contract
+420 N2 records for it ("Agreement with `bsd_glob` is the contract"). Chosen
+over leaving the `-r` matcher as it is and giving the plain path a second,
+exact copy of `bsd_glob`'s matching.
+
 ## Acceptance criteria (agreed with the architect, 2026-11-01)
 
 Every criterion is validated during development on a synthetically generated
@@ -149,7 +161,7 @@ an unreadable folder.
 | 4 | `--disable-progress` and `--hide progress` show no listing line, however long the listing | both spellings, plain pattern and `-r` |
 | 5 | At a narrow width the folder is shortened in the middle by `shorten_filename()`, and the line never exceeds `terminal_width - 1` | `--terminal-width` 60 and 140 |
 | 6 | A plain pattern selects the same files, in the same order, as `bsd_glob` did: `*`, `?`, `[...]`, `[!...]`, `{a,b}`, escapes, a literal name, mixed case, hidden files, a wildcard in the folder part, `~`; a bare directory and a pattern matching nothing still stop the run with the same error | `-V format-detection` `file:` lines, before against after |
-| 7 | `-r` selects the same files in the same order, and still reports an unreadable folder once at the end | `-V format-detection` `file:` lines and the end-of-run note, before against after |
+| 7 | `-r` selects the same files in the same order, and still reports an unreadable folder once at the end, except in D11's four cases, where its selection now equals `bsd_glob`'s at the top level | `-V format-detection` `file:` lines and the end-of-run note, before against after; D11's four cases against `bsd_glob` |
 | 8 | Sizes taken by the listing give the same figures as the size pass did: the "Processing" line's overall and per-file percentages | multi-file and single-file runs; an empty file |
 | 9 | With `-idx`, the index read-back reaches the same freshness verdicts and the index records the same size and modification time; without `-idx`, no modification time is taken | `read_index_file()`, `write_index_file()`; `-V index-read-back`, before against after |
 | 10 | The listing is no slower than before | the F1 and F4 fixtures, three runs each, before against after |

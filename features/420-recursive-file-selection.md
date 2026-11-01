@@ -206,6 +206,11 @@ changes which files `-r` selects.
   pattern a user writes selects the same names at depth that it selects at the
   top level — and was verified against `bsd_glob` itself over `*`, `?`,
   `[...]`, `[!...]`, `{a,b}`, escapes, and literal names.
+  *Four disagreements found by #728* (`features/728-file-list-progress.md`
+  F6 rows 1 to 4, closed by its D11, architect, 2026-11-01): `^` read as
+  negation inside a set, an escaped `]` left out of a set, a reversed range
+  stopping the run with a Perl error, and case observed where File::Glob
+  ignores it (Windows).
 
 - **N3 — A leading dot is only matched by a pattern that spells it out.**
   Not specified in the contract; resolved by N2's agreement rule. `bsd_glob`
