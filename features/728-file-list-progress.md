@@ -17,7 +17,7 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D6 are locked.
+contracts are confirmed by the architect; D1 to D7 are locked.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -83,6 +83,15 @@ nothing, so a normal run looks and captures exactly as it does today. This
 adopts the startup delay `docs/progress-indication-best-practices.md` item 9
 records as available (git hides its bar for the first second). Chosen over
 drawing the line as soon as the listing starts.
+
+**D7 — When the list is built, the line is erased and leaves nothing behind**
+(architect, 2026-11-01). The row is blanked in place and the next output takes
+it, so a slow listing leaves the screen as a quick one does and adds no row
+before the progress section, as the `-p` pause prompt does
+(`features/597-section-visibility.md` § Finding: the pause option adds no
+rows). The file count is already reported by the "Processing" line
+(`file i/N`) and the Processed files table. Chosen over a lasting
+"Building file list completed: ..." row.
 
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
