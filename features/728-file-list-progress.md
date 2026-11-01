@@ -19,8 +19,8 @@ file-list build.
 Implementation on `728-file-list-progress` (worktree
 `.claude/worktrees/728-file-list-progress`), version `0.20.0-728`. Drop 1 (one
 file listing for both paths, metadata from the admitting check) is committed
-and pushed at 037dead9 and validated (§ Drop 1 record); F8 is with the
-architect. Drop 2 (the line) is next. The `before` benchmark is captured on the
+and pushed at 037dead9 and validated (§ Drop 1 record). Drop 2 (the line) is
+next. The `before` benchmark is captured on the
 base commit 0153c2a8 at `tests/baseline/results/728-before.tsv` in the release
 worktree.
 
@@ -194,7 +194,7 @@ an unreadable folder.
 | 7 | `-r` selects the same files in the same order, and still reports an unreadable folder once at the end, except in D11's four cases, where its selection now equals `bsd_glob`'s at the top level | `-V format-detection` `file:` lines and the end-of-run note, before against after; D11's four cases against `bsd_glob` |
 | 8 | Sizes taken by the listing give the same figures as the size pass did: the "Processing" line's overall and per-file percentages | multi-file and single-file runs; an empty file |
 | 9 | With `-idx`, the index read-back reaches the same freshness verdicts and the index records the same size and modification time; without `-idx`, no modification time is taken | `read_index_file()`, `write_index_file()`; `-V index-read-back`, before against after |
-| 10 | The listing is no slower than before | the F1 and F4 fixtures, three runs each, before against after |
+| 10 | `-r` lists no slower than before; a plain pattern within the cost of reading a folder one entry at a time (F4, F8: at most 0.03 s per 50,000 entries). Restated after drop 1 under the architect's direction for this issue: the cost is D3's own, a few hundredths of a second on a whole run | the F1 and F4 fixtures, three runs each, before against after |
 | 11 | The braille spinner displays in the classic Windows console and in Windows Terminal (D9) | by eye on the Windows development host, with screenshots |
 
 ## Drop 1 record (2026-11-01, 037dead9)
