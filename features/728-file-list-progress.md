@@ -17,7 +17,7 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D3 are locked.
+contracts are confirmed by the architect; D1 to D4 are locked.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -55,6 +55,18 @@ selects, and in what order, stays as shipped; it is proven by comparing
 selections before and after on the same fixtures. This amends 420 D3 (without
 `-r`, behaviour exactly as shipped and the plain path not refactored through
 the `-r` expansion) for the plain path's matching. Cost: F4.
+
+**D4 — The line shows the files found so far, the folders read so far, and the
+folder being read, last** (architect, 2026-11-01):
+
+```
+⠹ Building file list... 12,408 files, 3,210 folders: logs/archive/2026-08
+```
+
+The folder path is the quickest sign of a wrong directory, and the counts show
+the scale. The path goes last and is shortened in the middle, as the
+"Processing" line renders its path (446 D5, 532 D1). Chosen over the spinner
+and text alone, and over the counts without the path.
 
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
