@@ -115,7 +115,7 @@ Every open issue carries exactly one `status:` label. Closed issues carry none.
 | Label | Meaning |
 |---|---|
 | `status: backlog` | Accepted and understood; no work underway. Where anything filed lands. |
-| `status: in progress` | Branch cut, work underway. Set before the first line of code. |
+| `status: in progress` | Work underway, planning and specification included. Set when planning starts. |
 | `status: in review` | PR open against the release branch. |
 | `status: on hold` | Deliberately paused by an explicit decision. Says nothing about whether work has started. |
 

@@ -121,7 +121,7 @@ about anything else, these still hold.
 - [ ] A named branch is checked out and synced from origin before any file is
       read (`docs/process/workflow.md` § 1).
 - [ ] Before the first line of code: branch name is a short description of the issue, status
-      set to `in progress` (which assigns the issue), `$version_number` stamped, and a
+      `in progress` (set when planning started, or now), `$version_number` stamped, and a
       `before` benchmark captured on the base commit if the hot path is in scope.
 
 ### Before sending any reply
@@ -164,6 +164,8 @@ about anything else, these still hold.
 
 ### Before planning, scoping, or stating a design view
 
+- [ ] Planning an issue is working on it: its status goes to `in progress` (which
+      assigns it) in the step that starts the planning, before any record is read.
 - [ ] Name the surfaces the work touches, the feature docs and research that own
       them, and the locked decisions that govern them. Read them. Then speak.
 - [ ] The owning records are found by search (`./process/find-records.sh

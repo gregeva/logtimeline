@@ -57,7 +57,7 @@ so the gate runs on exactly the code being merged. Nothing hardcodes a version:
 
 ```bash
 git branch --show-current                          # issue number + short description
-./process/issue-status.sh set {number} "in progress"      # also assigns you; --assignee <login> for a contributor
+./process/issue-status.sh set {number} "in progress"      # already set if planning started the work (§ 2); also assigns you; --assignee <login> for a contributor
 # set $version_number = "X.Y.Z-{issue}" in ltl
 ```
 
@@ -73,7 +73,10 @@ has commits):
 ## 2. Feature lifecycle
 
 Phase 1 begins only on explicit instruction. Filing a requirement
-(`docs/process/issues.md` § Filing a requirement) is not planning.
+(`docs/process/issues.md` § Filing a requirement) is not planning. When planning
+begins, the issue is set to `in progress` in the same step
+(`./process/issue-status.sh set {number} "in progress"`): specification is work
+on the issue.
 
 1. **Planning.** The owning feature doc in `features/` is the primary planning
    artifact: requirements, locked decisions (Dxx) with rationale, open items, `-V`
