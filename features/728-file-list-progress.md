@@ -17,7 +17,7 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D8 are locked.
+contracts are confirmed by the architect; D1 to D9 are locked.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -107,6 +107,17 @@ sizing during the walk existed only because `bsd_glob` was a separate step
 (architect: "446 D2 did that because of the bsd_glob is its separate process;
 that's all"). With no separate pass left after the listing, the line covers the
 listing alone.
+
+**D9 — The braille spinner is used on every platform, Windows included, and is
+checked on the Windows development host in both consoles before the work is
+accepted** (architect, 2026-11-01). The classic console (conhost, behind cmd
+and PowerShell 5) uses Consolas by default and does not borrow missing glyphs
+from other fonts, so it may draw boxes; Windows Terminal is told apart by
+`$ENV{WT_SESSION}` (`features/windows-character-rendering.md` § Detection
+Methods). A console that draws boxes is brought back to the architect with
+screenshots, with braille in Windows Terminal and `| / - \` in the classic
+console as the candidate. Chosen over `| / - \` on all of Windows, and over
+splitting by console up front.
 
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
