@@ -16,9 +16,13 @@ file-list build.
 
 ## Status
 
-Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D13 are locked and the
-acceptance criteria agreed.
+Implementation on `728-file-list-progress` (worktree
+`.claude/worktrees/728-file-list-progress`), version `0.20.0-728`. Drop 1 (one
+file listing for both paths, metadata from the admitting check) is committed
+and pushed at 037dead9 and validated (§ Drop 1 record); F8 is with the
+architect. Drop 2 (the line) is next. The `before` benchmark is captured on the
+base commit 0153c2a8 at `tests/baseline/results/728-before.tsv` in the release
+worktree.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -193,6 +197,41 @@ an unreadable folder.
 | 10 | The listing is no slower than before | the F1 and F4 fixtures, three runs each, before against after |
 | 11 | The braille spinner displays in the classic Windows console and in Windows Terminal (D9) | by eye on the Windows development host, with screenshots |
 
+## Drop 1 record (2026-11-01, 037dead9)
+
+One file listing for both paths, with the file's metadata taken by the check
+that admits it. `expand_plain_pattern()` reproduces `bsd_glob`'s reading
+(`expand_glob_braces()`, `split_file_pattern()`, `glob_segment_has_magic()`,
+`sort_like_bsd_glob()`), reading the folder that holds the files one entry at a
+time; `expand_recursive_pattern()` reads each folder one entry at a time and
+shares the split and the matcher (`basenames_matching_glob()`, replacing
+`basename_matches_glob()`); `admit_selected_file()` keeps the size, and the
+modification time under `-idx`, in `%selected_file_size` and
+`%selected_file_mtime`; `total_selected_files_for_progress()` replaces the size
+sweep; `read_index_file()` and the read loop's index record read the listing's
+values. The patterns catalogue's *One resolution surface per vocabulary* entry
+names the shared reader.
+
+Validated on a synthetic tree in the session scratchpad: a folder of awkward
+names (mixed case, `^`, `]`, `\`, `[`, `{` in names, a hidden file and folder,
+a space, `é`, a file `q*.888`), nested and mixed-case subfolders, an unreadable
+folder, a folder symlink, a file symlink and a dangling one. Every run beside
+the base `ltl` (0153c2a8) on the same input, `-V format-detection` `file:`
+lines compared in order:
+
+| # | Result |
+|---|---|
+| 2 | No line yet. Full output identical, apart from the run's own time and memory lines, on a plain run over the multi-file progress fixture, a `-r` run over it, and a one-day web access log |
+| 6 | 48 plain patterns, covering every class the criterion names, brace order and repetition, the unbalanced-brace and `{}` cases, a wildcard folder part, a folder symlink, an unreadable folder, a missing folder, a bare folder and two arguments: each selects what the base selected, in its order, and what `bsd_glob` itself selects |
+| 7 | 14 `-r` patterns: identical, except `[^a]*.888`, `[\]]*.888`, `q\*.888` and `[z-a]*.888`, which now select what `bsd_glob` selects at the top level and below (D11, D12); the last no longer stops with a Perl error. D13 (`/` as a root) was verified on the base code only: a run from `/` reads the whole disk |
+| 8 | `-V read-path` sizes identical; `validate-progress-line.sh` scenarios `multi-file`, `single-file`, `empty-file-keeps-both-percentages`, `path-in-frame`, `disable-progress`: 20 passed |
+| 9 | Two `-idx` runs each side over the multi-file fixture: the index's sizes and modification times identical, the second run `index_used: yes`, every file `fresh` at `tier_1_selection`; `validate-index-read-back.sh` scenarios `cold-no-index`, `warm-unfiltered`, `stale-mtime`, `stale-size`, `multi-file-all-fresh-tier1`, `multi-file-one-stale`, `default-writes-no-index`: 23 passed |
+| 10 | F8: `-r` faster; plain 0.02 to 0.03 s slower per 50,000 entries when few match |
+
+Also run: `validate-recursive-file-selection.sh`, all 13 scenarios, 36 passed;
+`validate-read-path.sh` scenario `paths-by-size`, 7 passed. No ` at ... line `
+on standard error from the new code in any run.
+
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
 | # | Surface | Contract | Record |
@@ -334,6 +373,47 @@ Rows 5 to 8 are closed for the plain path by expanding braces first, exactly as
 alternative's matches with `bsd_glob`'s comparison (`ci_compare()`: case folded,
 then byte order); `-r` keeps its own brace handling, so `-r` is unchanged there.
 Rows 1 to 4 are in the matcher itself, which `-r` shares.
+
+**F7 — `bsd_glob`'s order of names with bytes from 0x80 up depends on the
+platform's C `char`.** `ci_compare()` folds and subtracts through a plain C
+`char`: on this Mac (Apple arm64, where `char` is signed) `bsd_glob` puts
+`é.888` (bytes C3 A9) before `_x.888`, `a.888`, `Z.888` and `~.888`; Perl's
+`sort` puts it last. Perl's configuration records no signedness (`charbits=8`
+only), so `GLOB_CHAR_IS_SIGNED` reads it from the platform: signed on x86, and
+on Apple and Windows systems on ARM; unsigned on other systems on ARM, PowerPC,
+s390 and RISC-V. Verified on macOS arm64 only; the Windows host check (D9)
+covers Windows, and no Linux ARM host is available.
+
+**F8 — Listing time after drop 1, against criterion 10 ("The listing is no
+slower than before").** The listing alone, measured by adding a second argument
+that matches nothing so the run stops with its usage error once every argument
+is listed: the F1 fixtures, five runs each side, the base `ltl` (0153c2a8)
+against drop 1, median (range), peak resident memory median, macOS arm64,
+2026-11-01:
+
+| Shape | Base | Drop 1 |
+|---|---|---|
+| 50,000 files, plain, all match | 0.35 s (0.34–0.56), 53.2 MB | 0.34 s (0.34–0.35), 65.2 MB |
+| 50,000 files, plain, one in five match | 0.21 s (0.21–0.21), 42.2 MB | 0.24 s (0.23–0.28), 45.2 MB |
+| 50,000 files, plain, none match | 0.18 s (0.18–0.18), 40.1 MB | 0.20 s (0.20–0.23), 41.0 MB |
+| 8,421 folders, `-r`, 16,000 files match | 0.96 s (0.94–1.03), 51.3 MB | 0.84 s (0.83–1.08), 54.8 MB |
+| 8,421 folders, `-r`, none match | 0.44 s (0.43–0.46), 42.3 MB | 0.42 s (0.42–0.49), 42.5 MB |
+
+`-r` is faster: it now matches a name before testing it is a file, rather than
+testing every entry. A plain pattern that matches few names is 0.02 to 0.03 s
+slower per 50,000 entries, the cost F4 measured for reading a folder one entry
+at a time in Perl rather than in `bsd_glob`'s C loop: criterion 10 is not met
+there, by that margin. The first build was slower still (0.37 s against
+0.39 s with every file matching, 0.21 s against 0.25 s with one in five);
+three changes brought it here: a folder's names matched in one call rather
+than one call per name, the sort done as one string sort with no comparison
+block, and the size read with `-s _` rather than a full `stat` list. The extra
+memory with every file matching (12 MB at 50,000 files) is the listing's
+working set: its order keys, the matched list, and the size kept per file,
+which the base kept only with the progress line on. The order keys and the
+matched list are freed when the listing returns; the size kept per file stays
+for the run. The listing does not set the run's peak: a full read of the
+50,000 files peaks at 675 MB (drop 1, one run).
 
 ## Records searched
 
