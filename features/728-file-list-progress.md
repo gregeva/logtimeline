@@ -17,7 +17,7 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D7 are locked.
+contracts are confirmed by the architect; D1 to D8 are locked.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -92,6 +92,21 @@ before the progress section, as the `-p` pause prompt does
 rows). The file count is already reported by the "Processing" line
 (`file i/N`) and the Processed files table. Chosen over a lasting
 "Building file list completed: ..." row.
+
+**D8 — The listing takes each file's metadata from its own file check; the
+separate size pass goes** (architect's proposal, locked 2026-11-01). As the
+listing adds a file, the `-f` check that admits it also yields its size
+(`-s _`, no second file-system call; F5), which replaces
+`size_selected_files_for_progress()`. While the run index is on (`-idx`), the
+same check also yields the modification time the index needs; while it is off,
+it is not taken. The later steps that read this metadata again, the stat in
+`read_index_file()` and the read loop's stat for the index record
+(`my @file_stat = stat($in_file);`), take it from the listing instead. The run
+index stays supported until it is removed. Amends 446 D2, whose rejection of
+sizing during the walk existed only because `bsd_glob` was a separate step
+(architect: "446 D2 did that because of the bsd_glob is its separate process;
+that's all"). With no separate pass left after the listing, the line covers the
+listing alone.
 
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
