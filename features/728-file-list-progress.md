@@ -20,9 +20,11 @@ Implementation on `728-file-list-progress` (worktree
 `.claude/worktrees/728-file-list-progress`), version `0.20.0-728`. Drop 1 (one
 file listing for both paths, metadata from the admitting check) is committed
 and pushed at 037dead9 and validated (§ Drop 1 record). Drop 2 (the line) is
-next. The `before` benchmark is captured on the
-base commit 0153c2a8 at `tests/baseline/results/728-before.tsv` in the release
-worktree.
+committed and pushed at 2f62f740 and validated on macOS (§ Drop 2 record).
+Open: criterion 11, the spinner in both Windows consoles (D9), on the Windows
+development host; the completion gate waits for it. The `before` benchmark is
+captured on the base commit 0153c2a8 at
+`tests/baseline/results/728-before.tsv` in the release worktree.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -231,6 +233,57 @@ lines compared in order:
 Also run: `validate-recursive-file-selection.sh`, all 13 scenarios, 36 passed;
 `validate-read-path.sh` scenario `paths-by-size`, 7 passed. No ` at ... line `
 on standard error from the new code in any run.
+
+## Drop 2 record (2026-11-01, 2f62f740)
+
+The line: `file_list_progress_start()` before the first argument,
+`file_list_progress_folder()` as each folder is opened, a clock check every
+`FILE_LIST_TICK_STRIDE` (16) entries read or files tested, through
+`file_list_progress_tick()`, and `file_list_progress_end()` straight after the
+last argument, before the usage errors. `file_list_progress_text()` builds the
+frame; `paint_progress_line()` paints it.
+
+Implementation notes:
+
+- **N1 — The counts are written as the read pass's line writes its counts**
+  (`value_text(..., kind => 'count', budget => 'progress')`): `5274 files`,
+  `117.2k files`, `4k folders`. D4's sample `12,408` showed the shape, not the
+  format; one formatter for every progress count.
+- **N2 — `paint_progress_line()` pads by cells, not bytes** (`notice_cells()`):
+  a spinner glyph is three bytes and one cell, and padding by bytes would leave
+  two cells of an older frame standing. The read pass's line had the same
+  shortfall for any non-ASCII character in a path (from the code; not observed).
+- **N3 — The plain path admits each batch of matches as the folder is read.**
+  Admitting after the sort, as drop 1 did, kept `0 files` on the line for the
+  first second of a 200,000-file folder; admitting first then sorting selects
+  the same list in the same order.
+- **N4 — Under `--hide progress` nothing of the line runs:** each per-entry
+  check tests `$disable_progress` first, and the tick returns at once.
+
+Validated on two synthetic fixtures in the session scratchpad, a tree of
+16,276 folders holding 15,625 files and one folder of 200,000 files, with
+`ltl`'s raw standard output captured with each write's arrival time
+(`728-validate/listing-frames.pl`) and replayed through the row model of
+`tests/validate-progress-line.sh`:
+
+| # | Result |
+|---|---|
+| 1 | Frames at 0.66 to 0.72 s after the process started (the listing starts about 0.2 s in), then every 0.500 s; the spinner through D2's frames in order, cycling past the tenth; counts climbing, the folder last: `⠙ Building file list... 30431 files, 1 folders: bigflat`, `⠋ Building file list... 5274 files, 5926 folders: bigtree/a17/b19/c9` |
+| 2 | No frame from a listing under 500 ms (the multi-file progress fixture, and the 8,421-folder tree on most runs) |
+| 3 | The erase follows the last frame in every capture; the replayed screen holds no trace of the line; the next output (the usage error, the option notice box, `Processing completed.`) starts on a clean row; rendered screens identical to drop 1 apart from a memory figure's width, and `-V section-layout` identical (title rows 1 to 4, progress from row 6) |
+| 4 | No frame under `--disable-progress` or `--hide progress` on the tree that paints 15 frames otherwise |
+| 5 | Every frame 139 cells at `--terminal-width 140`, 59 at 60; at 60 the folder is shortened in the middle (`bigt.../c22`) |
+| 10 | The line's own cost, drop 1 against drop 2, five runs, median: 50,000 files all matching 0.32 s against 0.34 s; none matching 0.19 against 0.20 s; `-r` over 8,421 folders 0.44 against 0.45 s; the same with progress on or off |
+| 11 | Open: the Windows development host |
+
+Harness scenarios, as regression checks: `validate-progress-line.sh`, all 7
+scenarios, 27 passed; `validate-section-layout.sh` scenarios
+`hide-progress-is-disable-progress`, `layout-baseline`, `layout-many-files`,
+`progress-rendered`, 19 passed. No ` at ... line ` on standard error.
+
+User documentation: `docs/usage.md` § Files says what a slow listing shows and
+that `--hide progress` hides it. The patterns catalogue gains *Progress lines:
+one row, rewritten in place* (R3), naming both progress lines.
 
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
