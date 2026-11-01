@@ -1061,6 +1061,48 @@ decide as early as the information exists.
 
 ---
 
+## Progress lines: one row, rewritten in place
+
+**Definition.** A progress display is one row of standard output rewritten
+with a carriage return. Every frame reaches the terminal through
+`paint_progress_line()`, which pads it to the row's full width in cells
+(`notice_cells()`), so a shorter frame covers the longer one before it with
+nothing to remember between frames. Frames repaint at most every
+`PROGRESS_REPAINT_SECONDS` (500 ms). The row is blanked in place when the work
+is done, so a progress display adds no rows to the output. `--hide progress`
+(`--disable-progress`) suppresses every progress display and nothing else.
+
+**Intended uses.** Any new progress display builds its frame text and paints it
+through `paint_progress_line()` at this pace, with the variable-length part
+(a path) last and shortened in the middle. Work whose total is known up front
+shows a percentage (`progress_line_text()`, the read pass); work whose total
+cannot be known shows the spinner, the six-dot braille cycle in
+`@file_list_spinner`, one step per repaint, beside running counts
+(`file_list_progress_text()`, the file listing). A display for work that is
+usually quick waits before its first frame, as the file listing does
+(`FILE_LIST_LINE_DELAY_SECONDS`), so a quick run prints nothing.
+
+**Reasoning.** A carriage return moves the cursor without erasing, so padding
+is what keeps a shrinking frame from leaving its predecessor's tail on screen;
+the pad is counted in cells because a spinner glyph or a non-ASCII path is
+several bytes and one cell. Repainting on time rather than on work keeps fast
+input from hammering the terminal and slow input from looking frozen
+(`docs/progress-indication-best-practices.md` § What `ltl` adopts).
+
+**Consumption sites.**
+- `read_and_process_logs` :: `paint_progress_line($line) if $line ne "";`: the read pass's percentage line.
+- `file_list_progress_tick` :: `paint_progress_line( file_list_progress_text() );`: the file listing's spinner line.
+
+**Owning record.** `features/446-overall-progress-indicator.md` (the read
+pass's line, D4 and D8), `features/728-file-list-progress.md` (the spinner and
+the listing's line, D2 and D4 to D7),
+`docs/progress-indication-best-practices.md` (the survey both apply).
+
+**Status.** Established. The post-read phase lines ("Calculating statistics...",
+then "... completed.") print through their own calls rather than this painter.
+
+---
+
 ## Notice surfaces: one store of notice records, two entry calls
 
 **Definition.** A notice is a message to the analyst about this run (a
