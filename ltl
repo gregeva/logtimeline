@@ -26601,18 +26601,27 @@ sub expand_recursive_pattern {
 sub expand_plain_pattern {
     my ($pattern) = @_;
 
-    $pattern =~ s{\A([A-Za-z]:)(?![/\\])}{$1./} if GLOB_DOSISH;
+    # bsd_glob reads a drive-relative 'C:pattern' as 'C:./pattern', and the split
+    # needs that reading. Handed a piece of it back, bsd_glob makes the same
+    # insertion again, so each piece goes back to it as typed: 'C:x.log' names
+    # C:./x.log, as bsd_glob names it, never C:././x.log.
+    my $drive_relative = GLOB_DOSISH && $pattern =~ s{\A([A-Za-z]:)(?![/\\])}{$1./};
+    my $as_typed = sub {
+        my ($piece) = @_;
+        $piece =~ s{\A([A-Za-z]:)\./}{$1} if $drive_relative;
+        return $piece;
+    };
 
     my @files;
     for my $alternative ( expand_glob_braces($pattern) ) {
         my ( $folder, $separator, $file_part ) = split_file_pattern($alternative);
         unless ( glob_segment_has_magic($file_part) ) {
-            push @files, grep { admit_selected_file($_) } bsd_glob($alternative);
+            push @files, grep { admit_selected_file($_) } bsd_glob( $as_typed->($alternative) );
             next;
         }
         my @matched;
         my $prefix = $folder . $separator;
-        for my $root ( length $prefix ? bsd_glob($prefix) : ('') ) {
+        for my $root ( length $prefix ? bsd_glob( $as_typed->($prefix) ) : ('') ) {
             opendir( my $dh, length $root ? $root : '.' ) or next;
             file_list_progress_folder($root);
             # One entry at a time, so the read can be reported in steps; the
