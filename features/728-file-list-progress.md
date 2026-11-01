@@ -263,6 +263,40 @@ three runs:
 D3 makes the plain path read its folder the way `-r` does, so one listing
 routine can take the size in one place.
 
+**F6 — The `-r` matcher and `bsd_glob` disagree in eight cases; D3 has to
+close them for the plain path's selection to stay as shipped.** 420 N2 states
+the matcher's contract: "Agreement with `bsd_glob` is the contract — 'the same
+filename pattern' means the pattern a user writes selects the same names at
+depth that it selects at the top level". Method: one folder of awkward names,
+each pattern run through `bsd_glob` (what the plain path does today) and
+through `readdir` plus `basename_matches_glob()` sliced verbatim from `ltl`,
+with `bsd_glob`'s dot rule and order (`728-measure/matcher-diff.pl` in the
+session scratchpad), macOS, 2026-11-01. Rules read from Perl's
+`ext/File-Glob/bsd_glob.c` (v5.42.0) and `File/Glob.pm` 1.44.
+
+| # | Pattern | `bsd_glob` (plain path today) | `-r` matcher | Where the difference lies |
+|---|---|---|---|---|
+| 1 | `[^a]*.888` | names starting `^` or `a`: `^` is a literal in a set | names not starting `a`: `^` read as negation | matcher |
+| 2 | `[\]]*.888` | `]x.888`: an escaped `]` belongs to the set | nothing | matcher |
+| 3 | `[z-a]*.888` | nothing | Perl dies: `ltl -r "[z-a]*.888"` exits 25 with `Invalid [] range "z-a" in regex ... at ltl line 26529` on stderr | matcher (a shipped crash) |
+| 4 | Windows, any pattern | case ignored: File::Glob adds `GLOB_NOCASE` on `MSWin32` | case observed: `qr/\A$expr\z/`, no `/i` | matcher (from the source; not yet run on Windows) |
+| 5 | `{c,a}.888` | `c.888 a.888`: each brace alternative is globbed and sorted on its own, in brace order | `a.888 c.888` | brace handling |
+| 6 | `*.{888,txt}` | every `.888` name, then `b.txt` | all names in one sorted list | brace handling |
+| 7 | `{a,a}.888` | `a.888` twice, so the plain path reads it twice | once | brace handling |
+| 8 | `a{b.888` | nothing: an unbalanced brace makes `bsd_glob` glob only the text before it (`globexp2()`, "Non matching braces; just glob the pattern") | `ab.888` | brace handling |
+
+A literal name typed in another case (`A.888` beside `a.888` on a
+case-insensitive disk) is selected by `bsd_glob` as typed, because a literal
+segment is checked, not matched against the folder; the matcher, reading the
+folder, misses it. D3's routine leaves a literal final segment to `bsd_glob`,
+as a literal costs one check and no folder read.
+
+Rows 5 to 8 are closed for the plain path by expanding braces first, exactly as
+`bsd_glob` does, globbing each alternative on its own and sorting each
+alternative's matches with `bsd_glob`'s comparison (`ci_compare()`: case folded,
+then byte order); `-r` keeps its own brace handling, so `-r` is unchanged there.
+Rows 1 to 4 are in the matcher itself, which `-r` shares.
+
 ## Records searched
 
 `./process/find-records.sh --issues -r --recursive --disable-progress
