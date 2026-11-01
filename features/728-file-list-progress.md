@@ -21,73 +21,33 @@ Implementation on `728-file-list-progress` (worktree
 file listing for both paths, metadata from the admitting check) is committed
 and pushed at 037dead9 and validated (§ Drop 1 record). Drop 2 (the line) is
 committed and pushed at 2f62f740 and validated on macOS (§ Drop 2 record).
-The macOS stage is complete. Next: the Windows development host, then the
-completion gate back on the macOS host (§ Resuming).
+The Windows stage is complete, with one fix to drop 1's reading of a
+drive-relative pattern, committed and pushed at c9500c44 (§ Windows record).
+Next: the completion gate on the macOS host (§ Resuming).
 
 ## Resuming
 
-Drops 1 and 2 are on `728-file-list-progress` at 2f62f740, version
-`0.20.0-728`, validated on macOS. What remains rests on Windows: criterion 11
-(the spinner in both consoles, D9), and the Windows halves of D11 (case ignored
-where File::Glob ignores it) and D12 (a backslash read as `bsd_glob` reads it on
-Windows), which so far come from File::Glob's source alone, with the drive-
-relative `C:pattern` reading that `expand_plain_pattern()` reproduces. The
-completion gate waits for them.
+Drops 1 and 2 and the Windows fix are on `728-file-list-progress` at c9500c44,
+version `0.20.0-728`, validated on macOS (§ Drop 1 record, § Drop 2 record) and
+on Windows (§ Windows record). Every criterion is validated; the completion
+gate remains.
 
-### On the Windows development host
-
-Check out `728-file-list-progress` and pull. Every run is in `cmd.exe` with
-Strawberry Perl, from the checkout.
-
-1. **Fixtures**, outside the repository:
-   ```
-   perl -e "mkdir 'C:/Temp/ltl728'; for (1..100000) { open my $f, '>', sprintf('C:/Temp/ltl728/f%06d.888', $_) or die; close $f }"
-   perl -e "mkdir 'C:/Temp/ltl728sel'; mkdir 'C:/Temp/ltl728sel/sub'; for ('access.log','Error.LOG','[x].log','x.log','x-y.log','sub/deep.log') { open my $f, '>', 'C:/Temp/ltl728sel/'.$_ or die; close $f }"
-   ```
-2. **Criterion 11 (D9).** In a classic `cmd.exe` window (conhost), then in a
-   `cmd` tab of Windows Terminal:
-   `perl ltl "C:/Temp/ltl728/*.888" "C:/Temp/ltl728-none"`.
-   The second argument matches nothing on purpose, so the run stops once the
-   list is built. Expected: `⠋ Building file list... N files, 1 folders:
-   C:/Temp/ltl728`, the dot pattern stepping twice a second, and the line gone
-   before the error naming `C:/Temp/ltl728-none`. A screenshot of each console
-   mid-listing. No line at all means the listing took under 500 ms: add files.
-   A console that draws boxes or `?` goes back to the architect with its
-   screenshot; D9's candidate is braille in Windows Terminal and `| / - \` in
-   the classic console.
-3. **D11 and D12 on Windows (criteria 6 and 7).** The base code beside the
-   branch: `git show 0153c2a8:ltl > %TEMP%\ltl-base`, each run
-   `perl <ltl> --disable-progress -bs 1440 -oe -V format-detection <pattern>`,
-   the `file:` lines compared in order:
-
-   | Pattern | Plain path | `-r` |
-   |---|---|---|
-   | `C:/Temp/ltl728sel/*.log` | as the base: `access.log`, `Error.LOG` and the rest, case ignored | the top level as the plain path's, `Error.LOG` included (the base missed it: F6 row 4), then `sub/deep.log` |
-   | `C:/Temp/ltl728sel/*.LOG` | as the base | the top level as the plain path's |
-   | `C:\Temp\ltl728sel\*.log` | as the base | as the `/` form |
-   | `C:/Temp/ltl728sel/\[x].log` | as the base: `\[` quotes on Windows, selecting `[x].log` | `[x].log` (the base split at `\`) |
-   | `C:/Temp/ltl728sel/[!a]*.log` | as the base | the top level as the plain path's |
-   | `C:*.log`, run from `C:\Temp\ltl728sel` | as the base: the drive's current folder | not run: `-r` reads the drive's current folder too |
-
-   A plain-path result that differs from the base is a defect in drop 1's
-   reading of a pattern on Windows (`GLOB_DOSISH`, `glob_pattern_tokens()`,
-   `expand_plain_pattern()`), fixed on the branch before the gate.
-4. **Record** the results, with the screenshots described, in a § Windows
-   record of this doc, committed to `release/0.20.0`, and comment on the issue.
-
-### Then, on the macOS development host
+### On the macOS development host
 
 The completion gate (`docs/process/workflow.md` § 3), on the host and the kind
-of checkout that took the `before`: restore `$version_number` to `0.20.0` on
-the branch and push; from the issue worktree,
+of checkout that took the `before`: pull the branch in the issue worktree
+(c9500c44 was made on Windows); restore `$version_number` to `0.20.0` on the
+branch and push; from the issue worktree,
 `./tests/baseline/run-benchmark.sh single-day-access-log-standard --label 728-after`,
 compared with `728-before.tsv` (below); then `./tests/run-suite.sh <scratch-dir>`;
 then the PR to `release/0.20.0` and the close-out.
 
-### State outside the repository, on the macOS development host
+### State outside the repository
+
+On the macOS development host:
 
 - The issue worktree `.claude/worktrees/728-file-list-progress`: nothing
-  uncommitted, the branch pushed.
+  uncommitted, behind the branch by c9500c44.
 - `tests/baseline/results/728-before.tsv` in the release worktree
   (`.claude/worktrees/release-0.20.0`), untracked: the gate's `before`, taken
   2026-11-01 at 0153c2a8.
@@ -95,6 +55,10 @@ then the PR to `release/0.20.0` and the close-out.
   that session's scratchpad (`728-measure/`, `728-validate/`) and do not
   outlive it; § Drop 1 record and § Drop 2 record describe them well enough to
   rebuild.
+
+On the Windows development host: the fixtures of § Windows record under
+`C:\Temp` (`ltl728`, `ltl728sel`, `ltl728f7`), outside the repository; the
+capture scripts and screenshots lived in that session's scratchpad.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -344,7 +308,7 @@ Validated on two synthetic fixtures in the session scratchpad, a tree of
 | 4 | No frame under `--disable-progress` or `--hide progress` on the tree that paints 15 frames otherwise |
 | 5 | Every frame 139 cells at `--terminal-width 140`, 59 at 60; at 60 the folder is shortened in the middle (`bigt.../c22`) |
 | 10 | The line's own cost, drop 1 against drop 2, five runs, median: 50,000 files all matching 0.32 s against 0.34 s; none matching 0.19 against 0.20 s; `-r` over 8,421 folders 0.44 against 0.45 s; the same with progress on or off |
-| 11 | Open: the Windows development host |
+| 11 | § Windows record |
 
 Harness scenarios, as regression checks: `validate-progress-line.sh`, all 7
 scenarios, 27 passed; `validate-section-layout.sh` scenarios
@@ -354,6 +318,30 @@ scenarios, 27 passed; `validate-section-layout.sh` scenarios
 User documentation: `docs/usage.md` § Files says what a slow listing shows and
 that `--hide progress` hides it. The patterns catalogue gains *Progress lines:
 one row, rewritten in place* (R3), naming both progress lines.
+
+## Windows record (2026-11-01, c9500c44)
+
+Windows 11 on ARM64, Strawberry Perl 5.42.3 built for MSWin32-x64, every run
+through `cmd.exe` from the checkout, the base `ltl` (0153c2a8) beside the
+branch. Fixtures under `C:\Temp`: one folder of 100,000 empty files
+(`ltl728`); a folder holding `access.log`, `Error.LOG`, `[x].log`, `x.log`,
+`x-y.log` and `sub/deep.log` (`ltl728sel`); a folder of names with bytes from
+0x80 up (`ltl728f7`). Selections are the `-V format-detection` `file:` lines of
+`--disable-progress -bs 1440 -oe` runs, compared in order.
+
+| # | Result |
+|---|---|
+| 11 | `perl ltl "C:/Temp/ltl728/*.888" "C:/Temp/ltl728-none"`, each console started in a new window and its screen captured every 0.4 s, nothing typed into it. The listing ran about 10 s. In the classic console (conhost, `WT_SESSION` empty) and in Windows Terminal the braille is drawn one cell wide, neither boxes nor `?`, and the captures step through D2's frames in order (`⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏ ⠋ ⠙`, a frame seen twice where two captures fell inside one 500 ms repaint); the line reads `Building file list... 64799 files, 1 folders: C:/Temp/ltl728`, the count climbing. When the list is built the usage error starts on the line's row and nothing of the line remains, in both. In the classic console the glyph is drawn smaller than a letter, but legibly. D9 stands: braille on every platform |
+| 6 | Plain path: `C:/Temp/ltl728sel/*.log`, `*.LOG`, `C:\Temp\ltl728sel\*.log`, `\[x].log` (selecting `[x].log`) and `[!a]*.log` select what the base selects, case ignored as `bsd_glob` ignores it. `C:*.log`, run from that folder, did not: the branch listed `C:././x.log` where the base lists `C:./x.log`, the same files in the same order. `expand_plain_pattern()` reads `C:pattern` as `C:./pattern` for the split, as `bsd_glob` does, then handed the folder part, or a literal name, back to `bsd_glob`, which inserted `./` a second time. Fixed at c9500c44: each piece goes back as typed. After the fix, eleven drive-relative patterns (`C:*.log`, `C:x.log`, `C:sub/*.log`, `C:sub\*.log`, `C:./*.log`, `C:{x,a}*.log`, `C:*.LOG`, `C:[!a]*.log`, `C:sub/deep.log`, `C:*/*.log`, and `C:\Temp\ltl728sel\*.log` beside them) select what the base and `bsd_glob` select, names included, and the five above are unchanged |
+| 7 | `-r` over the same five: `*.log`, `*.LOG` and `[!a]*.log` now select the plain path's top level, `Error.LOG` included, then `sub/deep.log` (D11; the base observed case, so it missed `Error.LOG`, and with `*.LOG` selected only it); the `\` form selects as the `/` form; `\[x].log` selects `[x].log`, where the base split at the `\` and selected `x.log` through the set `[x]` (D12). Within a level `-r` keeps its character-code order (F3): `Error.LOG` before `[x].log`, where the plain path puts it after `access.log` |
+
+F7 on Windows: in `ltl728f7`, `é.888` and `Éb.888` (bytes E9 and C9, read
+through code page 1252) beside `_x`, `a`, `B`, `Z` and `~`: `bsd_glob`, the base
+and the branch all put the two first, as a signed C `char` orders them.
+
+No ` at ... line ` on standard error in any run. The harnesses do not run on
+Windows; the fix changes nothing where `GLOB_DOSISH` is false, and the
+harnesses that read the plain path run at the gate.
 
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
@@ -479,7 +467,7 @@ session scratchpad), macOS, 2026-11-01. Rules read from Perl's
 | 1 | `[^a]*.888` | names starting `^` or `a`: `^` is a literal in a set | names not starting `a`: `^` read as negation | matcher |
 | 2 | `[\]]*.888` | `]x.888`: an escaped `]` belongs to the set | nothing | matcher |
 | 3 | `[z-a]*.888` | nothing | Perl dies: `ltl -r "[z-a]*.888"` exits 25 with `Invalid [] range "z-a" in regex ... at ltl line 26529` on stderr | matcher (a shipped crash) |
-| 4 | Windows, any pattern | case ignored: File::Glob adds `GLOB_NOCASE` on `MSWin32` | case observed: `qr/\A$expr\z/`, no `/i` | matcher (from the source; not yet run on Windows) |
+| 4 | Windows, any pattern | case ignored: File::Glob adds `GLOB_NOCASE` on `MSWin32` | case observed: `qr/\A$expr\z/`, no `/i` | matcher (from the source; run on Windows in § Windows record) |
 | 5 | `{c,a}.888` | `c.888 a.888`: each brace alternative is globbed and sorted on its own, in brace order | `a.888 c.888` | brace handling |
 | 6 | `*.{888,txt}` | every `.888` name, then `b.txt` | all names in one sorted list | brace handling |
 | 7 | `{a,a}.888` | `a.888` twice, so the plain path reads it twice | once | brace handling |
@@ -504,8 +492,8 @@ platform's C `char`.** `ci_compare()` folds and subtracts through a plain C
 `sort` puts it last. Perl's configuration records no signedness (`charbits=8`
 only), so `GLOB_CHAR_IS_SIGNED` reads it from the platform: signed on x86, and
 on Apple and Windows systems on ARM; unsigned on other systems on ARM, PowerPC,
-s390 and RISC-V. Verified on macOS arm64 only; the Windows host check (D9)
-covers Windows, and no Linux ARM host is available.
+s390 and RISC-V. Verified on macOS arm64 and on Windows with Strawberry Perl
+built for x64 (§ Windows record); no Linux ARM host is available.
 
 **F8 — Listing time after drop 1, against criterion 10 ("The listing is no
 slower than before").** The listing alone, measured by adding a second argument
