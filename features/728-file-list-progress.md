@@ -17,7 +17,7 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D5 are locked.
+contracts are confirmed by the architect; D1 to D6 are locked.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -76,6 +76,13 @@ twice a second. Chosen over stepping the spinner every 100 ms, with or without
 the numbers. The spinner moves only between file entries: a single folder read
 that blocks, on a slow network drive for example, holds it still until the read
 returns.
+
+**D6 — The line first appears once the listing has taken 1 second**
+(architect, 2026-11-01). A listing that finishes inside the second shows
+nothing, so a normal run looks and captures exactly as it does today. This
+adopts the startup delay `docs/progress-indication-best-practices.md` item 9
+records as available (git hides its bar for the first second). Chosen over
+drawing the line as soon as the listing starts.
 
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
