@@ -21,10 +21,80 @@ Implementation on `728-file-list-progress` (worktree
 file listing for both paths, metadata from the admitting check) is committed
 and pushed at 037dead9 and validated (§ Drop 1 record). Drop 2 (the line) is
 committed and pushed at 2f62f740 and validated on macOS (§ Drop 2 record).
-Open: criterion 11, the spinner in both Windows consoles (D9), on the Windows
-development host; the completion gate waits for it. The `before` benchmark is
-captured on the base commit 0153c2a8 at
-`tests/baseline/results/728-before.tsv` in the release worktree.
+The macOS stage is complete. Next: the Windows development host, then the
+completion gate back on the macOS host (§ Resuming).
+
+## Resuming
+
+Drops 1 and 2 are on `728-file-list-progress` at 2f62f740, version
+`0.20.0-728`, validated on macOS. What remains rests on Windows: criterion 11
+(the spinner in both consoles, D9), and the Windows halves of D11 (case ignored
+where File::Glob ignores it) and D12 (a backslash read as `bsd_glob` reads it on
+Windows), which so far come from File::Glob's source alone, with the drive-
+relative `C:pattern` reading that `expand_plain_pattern()` reproduces. The
+completion gate waits for them.
+
+### On the Windows development host
+
+Check out `728-file-list-progress` and pull. Every run is in `cmd.exe` with
+Strawberry Perl, from the checkout.
+
+1. **Fixtures**, outside the repository:
+   ```
+   perl -e "mkdir 'C:/Temp/ltl728'; for (1..100000) { open my $f, '>', sprintf('C:/Temp/ltl728/f%06d.888', $_) or die; close $f }"
+   perl -e "mkdir 'C:/Temp/ltl728sel'; mkdir 'C:/Temp/ltl728sel/sub'; for ('access.log','Error.LOG','[x].log','x.log','x-y.log','sub/deep.log') { open my $f, '>', 'C:/Temp/ltl728sel/'.$_ or die; close $f }"
+   ```
+2. **Criterion 11 (D9).** In a classic `cmd.exe` window (conhost), then in a
+   `cmd` tab of Windows Terminal:
+   `perl ltl "C:/Temp/ltl728/*.888" "C:/Temp/ltl728-none"`.
+   The second argument matches nothing on purpose, so the run stops once the
+   list is built. Expected: `⠋ Building file list... N files, 1 folders:
+   C:/Temp/ltl728`, the dot pattern stepping twice a second, and the line gone
+   before the error naming `C:/Temp/ltl728-none`. A screenshot of each console
+   mid-listing. No line at all means the listing took under 500 ms: add files.
+   A console that draws boxes or `?` goes back to the architect with its
+   screenshot; D9's candidate is braille in Windows Terminal and `| / - \` in
+   the classic console.
+3. **D11 and D12 on Windows (criteria 6 and 7).** The base code beside the
+   branch: `git show 0153c2a8:ltl > %TEMP%\ltl-base`, each run
+   `perl <ltl> --disable-progress -bs 1440 -oe -V format-detection <pattern>`,
+   the `file:` lines compared in order:
+
+   | Pattern | Plain path | `-r` |
+   |---|---|---|
+   | `C:/Temp/ltl728sel/*.log` | as the base: `access.log`, `Error.LOG` and the rest, case ignored | the top level as the plain path's, `Error.LOG` included (the base missed it: F6 row 4), then `sub/deep.log` |
+   | `C:/Temp/ltl728sel/*.LOG` | as the base | the top level as the plain path's |
+   | `C:\Temp\ltl728sel\*.log` | as the base | as the `/` form |
+   | `C:/Temp/ltl728sel/\[x].log` | as the base: `\[` quotes on Windows, selecting `[x].log` | `[x].log` (the base split at `\`) |
+   | `C:/Temp/ltl728sel/[!a]*.log` | as the base | the top level as the plain path's |
+   | `C:*.log`, run from `C:\Temp\ltl728sel` | as the base: the drive's current folder | not run: `-r` reads the drive's current folder too |
+
+   A plain-path result that differs from the base is a defect in drop 1's
+   reading of a pattern on Windows (`GLOB_DOSISH`, `glob_pattern_tokens()`,
+   `expand_plain_pattern()`), fixed on the branch before the gate.
+4. **Record** the results, with the screenshots described, in a § Windows
+   record of this doc, committed to `release/0.20.0`, and comment on the issue.
+
+### Then, on the macOS development host
+
+The completion gate (`docs/process/workflow.md` § 3), on the host and the kind
+of checkout that took the `before`: restore `$version_number` to `0.20.0` on
+the branch and push; from the issue worktree,
+`./tests/baseline/run-benchmark.sh single-day-access-log-standard --label 728-after`,
+compared with `728-before.tsv` (below); then `./tests/run-suite.sh <scratch-dir>`;
+then the PR to `release/0.20.0` and the close-out.
+
+### State outside the repository, on the macOS development host
+
+- The issue worktree `.claude/worktrees/728-file-list-progress`: nothing
+  uncommitted, the branch pushed.
+- `tests/baseline/results/728-before.tsv` in the release worktree
+  (`.claude/worktrees/release-0.20.0`), untracked: the gate's `before`, taken
+  2026-11-01 at 0153c2a8.
+- The synthetic fixtures and validation drivers of the macOS stage lived in
+  that session's scratchpad (`728-measure/`, `728-validate/`) and do not
+  outlive it; § Drop 1 record and § Drop 2 record describe them well enough to
+  rebuild.
 
 ## Requirements (architect, 2026-11-01)
 
