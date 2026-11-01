@@ -845,6 +845,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 - `csv_declared_row` :: `$entry->{text} ? @value : map { format_csv_value( $_, $entry->{family} ) } @value;`
 - `share_row_text` :: `my $share = value_text( $count / $denominator * 100, kind => 'percentage', budget => 'share row', width => $slack );`
 - `write_index_file` :: `my $now_iso = format_timestamp(time(), precision => 's', shape => 'iso');`
+- `expand_recursive_pattern` :: `for my $entry ( basenames_matching_glob( $file_part, @entries ) ) {`: a file argument's pattern is read one way for both paths (#728 D3, D11, D12): `split_file_pattern()` splits it, `basenames_matching_glob()` matches names, both reproducing `bsd_glob`'s reading; `expand_plain_pattern` calls the same two.
 
 **Owning record.** This entry; worked contracts in
 `features/histogram-charts.md` § Command Line Interface (metric operands),
