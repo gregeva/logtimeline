@@ -183,6 +183,24 @@ median (range):
 At most 0.023 s per 50,000 entries either way. On the mixed-case folder of F3,
 the case-ignoring sort returns the same list as `bsd_glob`.
 
+**F5 — The size can be read from the listing's own file check, at a tenth of
+the separate sweep's cost.** The architect's proposal (2026-11-01): collect
+each file's size as the listing adds it, instead of in
+`size_selected_files_for_progress()` afterwards. The listing already checks
+every entry with `-f`, and Perl's `-s _` reads the size from that same check
+without asking the file system again. Over the 50,000 files of the flat folder,
+three runs:
+
+| Shape | Seconds |
+|---|---|
+| Today: `-f` check in the listing, then the separate sweep (`-f` and `-s` per file) | 0.066–0.067 + 0.114–0.115 = 0.180–0.182 |
+| Size taken from the listing's own `-f` check (`-s _`) | 0.075–0.078 |
+
+446 D2 rejected sizing during the walk because it "would put it in two places
+(the `-r` path and the glob path), against the one-resolution-surface rule".
+D3 makes the plain path read its folder the way `-r` does, so one listing
+routine can take the size in one place.
+
 ## Records searched
 
 `./process/find-records.sh --issues -r --recursive --disable-progress
