@@ -17,7 +17,8 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D9 are locked.
+contracts are confirmed by the architect; D1 to D10 are locked and the
+acceptance criteria agreed.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -77,12 +78,14 @@ the numbers. The spinner moves only between file entries: a single folder read
 that blocks, on a slow network drive for example, holds it still until the read
 returns.
 
-**D6 — The line first appears once the listing has taken 1 second**
-(architect, 2026-11-01). A listing that finishes inside the second shows
+**D6 — The line first appears once the listing has taken 500 ms**
+(architect, 2026-11-01). A listing that finishes inside that time shows
 nothing, so a normal run looks and captures exactly as it does today. This
 adopts the startup delay `docs/progress-indication-best-practices.md` item 9
-records as available (git hides its bar for the first second). Chosen over
-drawing the line as soon as the listing starts.
+records as available (git hides its bar for the first second). First locked at
+1 second, then lowered to 500 ms by the architect to make the line easier to
+test (D10); the first frame and the repaint pace (D5) are then the same
+interval. Chosen over drawing the line as soon as the listing starts.
 
 **D7 — When the list is built, the line is erased and leaves nothing behind**
 (architect, 2026-11-01). The row is blanked in place and the next output takes
@@ -118,6 +121,39 @@ Methods). A console that draws boxes is brought back to the architect with
 screenshots, with braille in Windows Terminal and `| / - \` in the classic
 console as the candidate. Chosen over `| / - \` on all of Windows, and over
 splitting by console up front.
+
+**D10 — No automated test for this work: it is validated on a synthetically
+generated folder structure** (architect, 2026-11-01): "There is no automated
+test for this. You validate on a synthenically generated folder structure
+only." No harness scenario and no hidden option are added. The existing
+harnesses that already read the paths this work changes run at the completion
+gate as they always do. Chosen over a hidden option that zeroes the delay and
+the pace for a test, and over a tree of tens of thousands of folders built
+during a test.
+
+## Acceptance criteria (agreed with the architect, 2026-11-01)
+
+Every criterion is validated during development on a synthetically generated
+folder structure under the scratchpad (D10), with the code before the change
+run beside it on the same structure where the criterion says "unchanged". The
+structure carries what each criterion needs: a folder of tens of thousands of
+files, a tree of thousands of nested folders (both large enough for the listing
+to pass 500 ms), mixed-case names, hidden files, names that need escaping, and
+an unreadable folder.
+
+| # | Criterion | Paths it covers |
+|---|---|---|
+| 1 | A listing over 500 ms shows `⠋ Building file list... N files, M folders: <folder>`, the spinner stepping through D2's frames in order, repainted at most every 500 ms | plain pattern, `-r` |
+| 2 | A listing under 500 ms prints nothing extra: standard output byte-identical to the code before, apart from the version string | plain pattern, `-r` |
+| 3 | When the list is built the line is erased: replaying the raw output through a terminal leaves no character of it, and `-V section-layout` reports the same rows as the same run under `--disable-progress` | plain pattern, `-r`; a run that then raises an option notice |
+| 4 | `--disable-progress` and `--hide progress` show no listing line, however long the listing | both spellings, plain pattern and `-r` |
+| 5 | At a narrow width the folder is shortened in the middle by `shorten_filename()`, and the line never exceeds `terminal_width - 1` | `--terminal-width` 60 and 140 |
+| 6 | A plain pattern selects the same files, in the same order, as `bsd_glob` did: `*`, `?`, `[...]`, `[!...]`, `{a,b}`, escapes, a literal name, mixed case, hidden files, a wildcard in the folder part, `~`; a bare directory and a pattern matching nothing still stop the run with the same error | `-V format-detection` `file:` lines, before against after |
+| 7 | `-r` selects the same files in the same order, and still reports an unreadable folder once at the end | `-V format-detection` `file:` lines and the end-of-run note, before against after |
+| 8 | Sizes taken by the listing give the same figures as the size pass did: the "Processing" line's overall and per-file percentages | multi-file and single-file runs; an empty file |
+| 9 | With `-idx`, the index read-back reaches the same freshness verdicts and the index records the same size and modification time; without `-idx`, no modification time is taken | `read_index_file()`, `write_index_file()`; `-V index-read-back`, before against after |
+| 10 | The listing is no slower than before | the F1 and F4 fixtures, three runs each, before against after |
+| 11 | The braille spinner displays in the classic Windows console and in Windows Terminal (D9) | by eye on the Windows development host, with screenshots |
 
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
