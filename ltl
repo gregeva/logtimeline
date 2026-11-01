@@ -72,6 +72,25 @@ my $index_enabled = 0;                                                  # -idx: 
 my $no_index = 0;                                                       # -ni: accepted and without effect, the index being off unless -idx
 my $recursive_files = 0;                                                # -r: expand each file argument's filename component against every depth beneath its directory part
 my @unreadable_directories;                                             # -r sweep: directories that could not be opened, reported once at the tail of read_and_process_logs()
+# What the file listing learned about each file it selected, from the same
+# check that admitted it (admit_selected_file()): its size, always (the read
+# path and the progress line read it), and its modification time while the
+# run index is on (read_index_file() and write_index_file() read it).
+my %selected_file_size;
+my %selected_file_mtime;
+# How File::Glob reads a pattern on this platform, which the file listing
+# reproduces exactly (expand_plain_pattern(), basenames_matching_glob(),
+# sort_like_bsd_glob()): on a DOSISH system a backslash is also a folder
+# separator and quotes only [ ] - { } ~ \; the module's default flags say
+# whether case is ignored; and its sort compares through a plain C char, whose
+# signedness Perl's configuration does not record, so it is read from the
+# platform: signed on x86, and on Apple and Windows systems on ARM; unsigned on
+# other systems on ARM, PowerPC, s390 and RISC-V.
+use constant GLOB_DOSISH         => ( $^O =~ /\A(?:MSWin32|os2|dos)\z/ ) ? 1 : 0;
+use constant GLOB_IGNORES_CASE   => ( $File::Glob::DEFAULT_FLAGS & File::Glob::GLOB_NOCASE() ) ? 1 : 0;
+use constant GLOB_CHAR_IS_SIGNED => ( $^O eq 'darwin' || $^O eq 'MSWin32'
+    || do { require Config; $Config::Config{archname} !~ /\A(?:aarch64|arm|powerpc|ppc|s390|riscv)/ } ) ? 1 : 0;
+use constant LISTING_NAME_BATCH  => 4096;   # a folder's names matched per call while it is read (expand_plain_pattern())
 my ( $include_query_string, $include_session, $include_user, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0, 0 );
 # Built-in metrics: the one definition of the metric names every option
 # resolves (-hm, -hg, -so, --hide and --show, -x, -d) and of every list a
@@ -589,19 +608,27 @@ my $total_non_qualifying_lines = 0;   # included lines from formats that do not 
                                       # for the percentage surfaces (#452 D2 provenance)
 my @progress_history = ();     # rolling history for lines/sec calculation: [ [timestamp, lines_read], ... ]
 
-# Overall progress across the whole selected file set (#446). The size sweep
-# runs once, at the end of option parsing, and only when two or more files are
-# selected: with one file the overall figure would repeat the per-file one and
-# say nothing. %progress_file_sizes holds the size the sweep took per file;
-# $progress_total_bytes is their sum (the denominator); $progress_bytes_done
+# Overall progress across the whole selected file set (#446). The total is
+# settled once, at the end of option parsing, from the sizes the file listing
+# took, and only when two or more files are selected: with one file the overall
+# figure would repeat the per-file one and say nothing. $progress_total_bytes
+# is the sum of the selected files' sizes (the denominator); $progress_bytes_done
 # carries the bytes of the files already closed — the settled part of the
 # numerator, to which the live tell() of the file in flight is added.
-my %progress_file_sizes  = ();
 my $progress_total_bytes = 0;
 my $progress_bytes_done  = 0;
 my $progress_file_index  = 0;   # 1-based position of the file being read
 my $progress_file_count  = 0;   # N; 0 when the sweep did not run (single file)
 my $progress_last_paint  = 0;   # Time::HiRes epoch of the last repaint
+# The file listing's progress line (#728): while the file arguments are expanded
+# into the files to read, a spinner, the files found, the folders read and the
+# folder being read, on the row the read pass's progress line takes next. It
+# first appears once the listing has taken FILE_LIST_LINE_DELAY_SECONDS,
+# repaints at the read pass's pace, and is erased when the list is built.
+my ( $file_list_started, $file_list_last_paint, $file_list_painted, $file_list_frame ) = ( 0, 0, 0, 0 );
+my ( $file_list_files, $file_list_folders, $file_list_entries ) = ( 0, 0, 0 );
+my $file_list_folder = '';
+my @file_list_spinner = qw( ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏ );   # D2: the six-dot braille cycle, one cell each
 # The notice store (#412 D11, D13): one record per raising, in raising order,
 # never merged. -V notices reads every record; a surface reads the visible ones.
 my @notice_records;
@@ -678,6 +705,13 @@ my $title_rows = 0;             # rows the title printed, before the options wer
 # test that keeps it off the hot path.
 use constant PROGRESS_REPAINT_SECONDS => 0.5;
 use constant PROGRESS_LINE_STRIDE     => 512;
+# The file listing's line (#728 D6) shows only once the listing has taken this
+# long, so a listing that finishes sooner prints nothing. While a folder is
+# read the clock is consulted every FILE_LIST_TICK_STRIDE entries: entries
+# arrive slowly exactly where the line matters (a network share, a security
+# tool inspecting each access), so the stride is short.
+use constant FILE_LIST_LINE_DELAY_SECONDS => 0.5;
+use constant FILE_LIST_TICK_STRIDE        => 16;
 my $total_lines_highlighted = 0;
 my $legend_length = 0;
 my $timestamp_length = 0;
@@ -2615,16 +2649,17 @@ sub read_index_file {
     # Per-file tiered lookup with freshness check.
     my %tier_seen;     # tier name => 1, used to enforce same-tier rule
     for my $in_file (@in_files) {
-        my @stat = stat($in_file);
-        unless (@stat) {
+        # The size and modification time the file listing took from the check
+        # that admitted the file (#728 D8); the run index being on, both were taken.
+        unless ( defined $selected_file_size{$in_file} && defined $selected_file_mtime{$in_file} ) {
             $index_preseed{$in_file} = {
                 lookup => 'none', matched_entry_date => '-', freshness => 'no_entry',
             };
             $tier_seen{none} = 1;
             next;
         }
-        my $on_disk_size  = $stat[7];
-        my $on_disk_mtime = format_timestamp($stat[9], precision => 's', shape => 'iso');
+        my $on_disk_size  = $selected_file_size{$in_file};
+        my $on_disk_mtime = format_timestamp($selected_file_mtime{$in_file}, precision => 's', shape => 'iso');
 
         my $file_row = $file_entries{$in_file};
         my $file_fresh = 0;
@@ -15006,14 +15041,14 @@ sub fit_message_key_to_column {
     return $prefix . $cut;
 }
 
-# Size the selected file set once, before the first file is opened, so the read
-# pass can report the run's overall completion (#446 D2). The list is final at
-# the point this runs — glob and recursive expansion, the -f filter and the -r
-# de-duplication have all been applied — so one stat sweep yields N and the
-# exact byte total. Sizing inside the traversal instead would put the same
-# computation in two places (the -r path and the glob path).
+# Total the selected file set once, before the first file is opened, so the
+# read pass can report the run's overall completion (#446 D2). The list is final
+# at the point this runs — expansion and the -r de-duplication have been
+# applied — and the file listing took each file's size from the check that
+# admitted it (#728 D8), so N and the exact byte total cost no further call to
+# the file system. A file named twice counts twice, as it is read twice.
 #
-# The sweep is skipped for a single file: the overall percentage would then be
+# Nothing is totalled for a single file: the overall percentage would then be
 # the per-file percentage under another name, and two identical figures side by
 # side tell the reader nothing (R4). $progress_file_count staying 0 is what the
 # rest of the surface reads as "no overall figure this run".
@@ -15021,17 +15056,12 @@ sub fit_message_key_to_column {
 # Bytes own the percentage and the file counter sits beside it, unweighted —
 # the dominant industry pattern, with no weighting constant to calibrate
 # (docs/progress-indication-best-practices.md § What ltl adopts).
-sub size_selected_files_for_progress {
+sub total_selected_files_for_progress {
     return if $disable_progress;            # the figure has no consumer
     return if scalar(@in_files) < 2;        # single file: per-file percentage only
 
-    %progress_file_sizes  = ();
     $progress_total_bytes = 0;
-    for my $file (@in_files) {
-        my $size = (-f $file) ? ((-s $file) // 0) : 0;
-        $progress_file_sizes{$file} = $size;
-        $progress_total_bytes += $size;
-    }
+    $progress_total_bytes += $selected_file_size{$_} // 0 for @in_files;
     $progress_file_count = scalar(@in_files);
     return;
 }
@@ -16644,15 +16674,79 @@ sub progress_line_text {
 # remembered between frames, and nothing flickers: the text is overwritten by
 # text in the same write, and the blanks only ever cover the tail — the row is
 # never blanked and repainted. The pad is the same width the line clear writes,
-# and progress_line_text() already fits the line inside it, so the pad cannot
-# go negative; the guard is there because the fit and the pad must never
-# disagree silently.
+# and progress_line_text() and file_list_progress_text() already fit their line
+# inside it, so the pad cannot go negative; the guard is there because the fit
+# and the pad must never disagree silently. The pad is counted in the cells the
+# text takes (notice_cells()), not its bytes: a spinner glyph, or a character
+# of a file name outside ASCII, is several bytes and one cell.
 sub paint_progress_line {
     my ($text) = @_;
-    my $pad = $terminal_width - 1 - length($text);
+    my $pad = $terminal_width - 1 - notice_cells($text);
     $pad = 0 if $pad < 0;
     print "\r$text" . " " x $pad;
     $| = 1;                                     # Flush output to stdout
+    return;
+}
+
+# The file listing's progress line (#728): the spinner's current frame, the
+# files found and the folders read so far, and the folder being read, last
+# (D4). The counts are written as the read pass's progress line writes its line
+# counts. The folder is the variable-length part, so it absorbs the fit: it is
+# shortened in the middle to whatever the row leaves (shorten_filename(), as the
+# read pass's line shortens its path), and cut outright below the ten
+# characters that declines to shorten to; with no room at all it is left out.
+sub file_list_progress_text {
+    my $prefix = $file_list_spinner[ $file_list_frame % @file_list_spinner ] . ' Building file list... '
+               . value_text( $file_list_files,   kind => 'count', budget => 'progress' ) . ' files, '
+               . value_text( $file_list_folders, kind => 'count', budget => 'progress' ) . ' folders';
+    my $room = $terminal_width - notice_cells($prefix) - 2 - 1;   # ': ' before the folder, then the safety margin
+    return $prefix if $room <= 0 || $file_list_folder eq '';
+    my $shown = shorten_filename( $file_list_folder, $room );
+    $shown = substr( $shown, 0, $room ) if length($shown) > $room;
+    return "$prefix: $shown";
+}
+
+# Start the listing's clock and counts; called before the first file argument
+# is expanded.
+sub file_list_progress_start {
+    ( $file_list_files, $file_list_folders, $file_list_entries, $file_list_frame, $file_list_painted ) = ( 0, 0, 0, 0, 0 );
+    $file_list_folder  = '';
+    $file_list_started = Time::HiRes::time();
+    return;
+}
+
+# A folder the listing is about to read: counted, named on the line, and a
+# moment to repaint, since opening a folder is where a slow volume waits.
+sub file_list_progress_folder {
+    my ($folder) = @_;
+    $file_list_folders++;
+    ( $file_list_folder = $folder ) =~ s{(?<=[^/\\])[/\\]+\z}{};   # shown without the separator a bsd_glob root carries
+    $file_list_folder = '.' if $file_list_folder eq '';
+    file_list_progress_tick();
+    return;
+}
+
+# Repaint the listing's line when it is due: not before the listing has taken
+# FILE_LIST_LINE_DELAY_SECONDS (D6), then at most every PROGRESS_REPAINT_SECONDS
+# (D5), each repaint stepping the spinner one frame.
+sub file_list_progress_tick {
+    return if $disable_progress;
+    my $now = Time::HiRes::time();
+    return if $now - $file_list_started < FILE_LIST_LINE_DELAY_SECONDS;
+    return if $file_list_painted && $now - $file_list_last_paint < PROGRESS_REPAINT_SECONDS;
+    $file_list_frame++ if $file_list_painted;
+    paint_progress_line( file_list_progress_text() );
+    ( $file_list_painted, $file_list_last_paint ) = ( 1, $now );
+    return;
+}
+
+# The list is built: the line, if it was ever painted, is erased in place and
+# leaves nothing behind (D7), as the line clear between read files does.
+sub file_list_progress_end {
+    return unless $file_list_painted;
+    print "\r" . " " x ( $terminal_width - 1 ) . "\r";
+    $| = 1;
+    $file_list_painted = 0;
     return;
 }
 
@@ -18472,16 +18566,19 @@ sub adapt_to_command_line_options {
     # Each argument is expanded on its own, so an argument that selects no file
     # is known by name: a directory, a path that does not exist, a pattern
     # that matches nothing. Directories and other non-files inside an
-    # argument that did select files are skipped without a word.
+    # argument that did select files are skipped without a word. Only files
+    # are selected: each expansion admits a path through admit_selected_file(),
+    # which keeps what the check learned about the file.
     my @selected_nothing;
+    file_list_progress_start();                                     # a listing that runs long reports itself (#728)
     foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
-        my @expanded = $recursive_files
+        my @files = $recursive_files
             ? expand_recursive_pattern($pattern)                    # -r: the filename component matches at every depth beneath the pattern's directory component
-            : bsd_glob($pattern);                                   # bsd_glob: wildcard/brace/tilde expansion without treating whitespace as a pattern separator, so paths containing spaces survive as one candidate
-        my @files = grep { -f $_ } @expanded;                       # only files are read
+            : expand_plain_pattern($pattern);                       # bsd_glob's reading of the pattern, its last folder read one entry at a time; whitespace is not a pattern separator, so paths containing spaces survive as one candidate
         push @selected_nothing, $pattern unless @files;
         push @in_files, @files;
     }
+    file_list_progress_end();                                       # before anything else prints, the usage errors below included
 
     # A recursive sweep can reach one file from two patterns whose roots nest
     # ('-r logs/*.888 logs/access/*.888'), and reading a file twice doubles its
@@ -18752,10 +18849,10 @@ sub adapt_to_command_line_options {
         }
     }
 
-    # The selected file list is final here — expansion, the -f filter and the
-    # -r de-duplication are all behind us — which is what lets the overall
-    # progress denominator be exact from the first line read (#446 D2).
-    size_selected_files_for_progress();
+    # The selected file list is final here — expansion and the -r
+    # de-duplication are behind us — which is what lets the overall progress
+    # denominator be exact from the first line read (#446 D2).
+    total_selected_files_for_progress();
 
     return;
 }
@@ -19113,22 +19210,22 @@ sub read_and_process_logs {
         push @files_processed, $in_file;
         my $line_number = 0;
         # >0 enables the per-file percentage (tell($fh) / size); 0 = line count
-        # only. Where the overall-progress sweep ran it already took this exact
-        # value for every selected file, so the size is read from there rather
-        # than stat'ed a second time (#446, in-drop obligation).
-        my $progress_file_size = exists $progress_file_sizes{$in_file}
-            ? $progress_file_sizes{$in_file}
-            : ( (-f $in_file) ? (-s $in_file) : 0 );
+        # only. The file listing took the size from the check that admitted the
+        # file (#728 D8), so it is read from there rather than stat'ed again.
+        my $progress_file_size = $selected_file_size{$in_file}
+            // ( (-f $in_file) ? (-s $in_file) : 0 );
         $progress_file_index++;
         $format_current_file = $in_file;
         my %fr_matches_at_start = map { $_ => $format_registry_entry{$_}[FR_MATCHES] } keys %format_registry_entry;
         $format_detection{$in_file} //= new_format_detection_record();
 
-        # Index file: capture file metadata and initialize per-file counters (Issue #46)
-        my @file_stat = stat($in_file);
+        # Index file: per-file counters (Issue #46), and the file's size and
+        # modification time as the file listing took them (#728 D8); the
+        # modification time is taken only while the run index is on, its one
+        # reader being write_index_file().
         $index_file_data{$in_file} = {
-            file_size       => $file_stat[7],
-            file_mtime      => $file_stat[9],
+            file_size       => $selected_file_size{$in_file},
+            file_mtime      => $selected_file_mtime{$in_file},
             line_count      => 0,
             match_count     => 0,
             first_timestamp => undef,
@@ -26390,12 +26487,13 @@ sub file_argument_problem {
 # Expand one file argument to every file matching its filename component at
 # any depth beneath its directory component (-r / --recursive).
 #
-# The pattern splits at its last '/': the directory part is globbed exactly as
-# the non-recursive path globs the whole pattern, yielding the set of roots to
-# descend (an empty directory part makes the root '.'); the final component
-# becomes a filename filter applied to basenames at every depth beneath each
-# root. A pattern naming only directories carries no filename component and so
-# matches nothing, recursive or not.
+# The pattern splits at its last folder separator (split_file_pattern(), the
+# split the non-recursive path makes too): the directory part is globbed with
+# bsd_glob, yielding the set of roots to descend (a pattern with no separator
+# makes the root '.', and a separator with nothing before it the
+# filesystem root); the final component becomes a filename filter applied to
+# basenames at every depth beneath each root. A pattern naming only directories
+# carries no filename component and so matches nothing, recursive or not.
 #
 # Traversal is breadth-first: every match at one level is collected before any
 # match one level down. Within a level, matching files are emitted in
@@ -26415,25 +26513,28 @@ sub file_argument_problem {
 sub expand_recursive_pattern {
     my ($pattern) = @_;
 
-    # Split at the last '/'. Windows callers may supply '\' separators, which
-    # File::Spec understands but bsd_glob's grammar treats as an escape, so the
-    # split accepts both while the reassembled paths use '/' throughout.
-    my ( $dir_part, $file_part );
-    if ( $pattern =~ m{^(.*)[/\\]([^/\\]*)$} ) {
-        ( $dir_part, $file_part ) = ( $1, $2 );
-    }
-    else {
-        ( $dir_part, $file_part ) = ( '', $pattern );
-    }
+    my ( $folder, $separator, $file_part ) = split_file_pattern($pattern);
 
     # A trailing separator ('logs/access/') leaves no filename component, so
     # there is nothing to match - the same outcome as a bare directory name.
     return () unless length $file_part;
 
-    # Empty directory part means the current directory. Root globbing uses the
-    # same bsd_glob call as the non-recursive path so wildcards in the
-    # directory part ('logs/*/access') need no special handling here.
-    my @roots = length($dir_part) ? bsd_glob($dir_part) : ('.');
+    # No separator means the current directory. A separator with nothing
+    # before it ('/'), or after a DOSISH drive ('C:/'), is a root whose entries
+    # are joined to it without another separator. Any other directory part is
+    # globbed with bsd_glob as the non-recursive path globs it, so wildcards in
+    # it ('logs/*/access') need no special handling here.
+    my ( @roots, %root_joins_bare );
+    if ( !length $separator ) {
+        @roots = ('.');
+    }
+    elsif ( !length $folder || ( GLOB_DOSISH && $folder =~ /\A[A-Za-z]:\z/ ) ) {
+        @roots = bsd_glob( $folder . $separator );
+        $root_joins_bare{$_} = 1 for @roots;
+    }
+    else {
+        @roots = bsd_glob($folder);
+    }
     @roots = grep { -d $_ && !-l $_ } @roots;
 
     my @matched;
@@ -26448,19 +26549,28 @@ sub expand_recursive_pattern {
                 push @unreadable_directories, $dir;
                 next;
             }
-            my @entries = sort grep { $_ ne '.' && $_ ne '..' } readdir($dh);
+            file_list_progress_folder($dir);
+            # One entry at a time, so a folder of many entries is read in steps
+            # rather than in one call that nothing can report from.
+            my @entries;
+            while ( defined( my $entry = readdir $dh ) ) {
+                push @entries, $entry unless $entry eq '.' || $entry eq '..';
+                file_list_progress_tick() if !$disable_progress && ++$file_list_entries % FILE_LIST_TICK_STRIDE == 0;
+            }
             closedir($dh);
+            @entries = sort @entries;
+            my $join = ( $dir eq '.' ) ? '' : $root_joins_bare{$dir} ? $dir : "$dir/";
 
             # Files first, then subdirectories queued for the next level: the
             # two passes are what make the traversal breadth-first rather than
             # interleaving a directory's own matches with its children's.
-            for my $entry (@entries) {
-                my $path = ( $dir eq '.' ) ? $entry : "$dir/$entry";
-                next unless -f $path;
-                push @matched, $path if basename_matches_glob( $entry, $file_part );
+            for my $entry ( basenames_matching_glob( $file_part, @entries ) ) {
+                my $path = $join . $entry;
+                push @matched, $path if admit_selected_file($path);
             }
             for my $entry (@entries) {
-                my $path = ( $dir eq '.' ) ? $entry : "$dir/$entry";
+                file_list_progress_tick() if !$disable_progress && ++$file_list_entries % FILE_LIST_TICK_STRIDE == 0;
+                my $path = $join . $entry;
                 next unless -d $path;
                 next if -l $path;                           # directory symlinks are not followed
                 push @next_level, $path unless $queued{$path}++;
@@ -26472,65 +26582,374 @@ sub expand_recursive_pattern {
     return @matched;
 }
 
-# Test one basename against the filename component of a file argument, using
-# the same wildcard/brace/tilde grammar bsd_glob applies to the non-recursive
-# path - the pattern a user writes means the same thing at every depth as it
-# does at the top level.
+# Expand one file argument the way bsd_glob expands it (the non-recursive
+# path), reading the folder that holds the files one entry at a time, so the
+# listing can report while it runs (#728 D3). What is selected, and in what
+# order, is bsd_glob's.
+#
+# bsd_glob's steps, in its order (bsd_glob(), globexp1(), glob0() in File::Glob's
+# bsd_glob.c): on a DOSISH system a drive-relative 'C:pattern' is read in that
+# drive's current folder. Braces are expanded first, and each alternative is
+# globbed and sorted on its own, in brace order, so '{c,a}.log' reads c.log
+# before a.log and '{a,a}.log' reads a.log twice. An alternative whose last
+# segment carries no wildcard names its file outright, and bsd_glob checks it
+# without reading the folder. Otherwise the folder part is globbed (its own
+# wildcards, '~', quoting) to the folders to read, each folder's names are
+# tested with the matcher -r uses, and the alternative's matches take
+# bsd_glob's order. A folder that cannot be read contributes nothing, as it
+# does to bsd_glob. Only files are selected.
+sub expand_plain_pattern {
+    my ($pattern) = @_;
+
+    # bsd_glob reads a drive-relative 'C:pattern' as 'C:./pattern', and the split
+    # needs that reading. Handed a piece of it back, bsd_glob makes the same
+    # insertion again, so each piece goes back to it as typed: 'C:x.log' names
+    # C:./x.log, as bsd_glob names it, never C:././x.log.
+    my $drive_relative = GLOB_DOSISH && $pattern =~ s{\A([A-Za-z]:)(?![/\\])}{$1./};
+    my $as_typed = sub {
+        my ($piece) = @_;
+        $piece =~ s{\A([A-Za-z]:)\./}{$1} if $drive_relative;
+        return $piece;
+    };
+
+    my @files;
+    for my $alternative ( expand_glob_braces($pattern) ) {
+        my ( $folder, $separator, $file_part ) = split_file_pattern($alternative);
+        unless ( glob_segment_has_magic($file_part) ) {
+            push @files, grep { admit_selected_file($_) } bsd_glob( $as_typed->($alternative) );
+            next;
+        }
+        my @matched;
+        my $prefix = $folder . $separator;
+        for my $root ( length $prefix ? bsd_glob( $as_typed->($prefix) ) : ('') ) {
+            opendir( my $dh, length $root ? $root : '.' ) or next;
+            file_list_progress_folder($root);
+            # One entry at a time, so the read can be reported in steps; the
+            # names are matched, and the matches admitted, a batch at a time,
+            # so a folder's non-matching names are never all held at once and
+            # the files found are counted as they are found. Admitting before
+            # sorting selects what sorting first would.
+            my @names;
+            while ( defined( my $name = readdir $dh ) ) {
+                push @names, $name;
+                file_list_progress_tick() if !$disable_progress && ++$file_list_entries % FILE_LIST_TICK_STRIDE == 0;
+                next if @names < LISTING_NAME_BATCH;
+                push @matched, grep { admit_selected_file($_) } map { $root . $_ } basenames_matching_glob( $file_part, @names );
+                @names = ();
+            }
+            closedir $dh;
+            push @matched, grep { admit_selected_file($_) } map { $root . $_ } basenames_matching_glob( $file_part, @names ) if @names;
+        }
+        push @files, sort_like_bsd_glob(@matched);
+    }
+    return @files;
+}
+
+# Admit a path the listing found when it is a file (a symlink to a file
+# included), keeping what the check learned (#728 D8): the size always, and the
+# modification time while the run index is on. Both come from the stat the
+# file test made (Perl's '_' handle), so the file system is asked once per
+# selected file. The file is counted on the listing's line, and a test is a
+# moment to repaint it, as a stat is where a slow volume waits.
+sub admit_selected_file {
+    my ($path) = @_;
+    file_list_progress_tick() if !$disable_progress && ++$file_list_entries % FILE_LIST_TICK_STRIDE == 0;
+    return 0 unless -f $path;
+    $selected_file_size{$path}  = ( -s _ ) || 0;
+    $selected_file_mtime{$path} = ( stat _ )[9] if $index_enabled;
+    $file_list_files++;
+    return 1;
+}
+
+# A pattern as bsd_glob reads it: one token per character, [ character, quoted ].
+# bsd_glob's quoting pass (GLOB_QUOTE, bsd_glob() in bsd_glob.c): a backslash
+# quotes the character after it, and stands for itself, quoted, at the end of
+# the pattern. On a DOSISH system it quotes only [ ] - { } ~ \ and otherwise
+# stands for itself, quoted, which bsd_glob still reads as a folder separator.
+sub glob_pattern_tokens {
+    my ($pattern) = @_;
+    my @tokens;
+    my $length = length $pattern;
+    my $i      = 0;
+    while ( $i < $length ) {
+        my $c = substr( $pattern, $i, 1 );
+        if ( $c eq '\\' ) {
+            my $next = $i + 1 < $length ? substr( $pattern, $i + 1, 1 ) : undef;
+            if ( defined $next && ( !GLOB_DOSISH || $next =~ /\A[\[\]\-{}~\\]\z/ ) ) {
+                push @tokens, [ $next, 1 ];
+                $i += 2;
+                next;
+            }
+            push @tokens, [ '\\', 1 ];
+            $i++;
+            next;
+        }
+        push @tokens, [ $c, 0 ];
+        $i++;
+    }
+    return @tokens;
+}
+
+# Tokens back to pattern text that reads as the same tokens: a quoted character
+# is written after a backslash.
+sub glob_tokens_text {
+    my ($tokens) = @_;
+    return join '', map { $_->[1] ? "\\$_->[0]" : $_->[0] } @$tokens;
+}
+
+# An unquoted token of the given character.
+sub glob_token_is {
+    my ( $token, $char ) = @_;
+    return defined $token && !$token->[1] && $token->[0] eq $char;
+}
+
+# A folder separator as bsd_glob reads one: '/', and on a DOSISH system '\'
+# too, quoted or not (glob0() compiles a quoted character to the plain one
+# before glob2() splits the pattern into folder segments).
+sub glob_token_separates {
+    my ($token) = @_;
+    return $token->[0] eq '/' || ( GLOB_DOSISH && $token->[0] eq '\\' );
+}
+
+# A pattern's brace alternatives, in bsd_glob's order, as pattern text
+# (globexp1() and globexp2() in bsd_glob.c, ported as they are): only the first
+# brace group is expanded at each step, its alternatives each expanded again in
+# turn; '[...]' inside a group is skipped over; a pattern of exactly '{}' is
+# left as it is; and a brace with no partner leaves only the text before it,
+# which is what bsd_glob then globs.
+sub expand_glob_braces {
+    my ($pattern) = @_;
+    my @alternatives;
+    glob_brace_alternatives( [ glob_pattern_tokens($pattern) ], \@alternatives );
+    return map { glob_tokens_text($_) } @alternatives;
+}
+
+sub glob_brace_alternatives {
+    my ( $tokens, $out ) = @_;
+    if ( @$tokens == 2 && glob_token_is( $tokens->[0], '{' ) && glob_token_is( $tokens->[1], '}' ) ) {
+        push @$out, $tokens;
+        return;
+    }
+    for my $brace ( 0 .. $#$tokens ) {
+        next unless glob_token_is( $tokens->[$brace], '{' );
+        glob_brace_expand_at( $tokens, $brace, $out );
+        return;
+    }
+    push @$out, $tokens;
+    return;
+}
+
+sub glob_brace_expand_at {
+    my ( $tokens, $brace, $out ) = @_;
+    my $n      = @$tokens;
+    my @prefix = @$tokens[ 0 .. $brace - 1 ];
+
+    # The partner of the brace, '[...]' skipped over.
+    my ( $depth, $close ) = ( 0, $brace + 1 );
+    for ( ; $close < $n; $close++ ) {
+        if ( glob_token_is( $tokens->[$close], '[' ) ) {
+            my $open = $close++;
+            $close++ while $close < $n && !glob_token_is( $tokens->[$close], ']' );
+            $close = $open if $close >= $n;
+        }
+        elsif ( glob_token_is( $tokens->[$close], '{' ) ) { $depth++ }
+        elsif ( glob_token_is( $tokens->[$close], '}' ) ) {
+            last if $depth == 0;
+            $depth--;
+        }
+    }
+    if ( $depth != 0 || $close >= $n ) {
+        push @$out, \@prefix;
+        return;
+    }
+
+    # Each alternative between the commas at this depth, with the text after
+    # the group appended, expanded again.
+    my @suffix = @$tokens[ $close + 1 .. $n - 1 ];
+    my $start  = $brace + 1;
+    $depth = 0;
+    for ( my $i = $brace + 1; $i <= $close; $i++ ) {
+        my $token = $tokens->[$i];
+        if ( glob_token_is( $token, '[' ) ) {
+            my $open = $i++;
+            $i++ while $i < $n && !glob_token_is( $tokens->[$i], ']' );
+            $i = $open if $i >= $n;
+            next;
+        }
+        if ( glob_token_is( $token, '{' ) ) { $depth++; next; }
+        if ( glob_token_is( $token, '}' ) && $depth ) { $depth--; next; }
+        next unless glob_token_is( $token, ',' ) || glob_token_is( $token, '}' );
+        next if $depth;
+        glob_brace_alternatives( [ @prefix, @$tokens[ $start .. $i - 1 ], @suffix ], $out );
+        $start = $i + 1;
+    }
+    return;
+}
+
+# Split a pattern at its last folder separator (glob_token_separates()).
+# Returns the text before the separator, the separator, and the file part, as
+# pattern text; the first two are empty for a pattern with no separator.
+sub split_file_pattern {
+    my ($pattern) = @_;
+    my @tokens = glob_pattern_tokens($pattern);
+    my $last   = -1;
+    for my $i ( 0 .. $#tokens ) {
+        $last = $i if glob_token_separates( $tokens[$i] );
+    }
+    return ( '', '', glob_tokens_text( \@tokens ) ) if $last < 0;
+    return ( glob_tokens_text( [ @tokens[ 0 .. $last - 1 ] ] ),
+             glob_tokens_text( [ $tokens[$last] ] ),
+             glob_tokens_text( [ @tokens[ $last + 1 .. $#tokens ] ] ) );
+}
+
+# A set at token $i, '[' unquoted, as glob0() in bsd_glob.c reads one: an
+# unquoted '!' first negates it ('^' is an ordinary member); the first member
+# is taken as it is, even ']'; 'a-z' is a range unless its end is an unquoted
+# ']'; the set ends at the next unquoted ']'. Without a closing ']' after the
+# first member the '[' is an ordinary character, and nothing is returned.
+# Returns the token index after the set, whether it is negated, its single
+# members and its ranges.
+sub glob_set_parse {
+    my ( $tokens, $i ) = @_;
+    my $n      = @$tokens;
+    my $j      = $i + 1;
+    my $negate = glob_token_is( $tokens->[$j], '!' ) ? 1 : 0;
+    $j++ if $negate;
+    return if $j >= $n;
+    return unless grep { glob_token_is( $tokens->[$_], ']' ) } $j + 1 .. $n - 1;
+
+    my ( @singles, @ranges );
+    my $c = $tokens->[ $j++ ][0];
+    while (1) {
+        if ( $j + 1 < $n && glob_token_is( $tokens->[$j], '-' ) && !glob_token_is( $tokens->[ $j + 1 ], ']' ) ) {
+            push @ranges, [ $c, $tokens->[ $j + 1 ][0] ];
+            $j += 2;
+        }
+        else {
+            push @singles, $c;
+        }
+        my $next = $tokens->[ $j++ ];
+        last if glob_token_is( $next, ']' );
+        $c = $next->[0];
+    }
+    return ( $j, $negate, \@singles, \@ranges );
+}
+
+# Whether a pattern segment carries a wildcard bsd_glob would match against a
+# folder's names: an unquoted '*' or '?', or a set.
+sub glob_segment_has_magic {
+    my ($segment) = @_;
+    my @tokens = glob_pattern_tokens($segment);
+    for my $i ( 0 .. $#tokens ) {
+        next if $tokens[$i][1];
+        my $c = $tokens[$i][0];
+        return 1 if $c eq '*' || $c eq '?';
+        return 1 if $c eq '[' && glob_set_parse( \@tokens, $i );
+    }
+    return 0;
+}
+
+# The order bsd_glob gives the matches of one pattern (GLOB_ALPHASORT,
+# ci_compare() in bsd_glob.c): ASCII letters folded to lower case, ties broken
+# by byte order. ci_compare() compares through a plain C char, so where char is
+# signed (GLOB_CHAR_IS_SIGNED) a byte from 0x80 up sorts before every ASCII
+# byte, and before the end of a shorter name; where it is unsigned it sorts
+# after, as byte order has it.
+#
+# Each name is sorted as one string, its sort key followed by the name itself,
+# so Perl's own string sort orders them with no comparison block: the key is
+# the folded name with an end mark (0, as ci_compare() reads the end of a
+# name; under a signed char the bytes are rotated by 0x80 so that byte order
+# is signed order, which moves the end mark to 0x80). No name holds a 0 byte,
+# so no key is the start of another, and two names compare by their keys, then
+# by their bytes. The key is one character longer than the name, which is how
+# the name is taken back.
+sub sort_like_bsd_glob {
+    return map { substr( $_, ( length($_) + 1 ) / 2 ) }
+           sort
+           map {
+               my $key = $_;
+               $key =~ tr/A-Z/a-z/;
+               if (GLOB_CHAR_IS_SIGNED) {
+                   $key =~ tr/\x00-\xff/\x80-\xff\x00-\x7f/;
+                   $key .= "\x80";
+               }
+               else {
+                   $key .= "\x00";
+               }
+               $key . $_;
+           } @_;
+}
+
+# The basenames, of those given and in their order, that match the filename
+# component of a file argument, as bsd_glob's match() in bsd_glob.c tests a
+# name against a pattern segment, so
+# the pattern a user writes selects the same names at every depth under -r as
+# it does in one folder without it (#728 D11). '*' and '?' match any run and any
+# one character; a set is read by glob_set_parse(), and a reversed range in it
+# matches nothing; quoting is glob_pattern_tokens()'s. Case is ignored where
+# File::Glob's default flags ignore it (GLOB_IGNORES_CASE): ASCII letters are
+# folded in the name, the pattern and both ends of a range, as match() folds
+# them. A leading dot in a name is matched only by a pattern whose first
+# character is a dot, quoted or not, matching bsd_glob: '*.888' does not select
+# '.hidden.888', '.*.888' does.
+#
+# An unquoted brace group in the component is matched as alternatives. Only -r
+# leaves one there; the non-recursive path expands braces before it reads a
+# folder (expand_plain_pattern()).
 #
 # bsd_glob cannot be asked to match a name in a directory other than the one
-# the pattern names, so the pattern is compiled to an equivalent regular
-# expression, cached per pattern (a sweep tests every basename it encounters
-# against the same handful of patterns).
-#
-# A leading dot is only matched by a pattern that spells it out, matching
-# bsd_glob's default: '*.888' does not select '.hidden.888', '.*.888' does.
+# the pattern names, so the component is compiled to an equivalent regular
+# expression, cached per pattern: a sweep tests every basename it encounters
+# against the same handful of patterns. A folder's names are tested in one
+# call.
 {
     my %compiled;
-    sub basename_matches_glob {
-        my ( $basename, $pattern ) = @_;
-
-        return 0 if $basename =~ /\A\./ && $pattern !~ /\A\./;
-
-        my $re = $compiled{$pattern};
-        unless ( defined $re ) {
-            my $expr = '';
-            my @chars = split //, $pattern;
-            my @alternation_depth;
-            while ( defined( my $c = shift @chars ) ) {
-                if ( $c eq '\\' ) {
-                    my $next = shift @chars;
-                    $expr .= defined($next) ? quotemeta($next) : quotemeta($c);
-                }
-                elsif ( $c eq '*' ) { $expr .= '[^/]*'; }
-                elsif ( $c eq '?' ) { $expr .= '[^/]'; }
-                elsif ( $c eq '[' ) {
-                    # Character class: copied through with its negation form
-                    # normalized ('!' to '^'), so '[!0-9]' means the same here
-                    # as it does to bsd_glob.
-                    my $class = '';
-                    if ( @chars && ( $chars[0] eq '!' || $chars[0] eq '^' ) ) {
-                        shift @chars;
-                        $class .= '^';
-                    }
-                    $class .= ']' if @chars && $chars[0] eq ']' && do { shift @chars; 1 };
-                    while ( @chars && $chars[0] ne ']' ) {
-                        my $cc = shift @chars;
-                        $class .= ( $cc =~ /[\w\-]/ ) ? $cc : quotemeta($cc);
-                    }
-                    if ( @chars ) { shift @chars; $expr .= "[$class]"; }
-                    else          { $expr .= quotemeta('[') . $class; }   # unterminated class is a literal '['
-                }
-                elsif ( $c eq '{' ) { push @alternation_depth, 1; $expr .= '(?:'; }
-                elsif ( $c eq ',' && @alternation_depth ) { $expr .= '|'; }
-                elsif ( $c eq '}' && @alternation_depth ) { pop @alternation_depth; $expr .= ')'; }
-                else { $expr .= quotemeta($c); }
-            }
-            $expr .= ')' x scalar(@alternation_depth);      # unterminated brace group closes at end of pattern
-            $re = $compiled{$pattern} = qr/\A$expr\z/;
-        }
-
-        return $basename =~ $re;
+    sub basenames_matching_glob {
+        my ( $pattern, @names ) = @_;
+        my $matcher = $compiled{$pattern} //= glob_segment_matcher($pattern);
+        my $regex   = $matcher->{regex};
+        @names = grep { substr( $_, 0, 1 ) ne '.' } @names unless $matcher->{leading_dot};
+        return grep { ( my $name = $_ ) =~ tr/A-Z/a-z/; $name =~ $regex } @names if GLOB_IGNORES_CASE;
+        return grep { $_ =~ $regex } @names;
     }
+}
+
+sub glob_segment_matcher {
+    my ($pattern) = @_;
+    my @tokens = glob_pattern_tokens($pattern);
+    my $fold    = sub { my $c = shift; $c =~ tr/A-Z/a-z/ if GLOB_IGNORES_CASE; return $c };
+    my $literal = sub { return sprintf '\\x{%x}', ord $fold->(shift) };
+
+    my $expr  = '';
+    my $depth = 0;                                          # brace groups open, which only -r leaves in a component
+    my $i     = 0;
+    while ( $i < @tokens ) {
+        my ( $c, $quoted ) = @{ $tokens[$i] };
+        if ( !$quoted && $c eq '*' ) { $expr .= '.*'; $i++; next; }
+        if ( !$quoted && $c eq '?' ) { $expr .= '.';  $i++; next; }
+        if ( !$quoted && $c eq '[' ) {
+            if ( my ( $end, $negate, $singles, $ranges ) = glob_set_parse( \@tokens, $i ) ) {
+                my @members = map { $literal->($_) } @$singles;
+                for my $range (@$ranges) {
+                    my ( $low, $high ) = map { ord $fold->($_) } @$range;
+                    push @members, sprintf( '\\x{%x}-\\x{%x}', $low, $high ) if $low <= $high;
+                }
+                $expr .= @members ? '[' . ( $negate ? '^' : '' ) . join( '', @members ) . ']'
+                       : $negate  ? '.'
+                       :            '(?!)';
+                $i = $end;
+                next;
+            }
+        }
+        if ( !$quoted && $c eq '{' )           { $depth++; $expr .= '(?:'; $i++; next; }
+        if ( !$quoted && $c eq ',' && $depth ) { $expr .= '|'; $i++; next; }
+        if ( !$quoted && $c eq '}' && $depth ) { $depth--; $expr .= ')'; $i++; next; }
+        $expr .= $literal->($c);
+        $i++;
+    }
+    $expr .= ')' x $depth;                                  # an unterminated brace group closes at the end of the component
+    return { regex => qr/\A$expr\z/s, leading_dot => ( @tokens && $tokens[0][0] eq '.' ) ? 1 : 0 };
 }
 
 ## MAIN ##

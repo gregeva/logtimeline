@@ -20,6 +20,8 @@ Glob expansion is performed internally by logtimeline rather than relying on the
 
 An option whose value is optional (`-hm`, `-hg`, `-V`, `-g`, `-mem`) takes the word after it only when that word is one of its values; otherwise the word is read as a file argument and the option keeps its default, so `ltl -hg access.log` reads `access.log` and shows every metric's histogram. A comma list given to `-hg` or `-V` that mixes known and unknown names stops the run with an error naming the unknown ones.
 
+When building the file list takes longer than half a second (a folder of many thousands of files, a deep tree under `-r`, a slow or network drive), logtimeline shows a spinner with `Building file list...`, the files found and the folders read so far, and the folder it is reading. It is erased once the list is built, and `--hide progress` hides it. If the folder is not the one you meant, press Ctrl-C.
+
 That internal expansion only happens if the pattern actually reaches logtimeline. On macOS and Linux, an unquoted wildcard is expanded by the shell first, and logtimeline receives the list of names the shell already matched — or, in some shells, the command is refused outright when the pattern matched nothing. It makes no difference for a single-level pattern, but it silently narrows a recursive sweep to whatever the shell already found. Put wildcard patterns in double quotes whenever you use `-r`: `ltl -r "logs/*.log"`.
 
 ## Options
