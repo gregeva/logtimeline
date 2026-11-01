@@ -17,7 +17,7 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D4 are locked.
+contracts are confirmed by the architect; D1 to D5 are locked.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -67,6 +67,15 @@ The folder path is the quickest sign of a wrong directory, and the counts show
 the scale. The path goes last and is shortened in the middle, as the
 "Processing" line renders its path (446 D5, 532 D1). Chosen over the spinner
 and text alone, and over the counts without the path.
+
+**D5 — The whole line, spinner included, repaints at the "Processing" line's
+pace: at most every 500 ms** (architect, 2026-11-01). One pace for every
+progress display in `ltl` (446 D4, `PROGRESS_REPAINT_SECONDS`;
+`docs/progress-indication-best-practices.md` item 5), so the spinner steps
+twice a second. Chosen over stepping the spinner every 100 ms, with or without
+the numbers. The spinner moves only between file entries: a single folder read
+that blocks, on a slow network drive for example, holds it still until the read
+returns.
 
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
