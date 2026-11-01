@@ -52,6 +52,10 @@ ambiguous, this is the tiebreaker.
 - **D3 — Without `-r`, behavior is exactly what ships today.** `-r` is purely
   additive. The non-recursive path is not refactored through the new
   expansion.
+  *Amended by #728* (`features/728-file-list-progress.md` D3, architect,
+  2026-11-01): a plain pattern's folder is read one entry at a time through
+  the `-r` filename matcher, so a progress indicator can turn while it is
+  read. What the plain path selects, and in what order, is unchanged.
 
 - **D4 — Directories are descended regardless of their own name.** The
   filename filter gates files only: a directory named `2026-08` is entered

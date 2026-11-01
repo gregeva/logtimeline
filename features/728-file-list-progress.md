@@ -17,7 +17,7 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 and D2 are locked.
+contracts are confirmed by the architect; D1 to D3 are locked.
 
 ## Requirements (architect, 2026-11-01)
 
@@ -45,11 +45,22 @@ cycle (`· ✢ ✳ ✶ ✻ ✽`). `ltl` has no spinner today
 toolchain guidance "describes progress output as including an ETA and a
 spinner; neither exists"), so this is a new mechanism.
 
+**D3 — A plain pattern's folder is read one entry at a time, as `-r` reads
+each folder** (architect, 2026-11-01). Chosen over keeping `bsd_glob`, which
+reads the folder in one call and would leave the spinner still for most of the
+wait (F2). The filename part is matched by the `-r` matcher
+(`basename_matches_glob()`), and the names are put in `bsd_glob`'s order, case
+ignored, so the order files are read in does not change. What a plain pattern
+selects, and in what order, stays as shipped; it is proven by comparing
+selections before and after on the same fixtures. This amends 420 D3 (without
+`-r`, behaviour exactly as shipped and the plain path not refactored through
+the `-r` expansion) for the plain path's matching. Cost: F4.
+
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
 | # | Surface | Contract | Record |
 |---|---|---|---|
-| 1 | File arguments | Each argument is expanded through `bsd_glob`, or `expand_recursive_pattern()` under `-r`, and only files are kept; an argument that selects no file stops the run. The indicator changes no file selected and no order. | 420 governing statement ("`-r` replaces one-level matching with all-depth matching ... Nothing else changes"), 420 D3 (without `-r`, behaviour exactly as shipped; the plain path not refactored through the `-r` expansion), 614 D1 point 2 (file resolution), 639 D1 (ltl's own files are ordinary input; no exclusion step) |
+| 1 | File arguments | Each argument is expanded through `bsd_glob`, or `expand_recursive_pattern()` under `-r`, and only files are kept; an argument that selects no file stops the run. The indicator changes no file selected and no order; D3 changes how a plain pattern's folder is read, not what it selects. | 420 governing statement ("`-r` replaces one-level matching with all-depth matching ... Nothing else changes"), 420 D3 (without `-r`, behaviour exactly as shipped; amended by D3 here for how the folder is read), 614 D1 point 2 (file resolution), 639 D1 (ltl's own files are ordinary input; no exclusion step) |
 | 2 | Progress line | One row rewritten in place, repainted at most every 500 ms, each frame padded to the full row width | 446 D4, D5, D8; 532 D1 |
 | 3 | Spinner | None exists; D2 adds it | 446 § In-drop obligations |
 | 4 | Suppression | `--disable-progress`, the same as `--hide progress`, is the only switch for a progress surface; behavioural notices always print | 446 D6, 597 D9 |
@@ -119,6 +130,21 @@ In a folder holding `a.888`, `B.888` and `C.888`, `bsd_glob` returns
 `B, C, a` (character code). 420 D5 says "alphanumeric within each level"
 without saying which. It bears on any design that moves the plain path onto the
 `-r` matcher.
+
+**F4 — Reading the folder one entry at a time costs no more than `bsd_glob`.**
+D3's shape (`opendir`/`readdir`, the `-r` matcher sliced verbatim from `ltl`,
+the case-ignoring sort, `-f` on the matches only) against today's
+`grep { -f $_ } bsd_glob(...)`, on the 50,000-file folder, three runs each,
+median (range):
+
+| Pattern | Files selected | Today (s) | D3's shape (s) |
+|---|---|---|---|
+| `*.888` (all match) | 50,000 | 0.184 (0.181–0.187) | 0.152 (0.151–0.152) |
+| `f4*.888` (one in five) | 10,000 | 0.052 (0.047–0.054) | 0.065 (0.064–0.066) |
+| `*.zzz` (none) | 0 | 0.019 (0.019–0.020) | 0.042 (0.042–0.042) |
+
+At most 0.023 s per 50,000 entries either way. On the mixed-case folder of F3,
+the case-ignoring sort returns the same list as `bsd_glob`.
 
 ## Records searched
 
