@@ -17,7 +17,7 @@ file-list build.
 ## Status
 
 Planning, started 2026-11-01 on `release/0.20.0`. The surfaces and their
-contracts are confirmed by the architect; D1 to D11 are locked and the
+contracts are confirmed by the architect; D1 to D13 are locked and the
 acceptance criteria agreed.
 
 ## Requirements (architect, 2026-11-01)
@@ -142,6 +142,32 @@ ignores it too. `-r` changes in exactly those four cases, towards the contract
 420 N2 records for it ("Agreement with `bsd_glob` is the contract"). Chosen
 over leaving the `-r` matcher as it is and giving the plain path a second,
 exact copy of `bsd_glob`'s matching.
+
+D12 and D13 were taken by Claude under the architect's direction for this
+issue (2026-11-01: "continue the implementation autonomously taking your
+recommendations for such decisions"), as further cases of D11's trade-off: one
+rule shared by both paths, read the way `bsd_glob` reads it, with `-r` changing
+where it disagreed with its own record.
+
+**D12 — One split of a pattern into its folder part and its file part, shared
+by both paths, read the way `bsd_glob` reads a backslash.** The split is at the
+last separator `bsd_glob` would honour: `/` only on macOS and Linux, where a
+`\` escapes the next character; on Windows also `\`, except before
+`[ ] - { } ~ \`, where it escapes (File::Glob's DOSISH rule, `bsd_glob()` in
+`bsd_glob.c`). `-r` split at the last `/` or `\` on every platform, so
+`ltl -r "diff/q\*.888"` selected nothing on macOS where `ltl "diff/q\*.888"`
+selects `diff/q*.888` (measured on the base code, 2026-11-01). `-r` changes for
+an escaped character in a pattern on macOS and Linux, and for those six
+escapes on Windows (from the source; checked on the Windows host with D9).
+Accords with 420 D1 ("Pattern splits at the last `/`").
+
+**D13 — A pattern whose folder part is the filesystem root recurses from the
+root.** `-r` read `/zzq-728*.888` as having an empty folder part and recursed
+from the current folder: from a scratch folder holding `zzq-728.888` and
+`sub/zzq-728b.888`, both were selected although nothing by that name exists at
+`/` (base code, 2026-11-01). 420 D1 makes the root `.` only for an empty folder
+part, as in `-r *.888`; a leading `/` names the root. With D12's split
+returning the separator, the root is `/`. The plain path already reads it so.
 
 ## Acceptance criteria (agreed with the architect, 2026-11-01)
 
