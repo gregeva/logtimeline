@@ -373,6 +373,9 @@ on identical input it measured 48,615 bytes in both base runs and 43,367 then
 code, about 0.3 MB on identical paths. The time saved is within run-to-run
 variance: the read loop is unchanged.
 
+**Full harness suite** (`./tests/run-suite.sh`) at 883032ec: 54 harnesses,
+54 passed, 5,492 checks passed, 0 failed.
+
 ## Surfaces and their contracts (confirmed by the architect, 2026-11-01)
 
 | # | Surface | Contract | Record |
