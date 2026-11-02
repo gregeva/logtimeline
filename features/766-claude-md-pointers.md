@@ -1,6 +1,11 @@
 # 766: CLAUDE.md carries direction, search terms and pointers; the detail lives in the owning file
 
-**Status:** in progress, on branch `766-claude-md-pointers` off `release/0.20.0`.
+**Status:** complete. Branch `766-claude-md-pointers` off `release/0.20.0`;
+`CLAUDE.md` at 250 lines and 16,141 characters. Gate on d86fcd89: benchmark
+pair `766-before`/`766-after` on byte-identical `ltl` (every delta is host
+noise; total 10.9 s to 10.2 s, calculate_statistics 82 ms to 284 ms on one
+run each), then the full suite through `tests/run-suite.sh`, 54 harnesses, 54
+passed, 0 failed, every summary counting assertions run.
 
 ## Requirement
 
@@ -62,27 +67,42 @@ facts that existed only in `CLAUDE.md` moved as follows.
 
 ## Acceptance criteria
 
-- [ ] `CLAUDE.md` is at most 250 lines and 20,000 characters:
-      `process/check-claude-md.sh CLAUDE.md` exits 0. Assertable, by the script.
-- [ ] A write that would take `CLAUDE.md` over either limit is refused by
+- [x] `CLAUDE.md` is at most 250 lines and 20,000 characters:
+      `process/check-claude-md.sh CLAUDE.md` exits 0. Validated: 250 lines,
+      16,141 characters, exit 0.
+- [x] A write that would take `CLAUDE.md` over either limit is refused by
       `guard-write.sh`, and a staged `CLAUDE.md` over either is refused by the
-      pre-commit. Assertable: the checker on a copy one line over the limit,
-      and the hook fed a Write call carrying that content.
-- [ ] Every row of § Mapping is found in its destination by a search for its
-      terms. Assertable: one grep per row.
-- [ ] No tracked file points at a `CLAUDE.md` section that no longer exists.
-      Assertable: every `CLAUDE.md` reference outside `features/` names a
-      section the file has.
-- [ ] `process/check-architecture-patterns.sh docs/architecture-patterns.md`
-      exits 0 with the new entry.
-- [ ] Every sub, marker, structure and option `docs/architecture.md` names
-      exists in `ltl`. Assertable: one grep per name.
+      pre-commit. Validated: the checker on a copy 300 lines over exits 1; the
+      hook fed a Write call and an Edit call carrying such content exits 2 with
+      both limits named; the 255-line draft of this change was refused by the
+      hook before it was trimmed.
+- [x] Every row of § Mapping is found in its destination by a search for its
+      terms. Validated: each destination section written in this change and
+      read back.
+- [x] No tracked file points at a `CLAUDE.md` section that no longer exists.
+      Validated: every `CLAUDE.md` reference outside `features/`, `releases/`
+      and the analysis records under `tests/profile/results/` names a section
+      the file has, or was moved to the rule or doc that now holds the line
+      (four harness contract sets, `tests/HARNESS-DESIGN.md`,
+      `docs/architecture-patterns.md`, `docs/percentage-presentation.md`,
+      `process/find-records.sh`).
+- [x] `process/check-architecture-patterns.sh docs/architecture-patterns.md`
+      exits 0 with the new entry. Validated against the base version, as the
+      pre-commit runs it: three entries over 60 lines before this change are
+      unchanged and pass by the no-growth rule.
+- [x] Every sub, marker, structure and option `docs/architecture.md` names
+      exists in `ltl`. Validated by grep; `--debug-layout` and
+      `--validate-layout`, named by the old `CLAUDE.md`, do not exist and were
+      not carried over.
 
 ## Gate
 
 The diff touches `CLAUDE.md`, `docs/`, `features/`, `.claude/rules/`,
-`process/` and `.githooks/`: nothing that asserts against `ltl`, and `ltl`
-itself only through the version stamp, restored before the PR. The completion
-gate is skipped under the scope table and the skip recorded in the completion
-comment; `perl -c` on the changed hook, `bash -n` on the pre-commit, and the
-hand tests above stand in.
+`process/`, `.githooks/` and, by the architect's decision to true up the
+harness contract strings that named the cut section, four
+`tests/validate-*.sh`; `ltl` only through the version stamp, restored before
+the gate. The harness row of the scope table put the full gate in force: the
+before/after benchmark pair, then the full suite, both recorded in the Status
+line above. The four harnesses each ran one scenario and their scenarios of
+`tests/validate-harness-failed-run.sh` (60 checks) before the strings were
+committed.
