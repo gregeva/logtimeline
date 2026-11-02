@@ -165,7 +165,11 @@ usual floor for text, 3:1 for large text):
 | Man Page (#fef49c) | 1.26 | 2.44 | 2.27 | 6.88 | 3.76 | 5.15 | 2.32 | 3.70 | 1.58 |
 | Novel (#dfdbc3) | 1.30 | 2.39 | 2.22 | 6.17 | 3.59 | 4.79 | 2.26 | 3.50 | 1.57 |
 | Silver Aerogel (#a8a8a8) | 2.15 | 2.52 | 1.75 | 4.98 | 3.21 | 4.18 | 1.72 | 3.50 | 1.98 |
-| Solid Colors (#cd4b93) | 3.30 | 1.67 | 1.81 | 1.75 | 1.07 | 1.29 | 1.76 | 1.09 | 2.60 |
+
+Solid Colors is left out of the contrast tables: it draws each new window
+on a different background (#cd4b93 in one run, #fdb813 in the next), so its
+ratios belong to the window, not the profile. Every other profile gave the
+same readings in two runs.
 
 The same colours as fixed codes, each basic colour replaced by the index
 16-255 nearest xterm's default for it (`93` to 226, `32` to 40, `36` to 44,
