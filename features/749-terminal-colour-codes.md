@@ -2,11 +2,11 @@
 
 ## Status
 
-**In progress: research done, macOS measured; Windows Terminal handed over
-to a session on the Windows host (§ 6, assigned by the architect
-2026-11-02).** Contracts in § 2 confirmed by the architect on 2026-11-02. The
-research is `features/749-terminal-colour-codes-research.md`. The macOS
-measurements (§ 5) were made on 2026-11-02 with the instruments in
+**In progress: research done, macOS and Windows Terminal measured; the
+architect's decision is next.** Contracts in § 2 confirmed by the architect
+on 2026-11-02. The research is
+`features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
+Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
 `prototype/749-terminal-colour-codes/` on branch `749-terminal-colour-codes`.
 No decision has been taken; nothing in `ltl` has changed.
 
@@ -138,7 +138,7 @@ against it by a second pass.
 | Bold on a basic code | Colour unchanged on every one of the 16 codes in every profile; the word is heavier (1.12 to 1.75 times the ink) | There: the bright variant at normal weight, lighter on a light scheme |
 | Bold on the default foreground (help headings, `Error:`, the week fold) | Heavier, in the profile's "Bold Text" colour: Clear Dark 10.76 to 11.78:1, Clear Light 9.12 to 10.91:1. It loses contrast where that colour does: Silver Aerogel draws bold text white on grey, 8.83 to 2.38:1; Novel 8.56 to 5.25:1; Grass 4.89 to 3.09:1 | There: lighter at normal weight |
 | Bold over index 16-255 | Colour unchanged, heavier, in every profile | The same |
-| `38;5;0`-`38;5;15` against the basic codes | Identical in Clear Dark and Clear Light, which define their own sixteen. In the other ten, which do not, all or 13 of the 16 differ: `38;5;N` is Terminal's built-in palette (`38;5;1` #990000), while the basic code is drawn in a colour that changes with the profile (`31` #d6492e on Basic, #bd311b on Man Page, #750000 on Ocean) | Index 0-15 not measured there |
+| `38;5;0`-`38;5;15` against the basic codes | Identical in Clear Dark and Clear Light, which define their own sixteen. In the other ten, which do not, all or 13 of the 16 differ: `38;5;N` is Terminal's built-in palette (`38;5;1` #990000), while the basic code is drawn in a colour that changes with the profile (`31` #d6492e on Basic, #bd311b on Man Page, #750000 on Ocean) | Identical on Campbell and One Half Light (§ 6.2) |
 | `38;5;0` | The scheme's colour 0: slate #35424c on Clear Dark, #2d3840 on Clear Light; #000000 in the other ten | — |
 | Faint | Towards the background in every profile: default text on Clear Light 9.12 to 1.77:1, on Clear Dark 10.76 to 3.21:1; `2;37` on Clear Light disappears (no pixel 48 from the background) | There: darker on both |
 | `38;2;R;G;B` | Drawn exactly: equal to the 256-colour index of the same RGB, in every profile | — |
@@ -263,86 +263,139 @@ Terminal.app does not brighten: the scheme's own yellow, cyan and green are
 pale against a light background, and the fixed-code versions of the same
 hues are paler still. Linux terminals were not measured.
 
-## 6. Windows Terminal: handover to the Windows host
+## 6. Measurements: Windows Terminal
 
-The architect assigned this measurement on 2026-11-02 to a Claude session on
-the Windows development host, handed over through the repository. This
-section is that session's brief. The One Half Light table in
-`docs/terminal-output.md` covers bold and faint on a few codes, not `ltl`'s
-output and not a dark scheme.
+Measured on 2026-11-02 by a Claude session on the Windows development host,
+as the architect assigned, from the brief this section held (git history of
+this file, e4d0e49b).
 
-**Goal.** The measurements of § 5, in Windows Terminal, on its default dark
-scheme (Campbell) and on One Half Light, so the architect decides with both
-platforms measured. The session measures and records; it decides nothing.
+### 6.1 Method
 
-**Setup.**
-- The host as `docs/toolchain-guidance.md` § Windows development host sets it
-  up; every command from Git Bash.
-- Branch `749-terminal-colour-codes` (the instruments) checked out and synced
-  as `docs/process/workflow.md` § 1 says; this doc is on `release/0.20.0`.
-- Recorded beside the readings: Windows build; Windows Terminal version
-  (`Get-AppxPackage Microsoft.WindowsTerminal`); the profile used, its font
-  face and size; the display scale; and, for that profile in
-  `settings.json`, `intenseTextStyle` and `adjustIndistinguishableColors` as
-  written, or "absent" when the default applies (research § 3.1 and § 4 give
-  the documented defaults).
+- **Where:** Windows Terminal 1.24.12741.0 (ARM64) on Windows 11 25H2, build
+  26200.9711; display 1920 by 1080 at 100% scale (96 DPI). Each window opened
+  from the default profile (Windows PowerShell) with its command replaced by
+  the capture's, and its colour scheme set for that window with
+  `wt --colorScheme`, so the settings file was left as it is. It sets no font
+  face or size (Windows Terminal's defaults apply; the measured cell is 9 by
+  19 pixels), and neither `intenseTextStyle` nor
+  `adjustIndistinguishableColors` (absent: the defaults apply, research § 3.1
+  and § 4). Schemes as shipped: Campbell, the default (background #0c0c0c),
+  and One Half Light (#fafafa).
+- **What was drawn:** the pattern of § 5.1 in a 102 by 34 window, and the
+  four `ltl` runs of § 5.6, made by the host's own `ltl` from the committed
+  fixtures, as written and rewritten to fixed codes, on both schemes. `ltl`'s
+  output was drawn full screen (56 rows): a 120 by 58 window does not fit on
+  this display, and every output is 55 lines or fewer, so nothing scrolled.
+  Native `ltl` on Windows does not ask the terminal for its background (§ 7),
+  so every run is drawn for dark on both schemes, which is what a user
+  without `-lbg` sees.
+- **How it was read:** as § 5.1, from the screen's own pixels
+  (`Graphics.CopyFromScreen`, no colour conversion). Two runs gave identical
+  readings on every one of the 181 swatches on both schemes. The readings
+  reproduce the One Half Light table in `docs/terminal-output.md` § Colour
+  and emphasis: bold default text #4f525d (79,82,93), faint #1c1d21
+  (28,29,33), `2;38;5;184` #6b6b00 (107,107,0).
+- **Instruments:** `wt-measure.sh`, `wt-capture.ps1` and `wt-show.sh` in
+  `prototype/749-terminal-colour-codes/` on branch `749-terminal-colour-codes`
+  (4deb31bf); the tables are in its `results/windows-terminal/`.
 
-**Inputs**, from `prototype/749-terminal-colour-codes/`:
-- `python3 pattern.py`, run in a work directory, writes `pattern.ans` and
-  `pattern.json`.
-- `./ltl-outputs.sh <dir>` writes `ltl`'s output from committed fixtures, as
-  written and rewritten to fixed codes, with the host's own `ltl`: its output
-  is what is measured. Native `ltl` on Windows does not ask the terminal for
-  its background (§ 7), so these runs are drawn for dark on both schemes,
-  which is what a user without `-lbg` sees.
+### 6.2 What Windows Terminal does with each kind of code
 
-**Drawing and capturing.** `open-capture.sh` drives Terminal.app, so the
-session writes its own capture script beside it (PowerShell or Git Bash),
-committed with the results. For each file and scheme:
-- a new Windows Terminal window, not the agent's shell, set to that scheme
-  for that window (`wt new-tab --colorScheme <name>` where the installed
-  version accepts it, else a profile per scheme), with the UTF-8 code page as
-  `docs/terminal-output.md` requires, showing the file with `cat` and nothing
-  after it;
-- the window sized so nothing scrolls: at least 102 columns by 34 rows for
-  the pattern, 120 by 58 for `ltl`'s output. The reader finds the cell grid
-  from the pattern's first and last rows;
-- the window alone captured as an 8-bit RGB or RGBA PNG (what
-  `System.Drawing`'s `Bitmap.Save` writes), at the display's own scale.
-- Before reading, `analyse.py` prints the grid it found (`cell_w`, `cell_h`):
-  "no marker found", or a cell size that does not match the font, means the
-  window scrolled or the 24-bit markers were not drawn.
+| Question (research § 7.3) | Campbell | One Half Light | Terminal.app (§ 5.2) |
+|---|---|---|---|
+| Bold on a basic code | `30`-`37` drawn in their bright variant (`1;31` is `91`'s #e74856) at the same weight (ink 1.00 to 1.02 times); `90`-`97` unchanged. The bright variant has more contrast here: `31` 3.23 to 5.09, `34` 2.38 to 4.95 | The same, ink 0.97 to 1.00 times; the bright variant has less contrast here: `33` 3.09 to 1.66, `32` 3.07 to 1.93, `34` 4.00 to 2.26, `35` 5.86 to 2.85, `36` 3.30 to 2.29 | Colour unchanged, heavier (1.12 to 1.75 times) |
+| Bold on the default foreground | #cccccc to #f2f2f2, 12.18 to 17.47:1, same weight (1.02) | #383a42 to #4f525d, 10.86 to 7.46:1, same weight (1.00) | Heavier, in the profile's Bold Text colour |
+| Bold over index 16-255 | Colour unchanged, heavier (1.12 to 1.13 times) | The same | The same |
+| `38;5;0`-`38;5;15` against the basic codes | Identical on all 16 | Identical on all 16 | Identical in Clear Dark and Clear Light; 13 or 16 differ in the other ten |
+| `38;5;0` | #0c0c0c, the scheme's black, which is its background | #383a42, the scheme's black, which is its text colour | Clear: slate; the other ten: #000000 |
+| `37` and `97` | #cccccc, #f2f2f2 | #fafafa, the background itself (1.00:1); #ffffff (1.04:1) | — |
+| Faint | Towards the background: default text 12.18 to 3.41:1, `33` 7.47 to 2.41, `38;5;184` 12.68 to 3.47 | Darker: default text 10.86 to 16.13:1, `33` 3.09 to 8.93, `38;5;184` 1.48 to 5.40; `2;37` turns invisible text into #7d7d7d (3.94:1) | Towards the background in every profile |
+| `38;2;R;G;B` | Drawn exactly: equal to the index 16-255 of the same RGB | The same | The same |
+| Contrast adjustment | — | None: `37` stays #fafafa on #fafafa, `33` is the scheme's #c18301, `38;5;226` #ffff00 (1.03:1), `38;5;184` #d7d700. So the effective `adjustIndistinguishableColors` is `never`, or `automatic` outside high contrast (research § 7.3, point 7) | — |
+| Background query (OSC 11) | Not measured: native `ltl` does not ask on Windows (§ 7) | Not measured | Answered |
 
-**Reading**, in `prototype/749-terminal-colour-codes/`:
+### 6.3 Contrast of the colours `ltl` writes, by scheme
 
-```bash
-python3 analyse.py <capture.png> <work>/pattern.json <work>/<scheme>.json
-python3 report.py <work>/<scheme>.json > results/windows-terminal/profile-<scheme>.txt
-python3 summary.py <work>/Campbell.json <work>/One-Half-Light.json > results/windows-terminal/summary.txt
-python3 fixed-contrast.py <work>/Campbell.json <work>/One-Half-Light.json > results/windows-terminal/fixed-contrast.txt   # dark first
-```
+Each code's colour against the scheme's background (WCAG 2; 4.5:1 for text,
+3:1 for large text), with § 5.3's Clear profiles beside them:
 
-**What the readings settle** (research § 7.3, the Windows Terminal points):
-- bold on the basic codes and on the default foreground, on both schemes,
-  against the One Half Light table (bright variant, normal weight); on
-  Campbell it is not yet measured;
-- `38;5;0`-`38;5;15` against the basic codes, and `38;5;0` against
-  `38;5;16`: whether the text over `ltl`'s fills follows the scheme there, as
-  in Terminal.app's Clear profiles;
-- faint on both schemes;
-- `38;5;226` and `38;5;184` on One Half Light against their RGB (255,255,0
-  and 215,215,0): a shifted colour means `adjustIndistinguishableColors`
-  reaches 256-colour codes;
-- the contrast of `ltl`'s colours on both schemes, today and as fixed codes
-  (the tables of § 5.3), and the most one colour reaches on both (§ 5.4);
-- the help headings and the explain page, by eye in the captures.
+| scheme (background) | `93` duration | `32` bytes | `36` count | `34` | `35` | `31` | `33` WARN | `90` rules | `37` |
+|---|---|---|---|---|---|---|---|---|---|
+| Campbell (#0c0c0c) | 16.91 | 5.71 | 6.14 | 2.38 | 2.44 | 3.23 | 7.47 | 4.31 | 12.18 |
+| One Half Light (#fafafa) | 1.66 | 3.07 | 3.30 | 4.00 | 5.86 | 3.51 | 3.09 | 7.46 | 1.00 |
+| Clear Dark (#292f3b) | 8.21 | 4.88 | 7.21 | 4.27 | 4.40 | 2.79 | 6.03 | 1.93 | 10.56 |
+| Clear Light (#fbfbfb) | 1.58 | 2.66 | 1.93 | 3.82 | 3.80 | 4.65 | 2.15 | 5.88 | 1.64 |
 
-**Recording.** The findings go into this section in the form of § 5 (setup,
-a table against Terminal.app, the contrast tables), committed directly to
-`release/0.20.0`. The capture script and `results/windows-terminal/` are
-committed to `749-terminal-colour-codes`. Both are pushed, then the
-stage-boundary comment goes on the issue (`docs/process/issues.md` § Issue
-updates). Captures stay out of the repository.
+The same colours as the fixed codes of § 5.3:
+
+| scheme | 226 | 40 | 44 | 21 | 164 | 160 | 184 | 244 | 254 |
+|---|---|---|---|---|---|---|---|---|---|
+| Campbell | 18.22 | 9.99 | 10.90 | 2.28 | 4.54 | 3.62 | 12.68 | 4.95 | 15.39 |
+| One Half Light | 1.03 | 1.88 | 1.72 | 8.23 | 4.13 | 5.17 | 1.48 | 3.78 | 1.22 |
+
+Read together: on One Half Light, `ltl`'s duration colour reads 1.66:1, its
+bytes, count and WARN colours about 3:1, and `37` does not show at all; the
+fixed codes lower yellow, green and cyan further (226 at 1.03:1), lift `37`
+only to 1.22:1, and raise blue and red (21 at 8.23:1, 160 at 5.17:1). On
+Campbell the basic codes read except blue (2.38:1), magenta (2.44:1) and red
+(3.23:1); the fixed codes raise magenta, red and the rules, and leave blue at
+2.28:1.
+
+### 6.4 One fixed colour for both schemes
+
+No colour reaches 4.5:1 against both Campbell's and One Half Light's
+backgrounds: the most any colour reaches on both is 4.33:1, against 3.60:1
+for the Clear pair, because these two backgrounds are further apart. The
+best single index per hue, taking the lower of its two ratios: yellow 100
+(#878700) 3.66, green 28 (#008700) 4.16, cyan 30 (#008787) 4.18, blue 63
+(#5f5fff) 4.25, magenta 163 (#d700af) 4.20, red 196 (#ff0000) 3.83, orange 130
+(#af5f00) 4.15. For cyan, blue, magenta and red the best index differs from
+the Clear pair's (§ 5.4): which single colour serves both depends on the
+pair of backgrounds, not only on the hue.
+
+### 6.5 Text over a fill
+
+| fill | `38;5;0` Campbell | `38;5;0` One Half Light | `38;5;16` both |
+|---|---|---|---|
+| `48;5;184` (yellow) | 12.68 | 7.35 | 13.61 |
+| `48;5;34` (green) | 6.64 | 3.85 | 7.13 |
+| `48;5;20` (blue) | 1.85 | 1.07 | 1.98 |
+
+As in Terminal.app's Clear profiles, index 0 follows the scheme: on One Half
+Light it is the scheme's #383a42, which roughly halves the contrast on every
+fill; on Campbell it is #0c0c0c, close to black. On the blue fill no black
+reads on either scheme (#683, a value drawn over a bar keeps a fixed
+foreground colour, unreadable on dark bars).
+
+### 6.6 `ltl`'s own output
+
+Read by eye in the captures; the captures stay out of the repository and
+`wt-measure.sh` remakes them. The codes named are the ones in the captured
+runs.
+
+- **One Half Light, today:** the run summary's file details and its
+  `Log Formats` heading and list (`37`, `4;37`) do not show: only the
+  marker's fill and the blue index numbers remain. The duration values
+  outside their bar, the highlighted-messages title and the 4xx category
+  entry (`93`, 1.66:1) are pale, the 4xx legend entries (`33`, 3.09:1) less
+  so. The help headings (bold over the default
+  foreground) are drawn lighter than the text around them at the same
+  weight, so they recede; the explain page's message-table titles (bold
+  `36`) turn the paler bright cyan (#56b5c1, 2.29:1). The users column's
+  values over its blue fill do not read (1.07:1).
+- **One Half Light, fixed codes:** the file details show, barely (254,
+  1.22:1); the yellow, green and cyan text gets paler (226 at 1.03:1); the
+  explain titles turn heavier but stay pale cyan; the 5xx legend and
+  category entries read better (`31` to 160, 3.51 to 5.17:1). The help headings do not change: they are
+  bold over the default foreground in both.
+- **Campbell, today:** the rules, separators and the command-line options
+  line (`90`, 4.31:1) are dimmer than the text but read; the 3xx legend and
+  category entries (`35`, 2.44:1) are dark; the users column's values over
+  the blue fill are close to invisible (1.85:1). The help and explain
+  headings stand out by brightness (#f2f2f2 against #cccccc), not by weight.
+- **Campbell, fixed codes:** the rules and the options line are brighter
+  (244, 4.95:1); the explain titles turn heavier; the users column's values
+  stay unreadable (1.98:1).
 
 ## 7. Observations from the code reading
 
@@ -385,10 +438,10 @@ called a defect.
 
 ## Resuming
 
-- Done: research (§ 4); macOS Terminal.app measured (§ 5), instruments on
+- Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
+  measured on Campbell and One Half Light (§ 6). Instruments for both on
   branch `749-terminal-colour-codes`.
-- Next: Windows Terminal, Campbell and One Half Light, on the Windows
-  development host. Start at § 6, which is the whole brief.
-- Then: the architect's decision, with § 5 and § 6 in front of him.
+- Next: the architect's decision, with § 5 and § 6 in front of him, on any
+  host.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
