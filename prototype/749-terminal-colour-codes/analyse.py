@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Reads a Terminal.app capture of pattern.ans against pattern.json.
+"""Reads a terminal window's capture of pattern.ans against pattern.json.
 
 Usage: analyse.py <capture.png> <pattern.json> [out.json]
 
-The capture is converted to sRGB and to BMP with sips, then:
+On macOS the capture is first converted to sRGB with sips (screencapture
+writes the display's colour space); elsewhere (a Windows capture) its pixels
+are read as written. Then:
 - the cell grid comes from the row-0 background cell (a cell's true top,
   height and width) and the marker blocks (column pitch, row pitch);
 - a block swatch reads as the median colour of each cell's inner half;
@@ -11,27 +13,54 @@ The capture is converted to sRGB and to BMP with sips, then:
   0-255) from the background beside it, their count, and the extreme pixel
   (farthest from the background), which is the colour the glyph is drawn in.
 """
-import json, os, struct, subprocess, sys, tempfile
+import json, os, shutil, struct, subprocess, sys, tempfile, zlib
 from statistics import median
 
 SRGB = "/System/Library/ColorSync/Profiles/sRGB Profile.icc"
 
+def read_png(path):
+    """Decodes an 8-bit, non-interlaced RGB or RGBA PNG: (width, height,
+    bytes per pixel, rows of raw pixel bytes)."""
+    d = open(path, "rb").read()
+    assert d[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    pos, idat = 8, b""
+    while pos < len(d):
+        n, kind = struct.unpack_from(">I4s", d, pos)
+        body = d[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, ctype, _, _, interlace = struct.unpack(">IIBBBBB", body)
+            assert depth == 8 and ctype in (2, 6) and interlace == 0, (depth, ctype, interlace)
+            bpp = 3 if ctype == 2 else 4
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    raw, stride, rows, prev = zlib.decompress(idat), w * bpp, [], bytearray(w * bpp)
+    for y in range(h):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - bpp] if i >= bpp else 0
+            b = prev[i]
+            c = prev[i - bpp] if i >= bpp else 0
+            if f == 1:   line[i] = (line[i] + a) & 255
+            elif f == 2: line[i] = (line[i] + b) & 255
+            elif f == 3: line[i] = (line[i] + (a + b) // 2) & 255
+            elif f == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(line)
+        prev = line
+    return w, h, bpp, rows
+
 def load(png):
-    tmp = tempfile.mkdtemp()
-    srgb, bmp = os.path.join(tmp, "s.png"), os.path.join(tmp, "s.bmp")
-    subprocess.run(["sips", "-m", SRGB, png, "--out", srgb], check=True, capture_output=True)
-    subprocess.run(["sips", "-s", "format", "bmp", srgb, "--out", bmp], check=True, capture_output=True)
-    d = open(bmp, "rb").read()
-    off = struct.unpack_from("<I", d, 10)[0]
-    w, h = struct.unpack_from("<ii", d, 18)
-    bpp = struct.unpack_from("<H", d, 28)[0]
-    assert bpp == 32, bpp
-    top_down = h < 0
-    h = abs(h)
+    if shutil.which("sips") and os.path.exists(SRGB):
+        srgb = os.path.join(tempfile.mkdtemp(), "s.png")
+        subprocess.run(["sips", "-m", SRGB, png, "--out", srgb], check=True, capture_output=True)
+        png = srgb
+    w, h, bpp, rows = read_png(png)
     def px(x, y):
-        yy = y if top_down else h - 1 - y
-        i = off + (yy * w + x) * 4
-        return (d[i + 2], d[i + 1], d[i])
+        r, i = rows[y], x * bpp
+        return (r[i], r[i + 1], r[i + 2])
     return w, h, px
 
 def dist(a, b):

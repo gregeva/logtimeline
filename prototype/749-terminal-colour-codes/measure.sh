@@ -4,9 +4,9 @@
 # Draws the measurement pattern in every shipped Terminal.app profile, reads
 # each capture, and writes the tables to results/ beside this script. Asks
 # Terminal.app for its background (OSC 11) in Clear Light and Clear Dark.
-# With <ltl-output-dir> holding .ans files of ltl's output, also draws each in
-# four profiles, as written and as rewritten to fixed codes by to256.pl, into
-# <work-dir>/shots; those captures show sample-log content and stay out of the
+# With <ltl-output-dir> holding the .ans files ltl-outputs.sh writes (ltl's
+# output as written and as rewritten to fixed codes), also draws each in four
+# profiles into <work-dir>/shots, for looking at; the captures stay out of the
 # repository.
 #
 # macOS only. Terminal (or whatever runs this) needs Screen Recording
@@ -16,7 +16,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mkdir -p "$1" && cd "$1" && pwd)
 ltl_out=${2:-}
-results="$here/results"
+results="$here/results/terminal-app"
 mkdir -p "$work/pattern" "$results"
 
 profiles=("Clear Dark" "Clear Light" "Basic" "Grass" "Homebrew" "Man Page" "Novel" "Ocean" "Pro" "Red Sands" "Silver Aerogel" "Solid Colors")
@@ -53,10 +53,6 @@ done
 
 if [[ -n "$ltl_out" ]]; then
     mkdir -p "$work/shots"
-    for f in "$ltl_out"/*.ans; do
-        [[ "$f" == *-256.ans ]] && continue
-        perl "$here/to256.pl" < "$f" > "${f%.ans}-256.ans"
-    done
     for p in "Clear Dark" "Clear Light" "Man Page" "Basic"; do
         for f in "$ltl_out"/*.ans; do
             "$here/open-capture.sh" "$p" "$f" "$work/shots/${p// /-}--$(basename "${f%.ans}").png" 120 56 >/dev/null

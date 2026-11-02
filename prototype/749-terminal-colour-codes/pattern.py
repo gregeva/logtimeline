@@ -109,6 +109,6 @@ for cells in rows:
         line += " " * (col - pos) + f"\033[{sgr}m{text}\033[0m"
         pos = col + len(text)
     out.append(line)
-open("pattern.ans", "w").write("\n".join(out) + "\n")
+open("pattern.ans", "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")
 json.dump(dict(cols=COLS, rows=len(rows), swatches=manifest), open("pattern.json", "w"), indent=1)
 print(len(rows), "rows,", len(manifest), "swatches")
