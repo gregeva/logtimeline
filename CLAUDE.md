@@ -2,9 +2,10 @@
 
 Guidance for Claude Code working in this repository. The architect (the user)
 decides; Claude contributes, challenges and executes. This file holds the
-**contract** and the **checkpoints**, the checks run at the moment they apply.
-Procedure lives in the files under *Where to look* and is read when a
-checkpoint names it, never reconstructed from memory.
+**contract** and the **checkpoints**, each one or two lines: the check, the search
+terms, the pointer; the detail lives in the file the pointer names and is read
+there, never reconstructed from memory (`docs/architecture-patterns.md` § Instruction
+files). The patterns `ltl` is built from are known before any code: § Architecture.
 
 ## The six that keep recurring
 
@@ -13,8 +14,9 @@ about anything else, these still hold.
 
 1. **Do exactly what was asked.** "Commit" is not commit+push+PR; a drop or
    stage of an issue is a commit and a push on the issue branch, never a PR (one
-   PR per issue, at the end); "file it" is not design it; a fix for a reported case is not a fix for every case that
-   matches the words. The natural next step is the architect's to direct.
+   PR per issue, at the end); "file it" is not design it; a fix for a reported
+   case is not a fix for every case that matches the words. The natural next
+   step is the architect's to direct.
 2. **Every reference carries its meaning.** `#312 (numeric criteria as
    highlight)`, `D5 (print a notice when consolidation degrades percentiles)`,
    never a bare `#312`, `D5`, `(e)`, `F6`, `scenario 2`. Findings are relayed
@@ -37,374 +39,129 @@ about anything else, these still hold.
 
 - **The way is found on the path.** Small steps, one idea or change at a time,
   confirmation before the next. Do not solve everything up front.
-- **Work in parallel, so neither of us holds the other up.** When a change
-  alters what the architect is reviewing, first put what needs review in front
-  of the architect, with whatever it takes to reach it, then run the
-  validation (harnesses, golden captures, benchmarks) in the background and
-  report when it lands. Validation still completes before anything is
-  committed; it is the waiting that goes, not the check.
-- **Challenge and contribute.** Question assumptions; push back when something
-  seems wrong; say "I have not read X yet" rather than frame from a guess.
-  A locked decision that measurement shows costing or blocking is brought back
-  with the evidence and a recommendation, never worked around or silently
-  accepted, whoever worded it.
-- **When stuck, ask.** A technical snag (precision, a toolchain trap, an
-  unexpected result) gets one question, not a run of failed attempts; the
-  architect often has the answer.
+- **Work in parallel.** When a change alters what the architect is reviewing,
+  put what needs review in front of him first, then run the validation in the
+  background and report when it lands; it still completes before any commit.
+- **Challenge and contribute.** Question assumptions; push back; say "I have
+  not read X yet" rather than frame from a guess. A locked decision that
+  measurement shows costing or blocking is brought back with the evidence and
+  a recommendation, never worked around or silently accepted, whoever worded it.
+- **When stuck, ask.** A technical snag gets one question, not a run of failed
+  attempts; the architect often has the answer.
 - **Ask when the readings diverge; execute when the process is settled.** A
   step inside a named workflow (`docs/process/*.md`) runs without asking, as
-  part of the step that causes it. Anything outside a named workflow waits for
-  direction. Starting new work always waits. Once an issue's work has started,
-  the drops of its agreed delivery plan, then its completion gate, PR, merge
-  and close-out, run in sequence without asking between them; the run stops
-  only for a decision that is the architect's, a failure, or a finding. When the
-  architect says he will test the change himself, his test sits between the
-  last drop and the gate: it takes him minutes and the suite half an hour, so
-  the change is handed to him first and the gate runs on the commit he accepted.
-  The gate follows the last drop of a plan the architect agreed; Claude's own sense
-  that the work is done never starts it, and an issue with no agreed plan has
-  one agreed first.
-- **A drop is not a release.** It ends with the developer's own runs on chosen
-  inputs, a commit and a push. No harness sweep, no gate, no consumer check
-  beyond the scenarios that read what the drop changed.
+  part of the step that causes it; anything outside one waits for direction,
+  and starting new work always waits. Once an agreed plan has started, its
+  drops, the architect's own test when he asked for one, then the completion
+  gate, PR, merge and close-out run in sequence; the run stops only for a
+  decision that is his, a failure or a finding (`docs/process/workflow.md` § 2, § 3).
 - **No unsolicited implementation.** No production code, no "here is what it
   would look like", until asked.
 - **Short and plain.** Lead with the outcome. Plain words over internal jargon.
   Bookkeeping gets one line. A reply that is running long stops and asks.
 - **Show the situation before discussing it.** A problem that spans several
-  stores, phases, paths or options is drawn first (swim lane, flow, matrix),
-  and every guideline and decision is then placed on the picture. Shorthand
-  prose is not a substitute, and a fix scoped from one routine is checked
-  against the whole picture before it is proposed.
+  stores, phases, paths or options is drawn first (swim lane, flow, matrix) and
+  every guideline and decision is placed on the picture; a fix scoped from one
+  routine is checked against the whole picture before it is proposed.
 - **The one licensed long message** is the findings report after measured
   work: what was built, correctness proof, measured tables (medians with
-  ranges), attribution of the mechanism, ceiling analysis of alternatives, and
-  only then the disposition question with a recommendation. Never a bare
-  "keep or revert?" on single-run numbers.
-- **A stop signal means ask, then wait.** "Wait", "stop", "we're not done", a
-  terse correction, an interrupted tool call: reply with one line and end the
-  turn. No investigating to guess the intent.
+  ranges), attribution of the mechanism, ceiling analysis of alternatives, then
+  the disposition question with a recommendation; never on single-run numbers.
+- **A stop signal means ask, then wait.** "Wait", "stop", a terse correction,
+  an interrupted tool call: reply with one line and end the turn.
 - **"Interview me" is a dialog.** Open questions, one or a few at a time, each
-  shaped by the last answer. Structured multiple choice only when genuinely
-  blocked among known alternatives.
+  shaped by the last answer; multiple choice only when genuinely blocked.
 - **A reframe is a sweep.** When an issue's framing changes, every artifact
   carrying the old framing is trued up in one action, without asking per item.
 - **A cleared context is the same session.** After `/clear`, a resume or a
-  compaction, earlier work is still this session's responsibility. "I cannot see
-  that in my context; checking" is the only reply to a history the architect
-  asserts, followed by evidence.
+  compaction, earlier work is still this session's responsibility; "I cannot
+  see that in my context; checking" is the only reply to an asserted history.
 
-## Checkpoints
+## At session start, or whenever context begins mid-stream
 
-### At session start, or whenever context begins mid-stream
+- [ ] The session-start sweep is read first; everything in it is potentially
+      this session's. A failed environment check is the first reply's subject,
+      whatever was sent (`docs/development-environment.md` § The environment check).
+- [ ] An issue `in review` whose PR reports MERGED is an unfinished close-out,
+      finished before new work; a branch merged while its issue stays
+      `in progress` is normal (`docs/process/workflow.md` § 1, § 4).
+- [ ] The open release branch is the base, never main; main behind a *tagged*
+      release is the finding, reported and fixed first. A named branch is
+      checked out and synced before any file is read (`workflow.md` § 1).
 
-- [ ] A failed environment check in the session-start context is the first
-      reply's subject, whatever the architect sent: read the troubleshooting
-      entries its pointers name, find the cause on this host, and give the
-      cause and the step that fixes it. It describes the host, never the work
-      in progress: no issue or branch is named in that reply.
-- [ ] Reconstruct outstanding state before anything else: `gh pr list --state open`,
-      `git branch -a --no-merged main`, `./process/issue-status.sh list`, uncommitted
-      or unpushed work in every worktree. Everything found is potentially this
-      session's.
-- [ ] Any issue still labelled `status: in review` whose PR reports `MERGED` is
-      a close-out that did not finish: complete § 4 for it before new work.
-      `git branch --no-merged` answers by commit identity, so cross it against
-      the issue's state rather than reading it as work outstanding.
-- [ ] The converse is normal: a branch merged into the release while its issue
-      stays `in progress` has usually merged its specification before
-      implementation. Read what the merge carried before calling it a finding.
-- [ ] The open release branch is the base: new work, reads and comparisons start
-      from `release/X.Y.Z`, never from main, which trails it until the release
-      merges. Main behind a *tagged* release branch is the finding: report it
-      first, fix it first, never route around it.
-- [ ] A named branch is checked out and synced from origin before any file is
-      read (`docs/process/workflow.md` § 1).
-- [ ] Before the first line of code: branch name is a short description of the issue, status
-      `in progress` (set when planning started, or now), `$version_number` stamped, and a
-      `before` benchmark captured on the base commit if the hot path is in scope.
+## Before sending any reply
 
-### Before sending any reply
-
-- [ ] Scan for identifiers: `#NNN`, `D`/`R`/`F`/`P` plus digits, option letters,
-      stage numbers, scenario and harness names. Each carries its meaning in the
-      same sentence, or is rewritten to name the thing.
 - [ ] First sentence is the verdict and its scope: caused by this work,
       pre-existing, or environmental. Evidence follows.
-- [ ] A decision being asked for is presented, never just requested: the
-      situation in a concise explanation; a diagram or flowchart of the code
-      path or flow concerned, named by its sub, and a table of the options;
-      the architectural constraints and trade-offs; each option precise about
-      what the tool will do, will not do, and the consequence. The sentence
-      stands without its IDs.
-- [ ] Nothing the architect has not read is narrated in order to be argued
-      against. No retracted framings, no self-orienting context.
-- [ ] One question at a time. A clarification gets a short explanation plus a
-      small table, not a discourse.
-- [ ] Only a real choice goes to the architect: two or more viable options, or
-      a tension not already settled by the records. A step with one sensible
-      option is recorded and taken, never put up for sign-off, and a walkthrough
-      does not pause on it.
-- [ ] A decision that needs the architect's lock is asked as a direct question
-      in the same message ("Do you lock D33: <what it means>?"), never written
-      into a record as "awaiting lock" or parked as an open question in a feature doc.
-- [ ] No closing commentary ("worth keeping in mind", "one caveat"). A caveat
-      that matters was raised before the decision.
-- [ ] His setup is not restated to him (gitignore, layout, what is generated).
-- [ ] A request carried out is answered with that it is done, nothing more:
-      no recap of what was written, no file, section or commit it went to,
-      no restatement of steps or content now recorded for a later session.
+- [ ] A decision is presented, never just requested: the situation, a picture of
+      the path, a table of the options with what each will and will not do; a lock
+      is asked as a direct question in the same message ("Do you lock D33:
+      <what it means>?"), never parked as "awaiting lock".
+- [ ] One question at a time; a clarification is a short explanation plus a small
+      table. Only a real choice goes to the architect: two viable options, or a
+      tension the records do not settle; one sensible option is recorded and taken.
+- [ ] Nothing he has not read is narrated to be argued against; his setup is not
+      restated to him; no closing commentary (a caveat that matters was raised
+      before the decision); a request carried out is answered with that it is done.
 - [ ] Claude's vocabulary is not attributed to him; say *format name*, not *slug*.
-- [ ] A waiver question lists every decision that depends on the step being waived.
-- [ ] A claim about tool output was read from the tool's output, not derived
-      from its inputs.
-- [ ] A claim about a structure's size or cost comes from a measurement: the
-      `-mem` high-water marks in the at-scale benchmark records
-      (`tests/baseline/results/*.tsv`) or a run made for it, never from code reading.
+- [ ] A waiver question lists every decision that depends on the step waived.
+- [ ] A claim about tool output was read from the output, not derived from its
+      inputs; a claim about a structure's size or cost comes from a measurement
+      (`tests/baseline/README.md` § Reading memory from a benchmark record).
 
-### Before planning, scoping, or stating a design view
+## Before planning, scoping, or stating a design view
 
-- [ ] Planning an issue is working on it: its status goes to `in progress` (which
-      assigns it) in the step that starts the planning, before any record is read.
-- [ ] Name the surfaces the work touches, the feature docs and research that own
-      them, and the locked decisions that govern them. Read them. Then speak.
-- [ ] The owning records are found by search (`./process/find-records.sh
-      --issues <terms>`; exit 3 means an issue search failed and the list is
-      incomplete), not taken from the issue's links:
-      every option (short and long form), sub and user-visible message the work
-      touches is searched across `features/`, `docs/`, `releases/` and the issue
-      bodies (a surface with no option, such as file arguments, by the subs and
-      messages that implement it), and each
-      record found is read or dismissed in the feature doc with its reason,
-      judged by its subject, never by the lines that matched; an entry of
-      `docs/architecture-patterns.md` the search names is a record of its own.
-- [ ] A decision that adds a surface (a sub, a store, a path run per line or
-      per value) re-runs the search over that surface's nouns before it is locked.
-- [ ] Read every feature file and doc the issue references; investigation
-      findings live there, not in the thread. An audit, an issue body or another
-      record's restatement points at a record; it is never the record.
-- [ ] A divergence is a finding only when it quotes the primary record line that
-      defines the expected behaviour, after a search for a record that makes the
-      behaviour deliberate. Without one it is an observation, raised as a
-      question, never stated as a correction or a defect.
-- [ ] The first message on a new issue states each touched surface's contract,
-      with the record line behind it, for the architect to confirm. Gaps,
-      findings and questions follow his confirmation.
-- [ ] Verify every sub name, path and artifact the issue cites exists; note
-      corrections on the issue. Audit the current code the plan touches.
-- [ ] Lead with the motivating consumer: what this is *for* precedes what it does.
-- [ ] Acceptance criteria are derived from the requirements and agreed in the
-      feature doc before code (`docs/test-driven-development.md`). An "unknown"
-      verification method is prototyping scope, proposed with its cost. A
-      criterion's validation names the scenario that asserts it; those scenarios
-      run when the change is written, never in place of the developer's own runs.
-- [ ] A criterion is only as strong as its validation. One that states an
-      invariant ("the store does not grow", "every output unchanged") is
-      validated on every path that reads or writes what it names, enumerated
-      from the code when the criterion is written and listed beside it; one
-      option never stands for its family. The before/after benchmark adds each
-      benchmark test that reaches the changed code to the standard case.
-- [ ] Hot-path work always gets a before/after benchmark. A prototype
-      (`prototype/README.md`) is for a new or changed data model, a new code
-      path or capability in the hot path, high frequency × cost, or an unknown
-      verification method; not for a small change to an existing path.
-- [ ] A performance fix measures its premise's constants first, mandatory when
-      the code has moved since the issue was written.
-- [ ] Ordering between issues is a native `blocked_by` edge, recorded in the
-      same step; the whole cluster is re-audited after any re-plan.
-- [ ] Walkthroughs are piece by piece: framing first, one line per phase, then
-      one section at a time with confirmation.
+- [ ] The owning records are found by search, never taken from the issue's
+      links: `./process/find-records.sh --issues <terms>`, each record read or
+      dismissed with its reason (`docs/process/investigation.md`).
+- [ ] A divergence is a finding only with the primary record line that defines
+      the expected behaviour quoted; without one it is an observation, raised
+      as a question (`investigation.md` § A divergence is a finding only with its record line).
+- [ ] Planning is work on the issue, status `in progress`; the surfaces, their
+      records and the locked decisions are read before a view is stated; the
+      acceptance criteria are agreed before code (`workflow.md` § 2,
+      `docs/test-driven-development.md`).
 
-### Before running a command
+## Before running a command
 
-- [ ] `ltl` always gets `--disable-progress`.
-- [ ] Will I look at this output more than once? Capture once to the scratchpad,
-      then grep, sed, diff, python3 against the file.
-- [ ] A prototype, reproduction, profiling or benchmark run of `ltl` passes bare
-      `-V` and is captured, so a later question is answered from the file, not a
-      re-run. Harness assertions stay shaped to what they read.
-- [ ] A failing child process is invoked directly on minimal input, not through
-      the parent harness. A harness under iteration runs only the scenarios
-      the change needs, one `--scenario` per name (a scenario reading another's
-      capture is named with it), never the whole harness; names are under
-      `--list`. An unknown name or flag exits non-zero having run nothing, so a
-      run that reports assertions is a run of what was named.
-- [ ] Only the harness under discussion runs while working it, and only its
-      scenarios the change needs. At the end of a stage the few harnesses the
-      issue touches may run whole; at the end of a drop, not. The full suite
-      runs once, as the completion gate, through `tests/run-suite.sh` and
-      nothing else; the Bash guard refuses it outside the gate. Before
-      launching any gate: name the behaviour this change could have altered;
-      if none, there is nothing to prove; confirm no test the architect
-      said he would run is still outstanding; and confirm every acceptance
-      criterion is validated, on every host it names (`docs/process/workflow.md` § 3).
-- [ ] Every `ltl` invocation in a test is shaped to the assertion that reads it:
-      smallest fixture carrying the signal, everything unread switched off via
-      documented options (`-bs 1440 -oe` for detection and selection assertions).
-      See `tests/HARNESS-DESIGN.md` § Invocation coherence.
-- [ ] The `full`, `xl` and `all` benchmark tiers are release instruments, never
-      development tools.
-- [ ] Both sides of a before/after benchmark run from the same kind of checkout:
-      identical code measures 1.9% slower from a worktree under the scratchpad
-      than from the main checkout, so a pair is two worktrees side by side, or
-      the main checkout twice, never one of each.
-- [ ] Benchmark results, analysis reports and comparisons under `tests/` are
-      deliverables: never overwritten for a test or a debug run. Use a separate
-      label or a scratch copy.
-- [ ] Nothing destructive touches `logs/`, its symlink, or any untracked project
-      artifact: no `rm`, `mv`, `git clean`, `git checkout -- .`, truncating
-      redirect. `./tests/cleanup-test-artifacts.sh` is the only cleanup. A corpus
-      that looks missing is a finding to report, never a state to repair.
-      The exception is Claude's own leftovers: output files an `ltl` run made
-      while testing (CSVs, the aggregate export, the run index) are deleted
-      without asking, never offered to the architect as a question.
+- [ ] Capture once, inspect the file: bare `-V` captured; a failing child run
+      directly on minimal input (`investigation.md` § Capture once).
+- [ ] The full suite runs once per issue as the completion gate, before the PR,
+      on this machine (`workflow.md` § 3), and again at the release gate on the
+      release branch, standard and generated read path (§ 5); never while
+      working. Before the completion gate, the behaviour the change could have altered is named.
 - [ ] Subagents and workflow agents run Opus 5 at medium effort, set explicitly
       on every call.
-- [ ] A step that publishes (a tag push, a release, a PR) is its own command,
-      never chained onto a local one: a permission layer judges the whole string
-      and refuses the pair for its second half, so the local part never runs.
 - [ ] A refused command is decomposed and its parts retried before it is called
-      impossible. The refusal names an operation, not a sequence, and an allow
-      rule that covers the operation is already in place more often than not.
-      Declaring a step blocked, or handing it back to the architect, comes after
-      that, and says which single command was refused and on what grounds.
-- [ ] Read `docs/toolchain-guidance.md` before ad-hoc shell one-liners against this repo.
+      blocked (`workflow.md` § 5).
 
-### Before writing a file, an issue body, or a comment
+## Before writing a file, an issue body, a comment, or code
 
-- [ ] Is this an artifact of the software, or of working on it? Problem
-      reports, tool feedback, transcripts and scratch go to the scratchpad or
-      `/tmp`, never into the repository.
-- [ ] This is a public repository. No customer names, case numbers, incident
-      descriptions, hostnames, user names, employee names, or provenance of
-      contributed logs. Sample lines are scrubbed to neutral placeholders.
-- [ ] No change history in code, comments or headers ("renamed from", "used to
-      be"). Comments describe the current state; git holds the history.
-- [ ] No internals in user-facing prose (`--help`, `--explain`, `docs/usage.md`,
-      `docs/explain/`, wiki, error messages): no Perl identifiers, issue numbers,
-      decision labels, or other tools' internals.
-- [ ] Issue body at filing: am I describing HOW? Then it does not belong. No
-      line numbers; code is referenced by function name plus snippet. It does
-      name the log files and the command-line options that produced the behaviour.
-      Full rule: `docs/process/issues.md` § Filing a requirement.
-- [ ] A specification, source code or a comment describes a sample log by its
-      family and characteristics ("a web application access log carrying
-      execution time in the duration field"), never by file name: a named file
-      that later leaves the corpus turns the reference into a failure. Test
-      scripts are exempt: a harness runs against a real file, chosen from
-      `docs/test-logs.md` for what its scenarios need.
-- [ ] A finding, contract, constraint or status change goes into the owning
-      feature doc in the same action; the comment points at it.
-- [ ] A decision made anywhere else is transcribed onto the open issue now.
-- [ ] A deferral pointer names a committed artifact, verified to contain the thing.
-- [ ] A cross-issue note passes the dependency-first test
-      (`docs/process/issues.md` § Blocking relationships).
-- [ ] A release-notes bullet is one line of 25 words at the outside, verb
-      first, naming the change once: an index entry pointing at `docs/usage.md`,
-      never a substitute for it. Only for user-observable change, never
-      pre-existing behaviour, never the cause of a bug.
-- [ ] Committed fixtures are named `.txt` (`*.log` and `*.csv` are gitignored);
-      `git ls-files` confirms tracking before a fixture is planned around.
+- [ ] Which record holds this, and what an issue body may hold: `docs/process/issues.md`
+      § Where things are recorded, § Filing a requirement. Issue bodies and comments
+      go through `gh`, where no path-scoped rule fires.
+- [ ] A change is proven by the developer's own runs before and after, read
+      from captured `-V`; a visual surface by looking at rendered output on
+      real data (`docs/test-driven-development.md` § Testing while developing,
+      § Visual surfaces). Harnesses guard against regressions later.
 
-### Before writing or changing code
+## Before deviating from an instruction, a locked decision, or a written process
 
-- [ ] Grep for the domain nouns first. One resolution surface per vocabulary:
-      parsing, matching, validation and formatting of a value class call the
-      existing sub. Near-duplicates found on the way are converged in the same change.
-- [ ] Consult `docs/architecture-patterns.md` for a pattern that fits before
-      building. A change that adds a consumption site of a pattern, or
-      introduces a new one, records it there in the same commit. An entry is
-      an index entry, at most 60 lines, pointing at the `docs/` file that
-      holds the complete pattern; the pre-commit hook refuses more.
-- [ ] Every accumulator tracks an observation count; derived output is gated on
-      `count > 0`, never on `defined` over a zero-initialised field.
-- [ ] Any ` at <file> line <N>` on `ltl`'s stderr is a bug. Every harness that
-      invokes `ltl` includes the runtime-warning check (`tests/lib/runtime-warnings.sh`).
-- [ ] A new option has a short form, a long form, a `print_help()` row and a
-      `docs/usage.md` row in the same commit. A description never restates the
-      row indicator.
-- [ ] Behavioural notices (auto-disable, fallback, limit hit) always print;
-      `--disable-progress` suppresses progress indicators only.
-- [ ] Any harness change: the file name tracks the `-V` section it validates;
-      every assertion declares `asserts`, `produced_by` (function name, not line)
-      and `contract`; a lookup that matches nothing is a failure, never a pass;
-      and its scenario of `tests/validate-harness-failed-run.sh` passes before
-      the change is committed.
-- [ ] Any `-V` section or key change: read `tests/HARNESS-DESIGN.md` first,
-      update every consumer and the owning feature doc's section contract in the
-      same commit, and run the scenarios that read the changed section or key,
-      each named with `--scenario`, to see them assert. Never a whole harness.
-- [ ] A visual surface is verified by looking at rendered output on real data.
-- [ ] Any script whose output a person reads in a terminal, prototypes and
-      tools included, follows `docs/terminal-output.md`: the UTF-8 code page
-      set on Windows, no `stty` or `tput`, every glyph one cell wide in Windows
-      Terminal, a colour that must hold its value (and anything bold) a
-      256-colour or 24-bit code, never a basic one. Windows output is checked
-      in a new window, not the agent's shell.
-
-### After each change, before committing it
-
-- [ ] Run `ltl` on inputs chosen by critical thinking to exercise the change:
-      the case it fixes, the cases around it, the inputs it could break. Run
-      the code before the change (`git show <base>:ltl`) on the same inputs,
-      capture both with `-V`, and read the difference. Harnesses guard against
-      regressions later; they are not how a change is proven while it is written.
-- [ ] A drop, a fix or a decision's change is committed and pushed on the
-      issue branch as soon as these runs show it behaves as intended. It is
-      never held back for the completion gate, and the gate is never the test.
-
-### Before deviating from an instruction, a locked decision, or a written process
-
-- [ ] Did the architect name the mechanism? Then it is the decision; use it or ask.
-- [ ] Does this conflict with a locked Dxx? Bring the problem and candidate
-      designs; never substitute and proceed.
 - [ ] Am I relying on a line in a plan or doc as permission? `git log -S` who
       wrote it. Claude's own line grants nothing.
 - [ ] Am I citing a finding? Re-read it first, and restate what it measured.
-- [ ] Was this agreed as "one at a time, each measured"? Then one at a time.
-- [ ] Am I broadening a fix past the reported case? Say what each newly
-      excluded class means and ask.
+- [ ] Am I broadening a fix past the reported case? Say what each excluded class means; ask.
 - [ ] Am I about to skip a step marked mandatory? List what depends on it, then ask.
 
-### Before opening a PR
+## Before opening a PR, and at close-out
 
-- [ ] Scope test applied to the diff (`docs/process/workflow.md` § 3): the `after`
-      benchmark, then the full suite, or a recorded skip.
-- [ ] `$version_number` restored to `X.Y.Z` before the gate ran.
-- [ ] The gate ran on the commit being merged; an amend re-runs it.
-- [ ] `--help` and `docs/usage.md` agree (`tests/validate-help-content.sh`).
-- [ ] Commit trailer is model-agnostic: `Co-Authored-By: Claude <noreply@anthropic.com>`.
-
-### At close-out
-
-- [ ] **Issue:** release-notes decision, completion comment (with any recorded
-      skip), close with label stripped, dependents released, merged branch
-      deleted (`docs/process/workflow.md` § 4).
-- [ ] **Parent:** when the closed issue has a parent (`gh api
-      repos/{owner}/{repo}/issues/{n}/parent`) whose sub-issues are now all
-      closed, its close-out is put to the architect in the same action.
-- [ ] **Runs to the end.** Once the issue is finished, every close-out step runs
-      without asking, including deleting the issue's own before/after benchmark
-      TSVs and removing its merged worktree, whose `logs` symlink goes with it
-      (the corpus it points to is untouched). Only another issue's artifacts wait.
-- [ ] **A merged PR is not a closed issue.** After any `gh pr merge`, the issue
-      it belongs to is closed, its `status:` label stripped and its completion
-      comment written, in that same action, before another issue is touched.
-      An issue whose PR reports `MERGED` while it is still open or still
-      labelled `status: in review` is unfinished work, and is found by
-      `gh issue view {number} --json state,labels`.
-- [ ] **One issue closed out at a time.** Close out each merge before the next
-      merge, never a batch of them afterwards: which issue received which step
-      is knowable now and forensic later, and the completion comment's evidence
-      is in hand at the merge.
-- [ ] A branch that reads as unmerged while its issue is closed is checked by
-      content before it is called unfinished or deleted: `git cherry`, and the
-      behaviour in the shipped tool. A PR based on another feature branch
-      reaches the base under different SHAs and leaves its branch looking live
-      (`docs/process/workflow.md` § 4).
-- [ ] **Release:** `gh pr view` reports `MERGED` and `git log main..release/X.Y.Z`
-      is empty. Otherwise the release is not finished.
-- [ ] **Session:** no open PRs, no unpushed branches, no issue moved but not resolved.
+- [ ] No PR before the completion gate passes on the commit being merged, the
+      scope test applied to the diff (`workflow.md` § 3).
+- [ ] A merged PR is not a closed issue: close, strip the label, write the
+      completion comment, delete the branch, in that action, one issue at a
+      time, to the end without asking (`workflow.md` § 4).
+- [ ] A session ends with no open PR, no unpushed branch, no issue moved but
+      not resolved.
 
 ## Where to look
 
@@ -412,167 +169,82 @@ about anything else, these still hold.
 |---|---|
 | Any branch, gate, merge, close or release step | `docs/process/workflow.md` |
 | Filing, status, blocking, where a record lives | `docs/process/issues.md` |
+| Grounding a view in the records; a divergence; capture once | `docs/process/investigation.md` |
 | Creating, renaming or editing any `tests/validate-*.sh`, or any `-V` section or key | `tests/HARNESS-DESIGN.md` (mandatory before acting) |
-| Deriving acceptance criteria | `docs/test-driven-development.md` |
+| Deriving acceptance criteria; testing while developing | `docs/test-driven-development.md` |
 | Deciding whether and how to prototype | `prototype/README.md` |
-| How a surface looks: glyphs, colours, the two coexisting looks and the choice per surface, the category sheet, wording | `docs/design-language.md` |
-| How a surface behaves: components, keys, taking input, countdown, buttons, size, placement, padding, erasing, unattended runs and the test method per surface | `docs/terminal-interaction.md` |
-| Notices and choices: what a notice is, the surfaces, taking input, the data model, the `-V notices` section, the producer's contract | `docs/notice-surfaces.md` |
-| What any output to a terminal does per platform: encoding and code page, escape sequences, glyph width, terminal commands, checking output on Windows | `docs/terminal-output.md` |
-| Setting up a development host, or a failed environment check | `docs/development-environment.md` |
-| Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
-| Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
+| How a surface looks: glyphs, colours, the two looks, wording | `docs/design-language.md` |
+| How a surface behaves: components, keys, input, placement, the test method | `docs/terminal-interaction.md` |
+| Notices and choices: the surfaces, the data model, `-V notices`, the producer's contract | `docs/notice-surfaces.md` |
+| Any output to a terminal, per platform; checking output on Windows | `docs/terminal-output.md` |
+| Setting up or building on a development host; a failed environment check | `docs/development-environment.md` |
+| Shell, grep, perl one-liners; running `ltl` from an agent session | `docs/toolchain-guidance.md` |
+| Choosing a test log | `docs/test-logs.md` |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
-| Creating or changing a documentation screenshot | `docs/process/screenshots.md` (every screenshot is an entry in `process/screenshots.yaml`, generated, never captured or edited by hand) |
-| Building on, or adding to, a recurring mechanism (a registry, a gate, a generated sub, the layout, a notice) | `docs/architecture-patterns.md` |
-| Format detection, extraction, classification | `features/log-format-registry.md` (system of record), `features/453-success-failure-classification-event-ledger.md` |
-| Column rendering | `features/column-layout-refactor.md` |
-| Heatmap and histogram | `features/heatmap.md`, `features/histogram-charts.md`, `docs/explain/` |
-| Bin-counter substrate and precision tiers | `features/189-histogram-bin-counter-primitives.md`, `features/293-precision-lever-unification.md` |
-| Performance work and profiling | `docs/perl-performance-optimization.md`, `features/nytprof-profiling-workflow.md`, `tests/baseline/README.md` |
+| Creating or changing a documentation screenshot | `docs/process/screenshots.md` |
+| The map of the source, and the record owning each area | `docs/architecture.md` |
+| Performance work, profiling, benchmarks | `docs/perl-performance-optimization.md`, `features/nytprof-profiling-workflow.md`, `tests/baseline/README.md` |
 | Regex ordering and patterns | `docs/regex-best-practices.md` |
-| What is enforced automatically, and how | `.claude/rules/`, `process/claude-hooks/` |
-| Tools of the development process (issue status, hooks, record finder, wiki sync, screenshots, root check) | `process/`; `build/` holds only building and packaging the binary |
+| Tools of the development process | `process/`; `build/` holds only building and packaging the binary |
 
 ## Repository hygiene
 
-Public repository. `./process/setup-hooks.sh` activates the tracked pre-commit
-guard at `.githooks/pre-commit`, which blocks staging anything under `.claude/`
-except the two shared, reviewed files named below, plus `.env*`, key and
-credential files, and common token patterns, and refuses an architecture-pattern
-entry that is not an index entry (`process/check-architecture-patterns.sh`);
-`.gitignore` is the primary defense. Overriding needs `--no-verify` and an explanation in the commit message.
-
-Two mechanisms of the Claude Code harness are tracked so that the mechanical
-rules in this file are enforced rather than advised:
-
-- `.claude/rules/*.md`: path-scoped rules loaded when a file matching their
-  `paths` is read or edited (harnesses, `ltl`, user docs, feature docs,
-  prototypes, release notes, benchmark tooling).
-- `.claude/settings.json`: hooks. At session start, resume, clear and compaction
-  `process/claude-hooks/session-start.sh` prints the outstanding-state sweep into
-  context. Before every Bash call `process/claude-hooks/guard-bash.sh` blocks
-  destructive operations against `logs/`, `ltl` without `--disable-progress`,
-  `git merge`, pushes to main, `--delete-branch`, model-versioned commit
-  trailers, and `tests/run-suite.sh` in a checkout not at the completion gate,
-  and asks before release-only benchmark tiers or `--no-verify`.
-  Before every file write `process/claude-hooks/guard-write.sh` blocks writes
-  under `logs/`, to released baseline TSVs, and of problem reports into the repo,
-  and a feature doc write that cites a `features/` or `docs/` record the
-  session's transcript shows no read of; it asks before an edit to `ltl`'s
-  per-line read loop.
-
-A rule that a hook can check belongs in a hook; a rule that needs judgement
-belongs in a checkpoint. `.claude/settings.local.json` stays machine-local and
-is never edited by Claude.
-
-`logs/` and every untracked project artifact are read-only to Claude. The
-corpora are gathered from real systems, gitignored and unrecoverable; anything
-destructive outside `./tests/cleanup-test-artifacts.sh` is proposed to the
-architect and run only on his say-so.
+Public repository: no customer names, case numbers, incident descriptions,
+hostnames, user or employee names, or provenance of contributed logs; sample lines
+are scrubbed to neutral placeholders. `./process/setup-hooks.sh` activates the
+tracked pre-commit guard, `.githooks/pre-commit`. Two Claude Code mechanisms are
+tracked and enforce the mechanical rules: the path-scoped rules in `.claude/rules/`,
+loaded when a matching file is read or edited, and the hooks in
+`process/claude-hooks/`, whose header comments list what each blocks; a rule a hook
+can check belongs in a hook, one that needs judgement is a checkpoint.
+`.claude/settings.local.json` is machine-local, never edited by Claude. `logs/` and
+every untracked project artifact are read-only to Claude: the corpora are
+unrecoverable, `./tests/cleanup-test-artifacts.sh` is the only cleanup, and anything
+destructive beyond it is proposed, never run.
 
 ## Project overview
 
 LogTimeLine (`ltl`) is a single-file Perl command-line tool that finds hotspots
 in large log files: time-bucket bar graphs with colour-coded performance bands,
-percentile latency statistics (P1 to P99.9), heatmaps and histograms, message
-consolidation, success/failure classification.
+percentile latency statistics, heatmaps and histograms, message consolidation,
+success/failure classification. Options: `docs/usage.md`, `--help`. Setting up
+a host and building: `docs/development-environment.md`.
 
 ```bash
-./ltl --disable-progress [options] <logfile(s)>     # always --disable-progress from Claude Code
-```
-
-Key options: `-n N`, `-b N` (bucket minutes), `-o` (CSV), `-ni` (no index),
-`-dmin/-dmax`, `-include/-exclude`, `-ipf/-epf/-hpf` (pattern files under
-`patterns/`: `metrics`, `navigate-app-calls`, `probes`, `thingworx`), `-du`,
-`-hm`, `-hg`, `-ms`, `-st/-et`, `-hses`, `-g N`, `-D` (standard read path), `--help`.
-Hidden: `--disable-progress`, `--terminal-width N`, `--debug-layout`,
-`--validate-layout`, `--detection-window=N`, `--generated-loop-threshold=N`.
-
-### Build
-
-```bash
-./build/macos-setup.sh                      # macOS (needs Homebrew): --dev-deps the profiler, --package PAR::Packer
-./build/macos-setup.sh --validate           # the environment check alone; --repair adds only what it finds missing
-./build/linux-setup.sh                      # Debian/Ubuntu: the distribution's packages; same options as macOS
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1   # Windows dev host, AMD64 or ARM64 (docs/toolchain-guidance.md)
-./build/macos-package.sh arm64|x86_64       # static binaries
-./build/ubuntu-package.sh amd64|arm64       # Docker
-./build/windows-package.sh                  # Docker + Wine
-```
-
-GitHub Actions builds all platforms on `v*` tags (`.github/workflows/release-build.yml`).
-
-### Test and benchmark
-
-```bash
-perl process/check-environment.pl                   # the development Perl, bash 4+ and Python first on PATH, on any host
-perl -c ltl                                         # syntax check; the whole gate for a comment-only diff
-./tests/validate-<name>.sh --list                   # its scenario names
-./tests/validate-<name>.sh --scenario <a> --scenario <b>   # the scenarios the change needs, while iterating
-./tests/baseline/run-benchmark.sh single-day-access-log-standard --label <issue>-before   # and -after, first in the gate
-./tests/baseline/compare-results.sh summary tests/baseline/results/<issue>-before.tsv tests/baseline/results/<issue>-after.tsv
-./tests/run-suite.sh <scratch-dir>                  # the full suite: completion gate only, after the benchmark
-./tests/cleanup-test-artifacts.sh                   # the only sanctioned cleanup
+./ltl --disable-progress [options] <logfile(s)>   # always --disable-progress from Claude Code
+perl -c ltl                                       # syntax check; the whole gate for a comment-only diff
+./tests/validate-<name>.sh --list                 # scenario names; --scenario <a> --scenario <b> while iterating
+./tests/run-suite.sh <scratch-dir>                # the full suite: completion gate only, after the benchmark
+./tests/cleanup-test-artifacts.sh                 # the only sanctioned cleanup
 ```
 
 ## Architecture
 
-`ltl` has three section markers; search for them rather than relying on line
-numbers: `## GLOBALS ##` (`$version_number`, configuration, data structures,
-options), `## SUBS ##`, `## MAIN ##`.
-
-**Processing flow:** `adapt_to_command_line_options()` →
-`read_and_process_logs()` → `calculate_all_statistics()` →
-`normalize_data_for_output()` → `print_bar_graph()` → `print_summary_table()`.
-
-**Format recognition** runs through the format registry (marker
-`## FORMAT REGISTRY`): declarative per-format specs in `format_registry_specs()`
-are built by `build_format_registry()` into a live registry; one generated scan
-sub per most-recently-used order is compiled on demand and cached by order
-signature. Every run self-validates against each entry's sample lines. Detection
-evidence comes from a read-only sample (`sample_file_for_detection()`: front,
-middle and end parts) before a file's first line; variant groups share a line
-shape and are scored by `select_format_variants()`; `-lf` pins a format. Each
-spec declares its success/failure `classification` and `event_ledger` flag,
-compiled into the scan block. Adding or changing a format means editing its
-spec, never hot-loop code. Records: `features/log-format-registry.md`,
-`features/453-success-failure-classification-event-ledger.md`; user surfaces
-`--help formats`, `--explain classification`.
-
-**Read path** (marker `## GENERATED READ LOOP`): a file above 2 MB is read by a
-body generated per run from the per-line loop's own text, its `#@` gate
-markers resolved once and compiled per file; at or below it, and under `-D`,
-by the loop itself, which stays the one source and the reference. A gate added
-to the loop gets its marker. Record: `features/621-generated-read-loop-body.md`;
-user surface `-D`, `-V read-path`.
-
-**Key structures:** `@format_registry` / `@format_scan_order` /
-`$format_scan_sub`; `%log_occurrences` (tallies per bucket); `%log_analysis`
-(bucket statistics); `%log_messages`; `%log_stats`; `%heatmap_data`;
-`@heatmap_boundaries` (N+1 boundaries for N columns).
-
-**Column layout:** `@column_layout` is the single source of truth for widths,
-spacing, visibility and colours; dynamic columns via `add_dynamic_column()`;
-auto-hides at narrow widths. `@column_colors` holds per-column ANSI definitions.
-
-**Platform:** `get_memory_usage()` reads process memory through `ps` on macOS,
-`/proc/self/statm` on Linux and `Win32::API` (`K32GetProcessMemoryInfo`) on
-Windows, branching on `$^O`.
-
-**Heatmap** (`-hm duration|bytes|count`, `-hmw <width>`, `-lbg`): logarithmic
-bucket boundaries, gradients yellow/green/cyan by metric.
+The patterns `ltl` is built from, known before any code is written and built on
+rather than beside, one entry each in `docs/architecture-patterns.md`: declarative
+table with one resolver; quantity units; declarative format registry compiled into
+generated, cached scan subs; generated code compiled from source strings; single
+column-layout source of truth; bin-counter primitives; precision tiers; data-model
+selectors resolved once per surface; demand gates; timestamp precision; timestamp
+acceptance; observation counts and gated means; raw value arrays sorted once at
+their last use; statistics-group consumer registry; run-scoped activation flags;
+`-V` telemetry sections as the test surface; named-structure memory map; one
+resolution surface per vocabulary; precise storage, formatting at the output
+boundary; width-to-format rule; named pipeline stages; staged processing; section
+visibility and boundaries; sort gates at three pipeline points; progress lines;
+notice surfaces; optional-operand options and the filename pushback; hot-loop
+discipline; instruction files. The map of the source (markers, processing flow,
+format recognition, read path, structures, layout, hidden options): `docs/architecture.md`.
 
 ## Keeping this file current
 
-An observation from a session is recorded by editing the checkpoint or
-principle it belongs to, in one or two lines, in the section where the check is
-performed; a rule that can be checked mechanically goes into a hook under
-`process/claude-hooks/` or a path-scoped rule under `.claude/rules/` instead. Incident narratives, dates, issue numbers and severity markers do
-not go here; the commit message that makes the edit carries the incident.
-After each release, the checkpoints are reviewed against what actually went
-wrong, and anything that never fired is removed.
-
-Claude's auto-memory is never written. Development runs on several machines,
-and a rule held in one machine's memory makes Claude behave differently there;
-every rule lives in this file or another tracked file.
+An observation from a session goes into the file that owns the rule: a process doc,
+a path-scoped rule, or a hook when it can be checked mechanically. This file changes
+only when a pointer or its one-line direction moves, or when the check is a
+judgement at a moment with no owning file; then one or two lines, in the section
+where the check is performed. Incident narratives, dates, issue numbers and severity
+markers never come here; the commit message carries the incident. The budget is 250
+lines and 20,000 characters, refused beyond by the write guard and the pre-commit
+(`process/check-claude-md.sh`). After each release the checkpoints are reviewed
+against what went wrong, and a line that never fired is removed. Claude's auto-memory
+is never written: every rule lives in a tracked file, the same on every machine.

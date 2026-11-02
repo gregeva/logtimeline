@@ -278,7 +278,7 @@ assert_command \
     command "s=\$(cell '$A' '^ 2025-05-07 01:00' success_pct) && f=\$(cell '$A' '^ 2025-05-07 01:00' failure_pct) && [[ \$s == *'centred=empty'* && \$f == *'centred=empty'* ]] || { echo \"success: \$s\"; echo \"failure: \$f\"; false; }" \
     asserts "a bucket with no classified line (no %bucket_outcomes entry) renders blank cells, not 0%" \
     produced_by "normalize_data_for_output() leaves the derived value unset for a bucket without outcomes; the render step prints nothing" \
-    contract "features/452-success-failure-percentage-columns.md D11, F9; CLAUDE.md § Before writing or changing code (derived output is gated on an observation count, never on defined-ness)"
+    contract "features/452-success-failure-percentage-columns.md D11, F9; .claude/rules/ltl-source.md (derived output is gated on an observation count, never on defined-ness)"
 
 # ---------------------------------------------------------------------------
 fi

@@ -25,6 +25,12 @@ runs:
   shown what is wrong, the likely scenario and the command to run; the agent
   receives the full report and diagnoses it from the entries below.
 
+In the agent's session a failed check is the first reply's subject, whatever
+the architect sent: the agent reads the troubleshooting entries the report's
+pointers name, finds the cause on this host, and gives the cause and the step
+that fixes it. That reply describes the host, never the work in progress: no
+issue or branch is named in it.
+
 It reports, per condition, `pass`, `FAIL`, `note` (something optional is
 missing) or `n/a` (not applicable on this host), with what it expected and
 what it found, the Perl it ran under and the `PATH` it saw. It exits 0 when
@@ -35,6 +41,17 @@ nothing fails, 1 otherwise.
 | macOS (Homebrew required) | `./build/macos-setup.sh` (`--dev-deps` adds the profiler, `--package` PAR::Packer) | `./build/macos-setup.sh --repair` | `./build/macos-setup.sh --validate` |
 | Windows (from PowerShell) | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1` (`--dev-deps` adds the profiler, `--package` PAR::Packer) | the same, with `--repair` | the same, with `--validate` |
 | Debian/Ubuntu | `./build/linux-setup.sh` (`--dev-deps` adds the profiler, `--package` PAR::Packer) | `./build/linux-setup.sh --repair` (adds nothing: the distribution's tools are on its default `PATH`) | `./build/linux-setup.sh --validate` |
+
+## Building the binaries
+
+```bash
+./build/macos-package.sh arm64|x86_64       # static binaries
+./build/ubuntu-package.sh amd64|arm64       # Docker
+./build/windows-package.sh                  # Docker + Wine
+```
+
+GitHub Actions builds every platform on `v*` tags
+(`.github/workflows/release-build.yml`).
 
 ## Troubleshooting a failed condition
 

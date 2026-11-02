@@ -61,6 +61,19 @@ if grep -qx 'docs/architecture-patterns.md' <<< "$staged_paths"; then
     rm -f "$base_tmp" "$staged_tmp"
 fi
 
+# CLAUDE.md is held to its budget (docs/architecture-patterns.md, Instruction
+# files); the check reads the staged file.
+if grep -qx 'CLAUDE.md' <<< "$staged_paths"; then
+    root=$(git rev-parse --show-toplevel)
+    staged_tmp=$(mktemp)
+    git show :CLAUDE.md > "$staged_tmp"
+    if ! "$root/process/check-claude-md.sh" "$staged_tmp"; then
+        rm -f "$staged_tmp"
+        fail "CLAUDE.md is over its budget (see process/check-claude-md.sh)"
+    fi
+    rm -f "$staged_tmp"
+fi
+
 content_patterns=(
     'AKIA[0-9A-Z]{16}'
     'ghp_[A-Za-z0-9]{30,}'

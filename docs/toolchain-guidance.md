@@ -97,6 +97,8 @@ The underlying design rule still holds and is enforced by the harness contract: 
 
 ## Running `ltl` from an agent session
 
-Always pass `--disable-progress`. Progress output — the read pass's rewritten status line carrying the file and overall percentages, the file counter, line counts and rate, plus the per-phase "Calculating ..." lines — is written for a human watching a terminal; in a captured session it is a large volume of redundant tokens. This is separate from the rule that user-facing *informational* messages must never be gated behind that flag — see `CLAUDE.md` § Before writing or changing code.
+Always pass `--disable-progress`. Progress output — the read pass's rewritten status line carrying the file and overall percentages, the file counter, line counts and rate, plus the per-phase "Calculating ..." lines — is written for a human watching a terminal; in a captured session it is a large volume of redundant tokens. This is separate from the rule that user-facing *informational* messages must never be gated behind that flag — see `.claude/rules/ltl-source.md`.
 
 `--terminal-width N` (hidden option) sets the render width in piped or non-TTY contexts. The `COLUMNS` environment variable does **not** work: `ltl` calls `GetTerminalSize()`, which needs a real TTY. At narrow widths (80–100) omit columns explicitly (`-os -od -ov`) rather than relying on truncation.
+
+The output files a run makes while testing (CSVs, the aggregate export, the run index) are Claude's own leftovers and are deleted without asking, never offered to the architect as a question. Nothing else is touched: `logs/`, its symlink and every untracked project artifact are read-only, `./tests/cleanup-test-artifacts.sh` is the only cleanup, and a corpus that looks missing is a finding to report, never a state to repair.

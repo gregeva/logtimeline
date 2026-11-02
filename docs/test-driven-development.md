@@ -50,6 +50,18 @@ uses the mechanism the timeline's duration and bytes columns use" is checkable:
 the same table, the same loop. A criterion written that way cannot pass against a
 newly invented substitute, which is the failure it exists to prevent.
 
+### A criterion is only as strong as its validation
+
+A criterion that states an invariant ("the store does not grow", "every output
+unchanged") is validated on every path that reads or writes what it names. The
+paths are enumerated from the code when the criterion is written and listed
+beside it; one option never stands for its family. The criterion's validation
+names the scenario that asserts it; those scenarios run when the change is
+written, never in place of the developer's own runs (§ Testing while
+developing). For hot-path work the before/after benchmark adds each benchmark
+test that reaches the changed code to the standard case
+(`docs/process/workflow.md` § 3 (a)).
+
 ## Triage: the three states
 
 Writing a criterion forces the question *how would I observe this?* Each
@@ -91,8 +103,10 @@ never runs.
 While writing a change, the developer tests it the whole way: runs the tool on
 inputs chosen by critical thinking about what the change touches (the case it
 fixes, the cases around it, edge inputs, the inputs it could break), runs the
-code before the change on the same inputs, and reads the difference. A change
-is committed when those runs show it does what was intended, and not before.
+code before the change on the same inputs (`git show <base>:ltl >
+<scratchpad>/ltl-before`), captures both with `-V` to the scratchpad, and
+reads the difference from the captures. A change is committed when those runs
+show it does what was intended, and not before.
 A case found this way that the acceptance criteria should hold becomes a
 scenario; the rest has done its job.
 

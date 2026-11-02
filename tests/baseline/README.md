@@ -57,6 +57,11 @@ Development references are working artifacts of a cycle. They are committed so t
 comparisons are reproducible and auditable, and they are never cited as release
 figures.
 
+**The checkout is part of the host.** Identical code measures 1.9% slower from a
+worktree under the scratchpad than from the main checkout, so both sides of a
+before/after pair run from the same kind of checkout: two worktrees side by side, or
+the main checkout twice, never one of each.
+
 ## A scenario's options are part of its identity — and of the compat map
 
 A row is paired across two TSVs by its test name **and** its options, which the TSV
@@ -136,6 +141,13 @@ that was counted there now has a row of its own.
 Since `$version_number` is stamped at branch creation (`docs/process/workflow.md` § Version stamping),
 a TSV's `version` row identifies the code that produced it, and the filename records the
 host class and the point in the cycle.
+
+## Reading memory from a benchmark record
+
+A claim about a structure's size or cost is a claim about a measurement: the `-mem`
+high-water marks in the at-scale records under `tests/baseline/results/*.tsv` (the
+`MEMORY` and `MEMORY_FINAL` rows, one per store of the memory map), or a run made for
+it with `-mem`. It is never derived from reading the code.
 
 ## Current development references
 

@@ -8,7 +8,7 @@
 #
 # Sibling to validate-help-layout.sh (visual column alignment). This
 # harness covers content correctness, which has a documented history
-# of drift (CLAUDE.md § Before writing or changing code: a new option updates print_help() and docs/usage.md in the same commit).
+# of drift (.claude/rules/ltl-source.md: a new option updates print_help() and docs/usage.md in the same commit).
 #
 # Implements the self-documenting-assertion design from
 # tests/HARNESS-DESIGN.md. Every assertion records:
@@ -411,7 +411,7 @@ scenario_B_usage_contains_all_visible_longs() {
 
     assert_all_present "$VISIBLE_LONGS_FILE" "$USAGE_LONGS_FILE" \
         label       'every non-hidden GetOptions long-form appears in docs/usage.md' \
-        asserts     'docs/usage.md is the canonical wiki source per CLAUDE.md (overwritten on each release); every non-hidden flag must appear there. The -hgb doc bug found during research (declared, in print_help, missing from usage.md) is exactly this class.' \
+        asserts     'docs/usage.md is the canonical wiki source per .claude/rules/user-docs.md (overwritten on each release); every non-hidden flag must appear there. The -hgb doc bug found during research (declared, in print_help, missing from usage.md) is exactly this class.' \
         produced_by 'docs/usage.md option tables - manually maintained, must be updated alongside any non-hidden flag addition' \
         contract    'docs/process/workflow.md section Post-release (wiki sync) + features/232-help-coverage.md section 3 - usage.md is part of the user-facing contract'
 }
@@ -544,7 +544,7 @@ scenario_I_discard_option_rows() {
         pattern     '^\| `-d, --discard <name>` \| Remove a named part of the line' \
         asserts     'docs/usage.md carries the -d, --discard <name> row' \
         produced_by 'docs/usage.md option table - manually maintained alongside print_help()' \
-        contract    'CLAUDE.md section Before writing or changing code (help and usage.md edited together)' \
+        contract    '.claude/rules/ltl-source.md (help and usage.md edited together)' \
         run_free    'docs/usage.md'
     assert_equal "$(grep -c -- '`-d, --discard <name>`' "$USAGE_MD")" "1" \
         label       'exactly one --discard row in docs/usage.md' \
@@ -673,7 +673,7 @@ scenario_H_mask_option_rows() {
         pattern     '^\| `-m, --mask <name>` \| Replace an identifier' \
         asserts     'docs/usage.md carries the -m, --mask <name> row' \
         produced_by 'docs/usage.md option table - manually maintained alongside print_help()' \
-        contract    'CLAUDE.md section Before writing or changing code (help and usage.md edited together)' \
+        contract    '.claude/rules/ltl-source.md (help and usage.md edited together)' \
         run_free    'docs/usage.md'
     assert_equal "$(grep -c -- '`-uuid' "$USAGE_MD")" "0" \
         label       'no -uuid row or advice in docs/usage.md' \
@@ -703,19 +703,19 @@ scenario_G_udm_function_list_parity() {
         pattern     'Counting: count, distinct \(alias dcount, unique\), ratio, rate, drate' \
         asserts     'The --help -udm function line lists the counting aggregation keywords and the distinct aliases' \
         produced_by 'print_help() in ltl (User-Defined Metrics subheading, function row)' \
-        contract    'features/user-defined-metrics.md section Counting Aggregations (Issue #313) - keyword set is locked; CLAUDE.md section Before writing or changing code (help and docs/usage.md edited together)'
+        contract    'features/user-defined-metrics.md section Counting Aggregations (Issue #313) - keyword set is locked; .claude/rules/ltl-source.md (help and docs/usage.md edited together)'
 
     assert_line "$help_out" \
         pattern     'mean \(alias avg\)' \
         asserts     'The --help -udm function line names mean as the canonical aggregation keyword with avg as its alias' \
         produced_by 'print_help() in ltl (User-Defined Metrics subheading, function row)' \
-        contract    'features/user-defined-metrics.md section Counting Aggregations (Issue #313) - canonical mean decision; CLAUDE.md section Before writing or changing code (help and docs/usage.md edited together)'
+        contract    'features/user-defined-metrics.md section Counting Aggregations (Issue #313) - canonical mean decision; .claude/rules/ltl-source.md (help and docs/usage.md edited together)'
 
     assert_line "$USAGE_MD" \
         pattern     'Counting:\*\* `count`, `distinct` \(alias `dcount`, `unique`\), `ratio`, `rate`, `drate`' \
         asserts     'The docs/usage.md UDM function row mirrors the --help counting keyword list (the two surfaces must agree per the documentation-alignment rule)' \
         produced_by 'docs/usage.md UDM spec table - manually maintained alongside print_help()' \
-        contract    'CLAUDE.md section Before writing or changing code (help and usage.md must carry consistent descriptions)' \
+        contract    '.claude/rules/ltl-source.md (help and usage.md must carry consistent descriptions)' \
         run_free    'docs/usage.md'
 
     assert_line "$help_out" \
@@ -1182,7 +1182,7 @@ scenario_L_bound_option_rows() {
             label       "docs/usage.md -$short row matches --help" \
             asserts     'docs/usage.md carries each numeric bound row with the text --help prints' \
             produced_by 'docs/usage.md option table - maintained alongside print_help()' \
-            contract    'features/605-input-units.md section 6 AC4; CLAUDE.md section Before writing or changing code (help and usage.md edited together)' \
+            contract    'features/605-input-units.md section 6 AC4; .claude/rules/ltl-source.md (help and usage.md edited together)' \
             run_free    'docs/usage.md'
     done
 }

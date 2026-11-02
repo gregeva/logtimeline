@@ -14,6 +14,7 @@ lives. `CLAUDE.md` holds the checkpoints; this file holds the conventions.
 | Change history | git: commit messages, PR descriptions, `git blame` | code comments, script headers, doc narratives |
 | Internal mechanism (identifiers, issue numbers, jargon) | source comments, feature docs, issue and PR bodies | `--help`, `--explain`, `docs/usage.md`, `docs/explain/`, error messages, the wiki |
 | Anything about the tooling used to do the work (problem reports, tool feedback, transcripts, scratch) | the session scratchpad or `/tmp` | anywhere in the repository |
+| A working rule for the agent (a check, a procedure, a convention) | the owning process doc under `docs/process/`, a path-scoped rule under `.claude/rules/`, or a hook under `process/claude-hooks/`; `CLAUDE.md` carries the one-line direction and the pointer (`docs/architecture-patterns.md` § Instruction files) | `CLAUDE.md` as the only copy |
 
 Code is referenced by enclosing function name plus a distinctive snippet to grep
 for. Line numbers drift within a day and may appear only as hints.
