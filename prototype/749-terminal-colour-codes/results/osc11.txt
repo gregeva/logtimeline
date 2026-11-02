@@ -1,0 +1,2 @@
+Clear Light: ESC]11;rgb:ffff/ffff/ffff
+Clear Dark: ESC]11;rgb:213d/2743/33e7
