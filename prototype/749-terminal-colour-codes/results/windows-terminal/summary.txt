@@ -1,0 +1,25 @@
+1. Bold (1;code) on the basic codes and the default foreground
+profile         bg       | basic: colour changed  | ink ratio  | default fg plain -> bold (contrast)
+Campbell        #0c0c0c | 30,31,32,33,34,35,36,37 | 1.00-1.02 | #cccccc -> #f2f2f2 (12.18 -> 17.47)
+One-Half-Light  #fafafa | 30,31,32,33,34,35,36,37 | 0.97-1.00 | #383a42 -> #4f525d (10.86 -> 7.46)
+
+2. Palette index 0-15 (38;5;N) against the basic code; index 16 against 30
+Campbell        differ:  0/16  | 38;5;16 #000000 vs 30 #0c0c0c
+One-Half-Light  differ:  0/16  | 38;5;16 #000000 vs 30 #383a42
+
+3. Bold over index 16-255: colour changed?   4. Faint: plain -> faint contrast   5. 24-bit equals 256 of same RGB
+Campbell        none     | 39 12.18->3.41 33 7.47->2.41 i184 12.68->3.47 | yes
+One-Half-Light  none     | 39 10.86->16.13 33 3.09->8.93 i184 1.48->5.4 | yes
+
+6. Contrast with the background of the codes ltl writes (block colour vs background)
+profile         93 duration    32 bytes    36 count     34 blue  35 magenta      31 red     33 WARN    90 rules    37 white
+Campbell              16.91        5.71        6.14        2.38        2.44        3.23        7.47        4.31       12.18
+One-Half-Light         1.66        3.07        3.30        4.00        5.86        3.51        3.09        7.46        1.00
+
+profile          38;5;226  38;5;184   38;5;34  38;5;160  38;5;208  38;5;244  38;5;111   38;5;16   (fixed 256-colour codes, same RGB everywhere)
+Campbell            18.22     12.68      6.64      3.62      8.12      4.95      8.95      1.07
+One-Half-Light       1.03      1.48      2.82      5.17      2.31      3.78      2.09     20.12
+
+7. Text over a fill (contrast of the glyph with the fill): 38;5;0 | 30 | 38;5;16
+Campbell        on 184: 12.68 12.68 13.61 | on 34:  6.64  6.64  7.13 | on 20:  1.85  1.85  1.98
+One-Half-Light  on 184:  7.35  7.35 13.61 | on 34:  3.85  3.85  7.13 | on 20:  1.07  1.07  1.98

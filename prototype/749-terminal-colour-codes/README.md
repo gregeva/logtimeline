@@ -53,13 +53,22 @@ The terminal running it needs Screen Recording permission. Captures stay in
 the work directory and out of the repository (window titles carry the
 user's name).
 
-On Windows (Windows Terminal): `measure.sh` and `open-capture.sh` drive
-Terminal.app and do not apply. `pattern.py`, `ltl-outputs.sh`, `to256.pl`,
-`analyse.py`, `report.py`, `summary.py` and `fixed-contrast.py` run from Git
-Bash as they are: `analyse.py` reads a PNG itself when `sips` is absent. The
-steps, and what the Windows capture must provide, are the handover in
-`features/749-terminal-colour-codes.md` § 6. Its results go to
-`results/windows-terminal/`.
+On Windows (Windows Terminal), from Git Bash:
+
+```bash
+./ltl-outputs.sh <ltl-output-dir>              # as on macOS, with the host's own ltl
+./wt-measure.sh <work-dir>                     # the pattern on Campbell and One Half Light; tables to results/windows-terminal/
+./wt-measure.sh <work-dir> <ltl-output-dir>    # also draws ltl's output on both schemes, for looking at
+```
+
+`wt-measure.sh` is `measure.sh`'s counterpart. `wt-capture.ps1` opens a new
+Windows Terminal window in a given scheme (`wt --colorScheme`, the settings
+file untouched), in which `wt-show.sh` sets the UTF-8 code page and prints
+the file with `cat`; it captures the window from the screen at the display's
+own scale and closes it. The pattern is drawn in a 102 by 34 window; `ltl`'s
+output full screen, which holds its 55 lines where a 58-row window does not
+fit on a 1080-pixel display. The other scripts run as they are: `analyse.py`
+reads a PNG itself when `sips` is absent.
 
 ## Results
 
@@ -67,3 +76,8 @@ steps, and what the Windows capture must provide, are the handover in
 one `profile-*.txt` per profile, from Terminal.app 2.15 on macOS 26.6.2 with
 every profile as shipped. Solid Colors draws each new window on a different
 background, so its readings belong to the run that made them.
+
+`results/windows-terminal/`: `summary.txt`, `fixed-contrast.txt` and one
+`profile-*.txt` per scheme, from Windows Terminal 1.24.12741.0 on Windows 11
+build 26200.9711, Campbell and One Half Light as shipped, the settings file
+setting neither `intenseTextStyle` nor `adjustIndistinguishableColors`.

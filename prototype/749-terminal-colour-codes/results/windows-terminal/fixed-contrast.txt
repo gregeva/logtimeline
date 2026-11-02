@@ -1,0 +1,14 @@
+Contrast of the fixed index (to256.pl mapping) with each profile's background
+profile            93 duration>226        32 bytes>40        36 count>44         34 blue>21     35 magenta>164         31 red>160        33 WARN>184       90 rules>244       37 white>254 38;5;0 fill text>16
+Campbell                     18.22               9.99              10.90               2.28               4.54               3.62              12.68               4.95              15.39               1.07
+One-Half-Light                1.03               1.88               1.72               8.23               4.13               5.17               1.48               3.78               1.22              20.12
+
+Ceiling on both Campbell and One-Half-Light (#0c0c0c, #fafafa): 4.33:1 for any colour
+Best single index per hue on both Campbell and One-Half-Light (min of the two contrasts):
+  yellow   38;5;100 #878700  dark 5.12  light 3.66
+  green    38;5;28  #008700  dark 4.16  light 4.51
+  cyan     38;5;30  #008787  dark 4.49  light 4.18
+  blue     38;5;63  #5f5fff  dark 4.25  light 4.40
+  magenta  38;5;163 #d700af  dark 4.20  light 4.46
+  red      38;5;196 #ff0000  dark 4.89  light 3.83
+  orange   38;5;130 #af5f00  dark 4.15  light 4.51
