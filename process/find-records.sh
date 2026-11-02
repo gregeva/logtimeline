@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Lists every record that mentions the surfaces a piece of work touches, so the
 # owning records are found by search rather than taken from an issue's links
-# (CLAUDE.md, Before planning). Each record listed is read, or dismissed in the
-# feature doc with its reason.
+# (docs/process/investigation.md, Finding the owning records). Each record
+# listed is read, or dismissed in the feature doc with its reason.
 #
 # Usage: find-records.sh [--issues] <term> [<term> ...]
 #   A term starting with '-' is an option and is matched as written inside a

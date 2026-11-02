@@ -350,8 +350,8 @@ reported success:
   A zero assertion count is never a pass; the count is evidence the run did not
   happen.
 
-`CLAUDE.md` § Before running a command directs that a harness under iteration
-uses `--scenario`. That checkpoint depends on this contract holding in every
+`.claude/rules/harnesses.md` and `docs/process/investigation.md` § Capture once
+direct that a harness under iteration uses `--scenario`. That checkpoint depends on this contract holding in every
 harness, not most of them, which is why `tests/validate-scenario-selector.sh`
 asserts both halves: the library's own behaviour, through probe harnesses that
 report which scenarios ran; and a sweep of every `tests/validate-*.sh` for the
@@ -1033,4 +1033,4 @@ The core-mandate rule (above) was added after Issue #619: message consolidation 
 - `ltl --help` — current `-V` surface and known section names
 - `ltl -V list` — runtime-discoverable registry of section names and one-line descriptions
 - Issue #226 — framework that this document is built on
-- CLAUDE.md § Before writing or changing code and § Where to look — the mandatory pointers back to this document
+- `.claude/rules/ltl-source.md`, `.claude/rules/harnesses.md` and CLAUDE.md § Where to look — the mandatory pointers back to this document

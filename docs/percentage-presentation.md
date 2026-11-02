@@ -34,7 +34,7 @@ Each surface's parameters are a row of the budget table `%value_budget` in `ltl`
 
 ## Why one sub
 
-Two percentage renderers had already diverged before this convention existed (the memory rows' `(<1%)` field and #453's three-significant-digit row value), and two more were specified without reference to either. One resolution surface per value class is a standing rule of this repository (CLAUDE.md § Before writing or changing code): the formatter is one named sub, and adding a percentage anywhere means calling it with parameters, never writing a new one.
+Two percentage renderers had already diverged before this convention existed (the memory rows' `(<1%)` field and #453's three-significant-digit row value), and two more were specified without reference to either. One resolution surface per value class is a standing rule of this repository (`.claude/rules/ltl-source.md`; *One resolution surface per vocabulary* in `docs/architecture-patterns.md`): the formatter is one named sub, and adding a percentage anywhere means calling it with parameters, never writing a new one.
 
 ## Migration of the existing sites
 

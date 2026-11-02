@@ -5,6 +5,7 @@
 use strict;
 use warnings;
 use JSON::PP;
+use File::Temp qw(tempfile);
 
 local $/;
 my $in = <STDIN> // '';
@@ -166,6 +167,42 @@ if ( $p =~ m{(?:^|/)ltl$} && -f $p && open my $fh, '<', $p ) {
           . "and a new per-line or per-value cost is prototyped or measured, and recorded in the owning feature doc, before it is decided (prototype/README.md § When a prototype is required). "
           . "Confirm that record exists"
             if $touches;
+    }
+}
+
+# CLAUDE.md is held to its budget (docs/architecture-patterns.md, Instruction
+# files): the content the write would leave is checked by
+# process/check-claude-md.sh of the same checkout before the write is allowed.
+if ( my ($checkout) = $p =~ m{^(.*)/CLAUDE\.md$} ) {
+    my $checker = "$checkout/process/check-claude-md.sh";
+    my $ti      = $call->{tool_input} // {};
+    my $text;
+    if ( -f $checker ) {
+        if ( defined $ti->{content} ) {
+            $text = $ti->{content};
+        } elsif ( -f $p && open my $fh, '<:utf8', $p ) {
+            $text = <$fh>;
+            close $fh;
+            for my $e ( defined $ti->{old_string} ? ($ti) : @{ $ti->{edits} // [] } ) {
+                my ( $old, $new ) = ( $e->{old_string} // '', $e->{new_string} // '' );
+                next if $old eq '';
+                if   ( $e->{replace_all} ) { $text =~ s/\Q$old\E/$new/g }
+                else                       { $text =~ s/\Q$old\E/$new/ }
+            }
+        }
+    }
+    if ( defined $text ) {
+        my ( $fh, $tmp ) = tempfile( 'claude-md-XXXXXX', TMPDIR => 1, SUFFIX => '.md' );
+        binmode $fh, ':utf8';
+        print {$fh} $text;
+        close $fh;
+        my $report = qx{bash "$checker" "$tmp" 2>&1};
+        my $status = $? >> 8;
+        unlink $tmp;
+        $report =~ s/\s+\z//;
+        $report =~ s/\n+/; /g;
+        deny "$report. Move the detail to the file that owns it and leave the pointer (docs/architecture-patterns.md, Instruction files)"
+            if $status != 0;
     }
 }
 

@@ -23,6 +23,24 @@ A dirty tree or a non-fast-forward pull is raised, not improvised around.
 Reasoning from a stale or wrong branch produces confidently false conclusions
 that are invisible until they have propagated through a plan.
 
+### The base branch, and the session-start sweep
+
+The open release branch is the base: new work, reads and comparisons start
+from `release/X.Y.Z`, never from main, which trails it until the release
+merges. Main behind a *tagged* release branch is the finding, reported and
+fixed first (§ 5 step 14), never routed around.
+
+The session-start hook prints the outstanding state (open PRs, unmerged
+branches, issues by status, uncommitted and unpushed work) into the context;
+everything in it is potentially this session's. An issue still `in review`
+whose PR reports `MERGED` is a close-out that stopped at the merge: § 4 is
+finished for it before new work. The converse is normal: a branch merged into
+the release while its issue stays `in progress` has usually merged its
+specification before its implementation, and what the merge carried is read
+before it is called a finding. `git branch --no-merged` answers by commit
+identity, so it is crossed against the issue's state (§ 4, A branch that
+merged through another branch).
+
 ### Branch naming
 
 `{issue-number}-{short-description}`: a few kebab-cased words naming what the
@@ -85,7 +103,12 @@ on the issue.
    first (every phase or drop, one line each), then one section at a time with
    confirmation. Before forming a view: identify the surfaces the work touches,
    the feature docs and research that own them, and the locked decisions that
-   govern them, and read them. Verify every sub name, path and artifact the issue
+   govern them, and read them; the owning records are found by search, never
+   taken from the issue's links (`docs/process/investigation.md` § Finding the
+   owning records). The first message on a new issue states each touched
+   surface's contract, with the record line behind it, for the architect to
+   confirm; gaps, findings and questions follow his confirmation. Verify every
+   sub name, path and artifact the issue
    cites actually exists, and audit the current code the plan touches, because
    issue bodies snapshot the tree at writing time. Lead infrastructure work with
    the consumer it exists for. Record ordering between issues as native
@@ -133,8 +156,18 @@ on the issue.
 5. **Testing.** Sample files per `docs/test-logs.md`. A visual surface is
    verified by looking at the rendered output on real data, never by grepping
    escape sequences.
-6. **Documentation.** `--help` and `docs/usage.md` in the same commit; CLAUDE.md
-   if the architecture map changed.
+6. **Documentation.** `--help` and `docs/usage.md` in the same commit;
+   `docs/architecture.md` if the architecture map changed, and `CLAUDE.md` only
+   if a pointer moved (`docs/architecture-patterns.md` § Instruction files).
+
+### Drops and stages
+
+A drop is one delivery of the agreed plan. It ends with the developer's own
+runs on chosen inputs (step 4), a commit and a push on the issue branch: no
+harness sweep, no gate, no consumer check beyond the scenarios that read what
+the drop changed. A stage is a group of drops; at its end the few harnesses
+the issue's work touches may run whole. Neither is a PR: one PR per issue, at
+the end, after the completion gate (§ 3).
 
 ## 3. Completion gate — before the PR
 
@@ -153,7 +186,9 @@ The gate starts only when the work is ready to merge: every drop delivered,
 and every acceptance criterion in the feature doc validated and recorded, on
 every machine, platform and CI run its validation method names. A criterion
 still to validate anywhere, on another host included, means the work is not
-ready; it is validated first, and the gate waits for it.
+ready; it is validated first, and the gate waits for it. Before the gate is
+launched, the behaviour this change could have altered is named; if there is
+none, there is nothing to prove, and the scope test records the skip.
 
 ### Scope test, applied to the diff
 
@@ -225,7 +260,7 @@ the release gate (§ 5, step 4).
 
 ## 4. Merge and close
 
-Steps 4 to 10 are one action, run per issue, in order, without pausing for
+Steps 4 to 11 are one action, run per issue, in order, without pausing for
 direction between them. A merge is not the end of an issue: an issue whose PR
 reports `MERGED` while it is still open, still labelled `status: in review`,
 or still without its completion comment is unfinished work, and the branch it
@@ -264,7 +299,14 @@ and gone a week later.
 10. **Delete the merged branch**, local and remote, in the same action as the
     close. A branch whose issue is closed and whose content is in the base is
     an artifact, and the longer it survives the more it looks like unfinished
-    work to the next session. Never the release branch.
+    work to the next session. Never the release branch. The issue's worktree
+    goes with it (`git worktree remove`), and with the worktree its `logs`
+    symlink; the corpus it points to is untouched. The issue's before/after
+    benchmark TSVs are deleted (§ 3 (a)). Only another issue's artifacts wait.
+11. **The parent.** When the closed issue has a parent
+    (`gh api repos/{owner}/{repo}/issues/{number}/parent`) whose sub-issues are
+    now all closed, the parent's close-out is put to the architect in the same
+    action.
 
 ### Confirming an issue is closed out
 

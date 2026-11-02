@@ -1,8 +1,9 @@
 # Architecture patterns
 
-The recurring mechanisms `ltl` is built from, one entry each: what the pattern
-is, when a new capability should reach for it, why it has the shape it has, where
-it is used, and which record owns its decisions. It is an index beside the
+The recurring mechanisms `ltl` is built from, and the ones the development
+process is built from, one entry each: what the pattern is, when a new
+capability should reach for it, why it has the shape it has, where it is used,
+and which record owns its decisions. It is an index beside the
 feature docs, not a replacement for them: where an owning record exists the entry
 summarises and points; where none exists (activation flags, the
 one-resolution-surface rule, the operand pushback, the hot-loop discipline)
@@ -166,8 +167,8 @@ startup rather than on line one of a real file (D24).
 - `csv_block_for_file` :: `my @order = $kind eq 'epoch' ? ('csv_epoch') : ('csv', 'csv_ddmm');` (the CSV template instantiated per header shape).
 
 **Owning record.** `features/log-format-registry.md` (system of record; D31,
-D39, D60) and `features/58-format-registry-staged-detection.md`; CLAUDE.md §
-Architecture, *Format recognition*.
+D39, D60) and `features/58-format-registry-staged-detection.md`;
+`docs/architecture.md` § Format recognition.
 
 **Template entries.** An entry whose field positions come from the input
 rather than from its spec is a template: its block is generated per input
@@ -373,7 +374,7 @@ a `defined` test over a zeroed total reads "observed" when nothing was
 line produces it and a surface demands it, at each store);
 `features/517-message-outcomes-demand-gate.md` D1;
 `features/305-shape-moment-extended-percentile-demand.md` § Store-level demand;
-the CLAUDE.md checkpoint on observation counts.
+the observation-count rule in `.claude/rules/ltl-source.md`.
 
 **Status.** Established for the observation-count rule by #616 (counts kept
 beside their totals under the same gate, a total projected only when counted,
@@ -579,7 +580,7 @@ representation retargets one site per quantity.
 - `impact_of` :: `my $mean = mean_of( $entry->{total_duration}, $entry->{duration_count} ) // 0;` (impact from the reported mean)
 
 **Owning record.** `features/616-gated-mean-derivation.md` D1 to D4; the
-CLAUDE.md checkpoint on observation counts. Cross-reference: *Precise storage,
+observation-count rule in `.claude/rules/ltl-source.md`. Cross-reference: *Precise storage,
 formatting at the output boundary*, to which the same issue adds the
 per-message bytes mean and the run index's means as sites.
 
@@ -825,8 +826,8 @@ Specification, S2 to S5, and § Issue #709).
 **Definition.** Parsing, matching, validation and formatting of a value class
 go through one named sub, and every surface that handles the class calls it:
 one parser per vocabulary, one formatter per value class, one guard policy per
-input class. This entry is the definition; the CLAUDE.md checkpoint (*Grep for
-the domain nouns first*) enforces it at the moment of writing code.
+input class. This entry is the definition; the rule in `.claude/rules/ltl-source.md`
+(*Grep for the domain nouns*) enforces it at the moment of writing code.
 
 **Intended uses.** Before writing any parse, compare, format or guard: grep for
 the domain noun; if a sub owns it, call it; if two sites already own it,
@@ -1250,3 +1251,49 @@ settled once per run, and the loop's entries are written through one
 reference each (`features/620-read-loop-run-constant-hoisting.md`). The
 remaining per-line option tests are the off-by-default feature gates; a
 switchable generated loop body that would drop them is #621, not planned.
+
+---
+
+## Instruction files: a pointer in `CLAUDE.md`, the detail in the owning file
+
+**Definition.** `CLAUDE.md` is loaded into every session and read at every
+turn; the process docs (`docs/process/*.md`), the path-scoped rules
+(`.claude/rules/*.md`) and the hooks (`process/claude-hooks/`) are read when
+their moment comes. So `CLAUDE.md` carries only direction, one or two lines
+per rule: the check, the search terms (the command, option or name to grep
+for) and the pointer to the file that holds the detail. The detail lives in
+exactly one owning file, and the agent reads that file when the pointer names
+it, never reconstructing it from memory. A rule a hook can check is a hook; a
+rule one kind of file needs is a path-scoped rule, loaded only when such a
+file is read or edited; a rule that needs judgement at a moment is a
+checkpoint line. The file is held to a budget of 250 lines and 20,000
+characters by the write guard and the pre-commit, through
+`process/check-claude-md.sh`.
+
+**Intended uses.** Every change to a working rule: the owning file changes
+first, and `CLAUDE.md` changes only when the pointer or the one-line direction
+moves. A session observation goes into the owning file, and into `CLAUDE.md`
+only when it is a judgement at a moment with no owning file. After each
+release the checkpoints are reviewed against what went wrong, and a line that
+never fired is removed.
+
+**Reasoning.** An instruction file past about 200 lines reduces adherence
+(Claude Code's own guidance on memory files). A procedure carried beside its
+check is a second copy of the process doc, and copies drift: an inventory of
+what a hook blocks, restated in `CLAUDE.md`, has to be edited with every hook
+change, and a checkpoint that restates a rule file is read even when no such
+file is open. A pointer cannot drift from the file it names, and a file read
+at its moment is read whole, with the context the one-liner left out.
+
+**Consumption sites.**
+- `CLAUDE.md` :: `## Where to look`
+- `CLAUDE.md` :: `## Keeping this file current`
+- `process/check-claude-md.sh` :: `MAX_LINES=250`
+- `process/claude-hooks/guard-write.sh` :: `check-claude-md.sh`
+- `.githooks/pre-commit` :: `check-claude-md.sh`
+
+**Owning record.** This entry is the record; the budget and the mapping of
+each former checkpoint line to its owning file are in
+`features/766-claude-md-pointers.md`.
+
+**Status.** Established.
