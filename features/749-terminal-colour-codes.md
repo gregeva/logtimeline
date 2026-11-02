@@ -2,8 +2,9 @@
 
 ## Status
 
-**In progress: research done, macOS measured, Windows Terminal not yet
-measured.** Contracts in § 2 confirmed by the architect on 2026-11-02. The
+**In progress: research done, macOS measured; Windows Terminal handed over
+to a session on the Windows host (§ 6, assigned by the architect
+2026-11-02).** Contracts in § 2 confirmed by the architect on 2026-11-02. The
 research is `features/749-terminal-colour-codes-research.md`. The macOS
 measurements (§ 5) were made on 2026-11-02 with the instruments in
 `prototype/749-terminal-colour-codes/` on branch `749-terminal-colour-codes`.
@@ -128,7 +129,7 @@ against it by a second pass.
   background beside it. Contrast is the WCAG 2 ratio against that
   background.
 - **Instruments:** `prototype/749-terminal-colour-codes/` (README there). The
-  per-profile tables are in its `results/`.
+  per-profile tables are in its `results/terminal-app/`.
 
 ### 5.2 What Terminal.app does with each kind of code
 
@@ -223,13 +224,17 @@ fill's luminance, as #683 asks, would be white there.
 
 ### 5.6 `ltl`'s own output
 
-Captured in Clear Dark, Clear Light, Man Page and Basic: a timeline of a
-ThingWorx script log carrying duration, bytes and count (columns in `93`,
-`32`, `36`, `34`; WARN, ERROR and INFO in the legend), a timeline of a web
-application access log, `ltl --help` and `ltl --explain
-contribution-highlighting` under `FORCE_COLOR`, each as written today and as
-rewritten to fixed codes by `prototype/749-terminal-colour-codes/to256.pl`.
-What the captures show matches § 5.2 and § 5.3:
+Captured in Clear Dark, Clear Light, Man Page and Basic, from the runs
+`prototype/749-terminal-colour-codes/ltl-outputs.sh` makes on committed
+fixtures so every host draws the same ones: a timeline of a web application
+access log (duration and bytes columns, the HTTP status families in the
+legend, one path highlighted), a timeline of a ThingWorx script log
+(duration, bytes, count and users columns, in `93`, `32`, `36`, `34`; one
+message family highlighted), the top of `ltl --help` and `ltl --explain
+contribution-highlighting` under `FORCE_COLOR`. Each is drawn as written today
+and as rewritten to fixed codes by `to256.pl`. The same views were first
+captured on two corpus logs and read the same way. What the captures show
+matches § 5.2 and § 5.3:
 
 - **Clear Light, today:** the duration values (`93`), the count values
   (`36`), the explain page's message-table titles (bold `36`) and the run
@@ -246,7 +251,8 @@ What the captures show matches § 5.2 and § 5.3:
   and harder to read (2.79 to 2.49:1); the users column's values turn black
   on blue (1.03 to 1.98:1), still unreadable.
 
-The captures stay out of the repository: they show sample-log content.
+The captures stay out of the repository (their window titles carry the
+user's name); `ltl-outputs.sh` and `measure.sh` remake them.
 
 ### 5.7 The issue's open item: non-default schemes on macOS
 
@@ -257,14 +263,86 @@ Terminal.app does not brighten: the scheme's own yellow, cyan and green are
 pale against a light background, and the fixed-code versions of the same
 hues are paler still. Linux terminals were not measured.
 
-## 6. Windows Terminal: not yet measured
+## 6. Windows Terminal: handover to the Windows host
 
-The issue asks for Windows Terminal on a light and a dark scheme. The
-measured One Half Light table in `docs/terminal-output.md` covers bold and
-faint on a few codes, not `ltl`'s output, and not a dark scheme. The same
-pattern and the same `ltl` captures can be shown there (`type` of the `.ans`
-files in a new Windows Terminal window); the reader needs the captures
-brought back to macOS (`sips`).
+The architect assigned this measurement on 2026-11-02 to a Claude session on
+the Windows development host, handed over through the repository. This
+section is that session's brief. The One Half Light table in
+`docs/terminal-output.md` covers bold and faint on a few codes, not `ltl`'s
+output and not a dark scheme.
+
+**Goal.** The measurements of § 5, in Windows Terminal, on its default dark
+scheme (Campbell) and on One Half Light, so the architect decides with both
+platforms measured. The session measures and records; it decides nothing.
+
+**Setup.**
+- The host as `docs/toolchain-guidance.md` § Windows development host sets it
+  up; every command from Git Bash.
+- Branch `749-terminal-colour-codes` (the instruments) checked out and synced
+  as `docs/process/workflow.md` § 1 says; this doc is on `release/0.20.0`.
+- Recorded beside the readings: Windows build; Windows Terminal version
+  (`Get-AppxPackage Microsoft.WindowsTerminal`); the profile used, its font
+  face and size; the display scale; and, for that profile in
+  `settings.json`, `intenseTextStyle` and `adjustIndistinguishableColors` as
+  written, or "absent" when the default applies (research § 3.1 and § 4 give
+  the documented defaults).
+
+**Inputs**, from `prototype/749-terminal-colour-codes/`:
+- `python3 pattern.py`, run in a work directory, writes `pattern.ans` and
+  `pattern.json`.
+- `./ltl-outputs.sh <dir>` writes `ltl`'s output from committed fixtures, as
+  written and rewritten to fixed codes, with the host's own `ltl`: its output
+  is what is measured. Native `ltl` on Windows does not ask the terminal for
+  its background (§ 7), so these runs are drawn for dark on both schemes,
+  which is what a user without `-lbg` sees.
+
+**Drawing and capturing.** `open-capture.sh` drives Terminal.app, so the
+session writes its own capture script beside it (PowerShell or Git Bash),
+committed with the results. For each file and scheme:
+- a new Windows Terminal window, not the agent's shell, set to that scheme
+  for that window (`wt new-tab --colorScheme <name>` where the installed
+  version accepts it, else a profile per scheme), with the UTF-8 code page as
+  `docs/terminal-output.md` requires, showing the file with `cat` and nothing
+  after it;
+- the window sized so nothing scrolls: at least 102 columns by 34 rows for
+  the pattern, 120 by 58 for `ltl`'s output. The reader finds the cell grid
+  from the pattern's first and last rows;
+- the window alone captured as an 8-bit RGB or RGBA PNG (what
+  `System.Drawing`'s `Bitmap.Save` writes), at the display's own scale.
+- Before reading, `analyse.py` prints the grid it found (`cell_w`, `cell_h`):
+  "no marker found", or a cell size that does not match the font, means the
+  window scrolled or the 24-bit markers were not drawn.
+
+**Reading**, in `prototype/749-terminal-colour-codes/`:
+
+```bash
+python3 analyse.py <capture.png> <work>/pattern.json <work>/<scheme>.json
+python3 report.py <work>/<scheme>.json > results/windows-terminal/profile-<scheme>.txt
+python3 summary.py <work>/Campbell.json <work>/One-Half-Light.json > results/windows-terminal/summary.txt
+python3 fixed-contrast.py <work>/Campbell.json <work>/One-Half-Light.json > results/windows-terminal/fixed-contrast.txt   # dark first
+```
+
+**What the readings settle** (research § 7.3, the Windows Terminal points):
+- bold on the basic codes and on the default foreground, on both schemes,
+  against the One Half Light table (bright variant, normal weight); on
+  Campbell it is not yet measured;
+- `38;5;0`-`38;5;15` against the basic codes, and `38;5;0` against
+  `38;5;16`: whether the text over `ltl`'s fills follows the scheme there, as
+  in Terminal.app's Clear profiles;
+- faint on both schemes;
+- `38;5;226` and `38;5;184` on One Half Light against their RGB (255,255,0
+  and 215,215,0): a shifted colour means `adjustIndistinguishableColors`
+  reaches 256-colour codes;
+- the contrast of `ltl`'s colours on both schemes, today and as fixed codes
+  (the tables of § 5.3), and the most one colour reaches on both (§ 5.4);
+- the help headings and the explain page, by eye in the captures.
+
+**Recording.** The findings go into this section in the form of § 5 (setup,
+a table against Terminal.app, the contrast tables), committed directly to
+`release/0.20.0`. The capture script and `results/windows-terminal/` are
+committed to `749-terminal-colour-codes`. Both are pushed, then the
+stage-boundary comment goes on the issue (`docs/process/issues.md` § Issue
+updates). Captures stay out of the repository.
 
 ## 7. Observations from the code reading
 
@@ -309,6 +387,8 @@ called a defect.
 
 - Done: research (§ 4); macOS Terminal.app measured (§ 5), instruments on
   branch `749-terminal-colour-codes`.
-- Open: Windows Terminal, light and dark (§ 6); the architect's decision.
-- State outside the repository: the captures of `ltl`'s output are in the
-  session scratchpad only.
+- Next: Windows Terminal, Campbell and One Half Light, on the Windows
+  development host. Start at § 6, which is the whole brief.
+- Then: the architect's decision, with § 5 and § 6 in front of him.
+- State outside the repository: none needed; the captures are remade by the
+  instruments.
