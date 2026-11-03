@@ -718,6 +718,47 @@ The stages:
 4. The same capture and validation on Windows.
 5. The selection, for the architect.
 
+### 10.1 The macOS candidate, s2-c4
+
+`palettes/s2-c4.tsv` was rendered on the issue branch (4535c4c5). It
+covers all eight runs, the 11 profiles, and the background known (the set)
+and unknown (today's colours). Readings are in
+`results/e-prototype/s2-c4/`. The histogram's and the heatmap's cells are
+left out.
+
+Groups of cells with one code that fall below the floor (4.5:1 for text,
+3:1 for bars and lines), today against s2-c4:
+
+| Profile | Text on the background (70 groups) | Text over a fill (32) | Bars and lines (29) |
+|---|---|---|---|
+| Clear Dark | 24, 1 | 29, 0 | 11, 4 |
+| Basic, Pro, Homebrew | 8, 0 | 19, 0 | 5, 4 |
+| Clear Light | 46, 1 | 29, 0 | 17, 4 |
+| Man Page | 52, 10 (none below 3) | 20, 0 | 24, 4 |
+| Novel | 56, 43 (1 below 3) | 20, 0 | 17, 4 |
+| Silver Aerogel, Grass, Ocean, Red Sands | 56 to 62, 59 or 60 | 19 or 20, 0 | 12 to 24, 16 to 25 |
+
+On the designed backgrounds, two kinds of reading remain, neither a colour
+failure:
+- **The one text reading** on Clear Dark and on Clear Light is the notice
+  panel's thin `——` rule. Its antialiased pixels never reach the full
+  colour; its codes read 7.48:1 (44 on Clear Dark) and 7.24:1 (23 on
+  Clear Light).
+- **The four bar readings** compare a bar's `█` with its own fill behind it.
+  That is how a bar is drawn, not text to read.
+
+Text over a fill now reads at 4.5:1 in every profile.
+
+Open in the candidate, for the architect's eye and Windows' feedback:
+- On light, the yellow fills are olive (58, 100) and light teal's
+  highlighted fill is dark green (22). The light set's yellow text is amber
+  (94).
+- On dark, the purple column and the violet classification state share
+  141.
+- The light set is designed for Clear Light: Man Page and Novel fall short
+  in places.
+- On the mid-tone and coloured backgrounds, no set reaches the floors.
+
 ## Resuming
 
 - Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
@@ -744,20 +785,34 @@ The stages:
 
     The progress lines (`92`) and the pause prompt (`0;44`) cannot come
     from a run here, so they are printed from `ltl`'s own codes for them.
-  - **Designer:** `design.py` on the issue branch now designs every role.
+  - **Designer:** `design.py` on the issue branch designs every role.
     These are text on the background, `ltl`'s fixed text codes, the bar
     fills (plain and highlighted per column colour), the text over each
-    fill, and bold over the default foreground. The first candidate,
-    `palettes/s2-c1.tsv`, has faults to iterate on. The light yellow
-    highlighted fill drifts to olive-green (64), and the light orange one
-    to red (196). On dark, the purple column and the violet classification
-    state share 141.
-  - **Still to build:** `e-palette.py` must remap by these roles. It must
-    leave the histogram block and the heatmap columns untouched; recolour
-    a bar glyph drawn over its fill (`█`, `▀`, `▄`) with the fill; and give
-    text over a fill the `t` colour of that fill. `e-outputs.sh` must cover
-    the seven runs. `e-show.sh` and `read-output.py` must capture and read
-    output of any length, page by page.
+    fill, and bold over the default foreground. A fill takes its hue from
+    the scheme colour of the same name, as the class's default profile
+    draws it, and stays nearer its own column's hue than any other
+    column's. Candidates are `palettes/s2-c1` to `s2-c3`. In s2-c3, light
+    yellow fills are olive (58, 100), light teal's highlighted fill drifts
+    to dark green (22), and light orange's plain fill is tan (137). On
+    white, those hues cannot stay light and still stand out as bars. A
+    design run takes about four minutes.
+  - **Instruments,** all built (issue branch, 08f91b5f). `e-outputs.sh`
+    writes the eight runs: the seven above, plus the progress lines and
+    the pause prompt printed from `ltl`'s own codes. `e-palette.py`
+    remaps by role, cell by cell:
+    - the histogram block and the heatmap's columns are left as `ltl`
+      writes them;
+    - a bar glyph drawn in a fill's colour follows the fill;
+    - text over a fill takes that fill's text colour.
+
+    Each rewrite is checked against `ltl`'s output: every character and
+    attribute kept, the histogram and heatmap cells unchanged.
+    `e-show.sh` prints any length a page at a time and `e-measure.sh`
+    captures every page. `read-output.py` reads the pages with NumPy, and
+    finds each later page's first line from the capture: `ltl` ends with
+    an empty line, and Terminal.app shows the last page one line short.
+  - **The macOS candidate:** s2-c4, rendered and read across every surface
+    (§ 10.1).
 - After macOS: the same capture and validation on Windows, then the
   architect's choice.
 - State outside the repository: none needed; the captures are remade by the
