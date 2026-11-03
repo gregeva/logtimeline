@@ -58,9 +58,11 @@ sub rewrite {
         elsif ($v == 109) { }
         else { push @out, $v }
     }
-    return @out ? join(';', @out) : '0';
+    return join ';', @out;
 }
 while (my $line = <STDIN>) {
-    $line =~ s/\e\[([0-9;]*)m/"\e[" . rewrite($1) . "m"/ge;
+    # a sequence left with nothing (109 alone) is removed: written empty it
+    # would be a reset
+    $line =~ s/\e\[([0-9;]*)m/my $r = rewrite($1); length $r ? "\e[${r}m" : ''/ge;
     print $line;
 }

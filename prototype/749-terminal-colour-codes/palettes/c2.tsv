@@ -1,0 +1,26 @@
+# D1 sets by design.py: hue tolerance 25.0, separation 0.08, soft weight 0.5, weights L 0.5 C 1.0 H 2.0
+# dark: targets from Clear-Dark; floor on Clear-Dark, Basic, Pro, Homebrew; penalty on none
+# light: targets from Clear-Light; floor on Clear-Light; penalty on Man-Page, Novel
+# source	name	use	dark	dark_rgb	dark_min	light	light_rgb	light_min
+s0	black (fill text)	text over a fill	16	#000000	1.00	16	#000000	20.29
+s1	red	5xx, ERROR	174	#d78787	4.93	88	#870000	10.00
+s2	green	bytes, 2xx	71	#5faf5f	4.98	22	#005f00	7.70
+s3	yellow	4xx, WARN	179	#d7af5f	6.51	94	#875f00	5.53
+s4	blue	users column, file index	110	#87afd7	5.85	25	#005faf	6.23
+s5	magenta	3xx	176	#d787d7	5.33	91	#8700af	7.66
+s6	cyan	count column	116	#87d7d7	8.14	23	#005f5f	7.24
+s7	white	file details	254	#e4e4e4	10.56	238	#444444	9.41
+s8	bright black	rules, headings, options line	74	#5fafd7	5.50	24	#005f87	6.79
+s9	bright red	per-minute rates	209	#ff875f	5.68	124	#af0000	7.19
+s10	bright green		71	#5faf5f	4.98	22	#005f00	7.70
+s11	bright yellow	duration values	222	#ffd787	9.80	94	#875f00	5.53
+s12	bright blue		74	#5fafd7	5.50	25	#005faf	6.23
+s13	bright magenta		176	#d787d7	5.33	127	#af00af	5.90
+s14	bright cyan	message-table titles	116	#87d7d7	8.14	23	#005f5f	7.24
+s15	bright white	notice pick	255	#eeeeee	11.57	59	#5f5f5f	6.17
+f34	38;5;34	success %, bytes histogram	-			22	#005f00	7.70
+f46	38;5;46	bytes histogram peak	-			28	#008700	4.54
+f111	38;5;111	users count	-			25	#005faf	6.23
+f160	38;5;160	failure %	203	#ff5f5f	4.51	-		
+f184	38;5;184	percentile lines, duration histogram	-			58	#5f5f00	6.50
+f226	38;5;226	duration histogram peak	-			100	#878700	3.69

@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""Reads a terminal window's captures of ltl output, cell by cell.
+
+  read-output.py <top.png> <bottom.png> <shown.ans> <frame.json> <window-rows> <profile> <condition> <background> <palette> <base.ans>  > read.json
+  read-output.py --table <read.json>
+  read-output.py --summary <read.json>...
+  read-output.py --compare <read.json>...
+
+<top.png> is the window showing the first <window-rows> lines of <shown.ans>
+(the exact file printed), <bottom.png> the same window scrolled to the end.
+The grid comes from the top capture's marker blocks (column pitch) and
+calibration cell (its top and height: a background fills the whole cell),
+and holds for the bottom capture, the same window. Every cell of
+<shown.ans> is parsed for its character and the codes in force (foreground,
+background, bold); a line the top capture shows is read there, the rest in
+the bottom capture. Each cell holding a glyph is read:
+- its background: the window's background (the median of blank cells with no
+  background code) for a cell with none, otherwise the cell's most frequent
+  pixel, which is its fill;
+- its ink: the pixel farthest from that background, the colour the glyph is
+  drawn in, and that pixel's WCAG 2 contrast with the background.
+Cells are grouped by (role, foreground, bold, background, kind): the role is
+the foreground <base.ans> (today's ltl, the same layout) writes in that cell,
+so a surface is followed from today's code to the code a set gives it; kind
+is text, or graphic for box drawing, block and geometric glyphs. A group's
+colour is the ink at the 90th percentile of distance from the background
+across its cells (thin glyphs do not reach the full colour), its contrast
+that colour's, and its low the 10th percentile of the cells' own contrasts.
+"""
+import json, os, re, sys, unicodedata
+from statistics import median
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from analyse import load, dist, contrast, hexc
+
+def parse(text):
+    st = dict(fg="def", bg="def", bold=False, faint=False, ul=False, rev=False)
+    cells = []
+    for row, line in enumerate(text.split("\n")):
+        col, i = 0, 0
+        while i < len(line):
+            if line[i] == "\x1b":
+                m = re.match(r"\x1b\[([0-9;]*)m", line[i:])
+                if m:
+                    apply(st, m.group(1)); i += m.end(); continue
+                raise SystemExit(f"row {row}: an escape other than SGR")
+            ch = line[i]
+            w = 2 if unicodedata.east_asian_width(ch) in "WF" else 1
+            cells.append((row, col, ch, dict(st)))
+            col += w; i += 1
+    return cells
+
+def apply(st, code):
+    p = [int(v) if v else 0 for v in code.split(";")] if code else [0]
+    while p:
+        v = p.pop(0)
+        if v == 0: st.update(fg="def", bg="def", bold=False, faint=False, ul=False, rev=False)
+        elif v == 1: st["bold"] = True
+        elif v == 2: st["faint"] = True
+        elif v == 22: st["bold"] = st["faint"] = False
+        elif v == 4: st["ul"] = True
+        elif v == 24: st["ul"] = False
+        elif v == 7: st["rev"] = True
+        elif v == 27: st["rev"] = False
+        elif 30 <= v <= 37 or 90 <= v <= 97: st["fg"] = str(v)
+        elif v == 39: st["fg"] = "def"
+        elif 40 <= v <= 47 or 100 <= v <= 107: st["bg"] = str(v)
+        elif v == 49: st["bg"] = "def"
+        elif v in (38, 48) and p[:1] == [5]:
+            st["fg" if v == 38 else "bg"] = f"{v};5;{p[1]}"; del p[:2]
+        elif v in (38, 48) and p[:1] == [2]:
+            st["fg" if v == 38 else "bg"] = f"{v};2;" + ";".join(map(str, p[1:4])); del p[:4]
+
+def graphic(ch):
+    o = ord(ch)
+    return 0x2500 <= o <= 0x25FF or 0x2800 <= o <= 0x28FF
+
+def scheme(code):
+    if code == "def": return False
+    p = code.split(";")
+    return len(p) == 1 or (p[1] == "5" and int(p[2]) < 16)
+
+def geometry(w, h, px, man):
+    mark, cal = (254, 0, 129), (129, 0, 254)
+    top = [(x, y) for y in range(min(h, 120)) for x in range(w) if dist(px(x, y), mark) < 40]
+    left = [p for p in top if p[0] < w / 2]
+    right = [p for p in top if p[0] >= w / 2]
+    lx0 = min(x for x, _ in left)
+    cw = (min(x for x, _ in right) - lx0) / (man["cols"] - 1)
+    cpts = [(x, y) for y in range(min(h, 120)) for x in range(w) if dist(px(x, y), cal) < 40]
+    cx0, cy0, cy1 = min(x for x, _ in cpts), min(y for _, y in cpts), max(y for _, y in cpts)
+    col = [s["col"] for s in man["swatches"] if s["id"] == "calib"][0]
+    return cx0 - col * cw, cy0, cw, cy1 - cy0 + 1
+
+def read(top_png, bottom_png, shown, frame, wrows, profile, cond, background, palette, base):
+    man, wrows = json.load(open(frame)), int(wrows)
+    wt, ht, pt = load(top_png)
+    wb, hb, pb = load(bottom_png)
+    x0, y0, cw, ch = geometry(wt, ht, pt, man)
+    offset = man["rows"] - wrows
+    def where(r, c):
+        px, rr = (pt, r) if r < wrows else (pb, r - offset)
+        return px, (int(round(x0 + c * cw)), int(round(y0 + rr * ch)), int(round(x0 + (c + 1) * cw)), int(round(y0 + (rr + 1) * ch)))
+    cells = parse(open(shown, encoding="utf-8").read())
+    role = {(r, c): st["fg"] for r, c, g, st in parse(open(base, encoding="utf-8").read())}
+    samples = []
+    for r, c, g, st in [x for x in cells if x[2] == " " and x[3]["bg"] == "def" and 0 < x[0] < wrows][::7][:400]:
+        px, (xa, ya, xb, yb) = where(r, c)
+        samples.append(px((xa + xb) // 2, (ya + yb) // 2))
+    wbg = tuple(int(median(s[i] for s in samples)) for i in range(3))
+    groups = {}
+    for r, c, g, st in cells:
+        if g == " " or r == 0:
+            continue
+        px, (xa, ya, xb, yb) = where(r, c)
+        pix = [px(x, y) for y in range(ya, yb) for x in range(xa, xb)]
+        if st["bg"] == "def":
+            bg = wbg
+        else:
+            counts = {}
+            for p in pix: counts[p] = counts.get(p, 0) + 1
+            bg = max(counts, key=counts.get)
+        ink = max(pix, key=lambda p: dist(p, bg))
+        k = (role[(r, c)], st["fg"], st["bold"], st["bg"], "graphic" if graphic(g) else "text")
+        e = groups.setdefault(k, dict(cells=[], text=""))
+        e["cells"].append((dist(ink, bg), ink, bg, contrast(ink, bg)))
+        if len(e["text"]) < 28: e["text"] += g
+    out = []
+    for (rl, fg, bold, bgc, kind), e in groups.items():
+        cs = sorted(e["cells"], key=lambda t: t[0])
+        d, ink, bg, _ = cs[int(0.9 * (len(cs) - 1))]
+        lows = sorted(t[3] for t in cs)
+        out.append(dict(role=rl, fg=fg, bold=bold, bg=bgc, kind=kind, n=len(cs), colour=hexc(ink), bg_colour=hexc(bg),
+                        contrast=round(contrast(ink, bg), 2), low=round(lows[int(0.1 * (len(lows) - 1))], 2), sample=e["text"]))
+    return dict(profile=profile, condition=cond, background=background, palette=palette,
+                captures=[os.path.basename(top_png), os.path.basename(bottom_png)], window_bg=hexc(wbg),
+                grid=dict(x0=round(x0, 1), y0=y0, cell_w=round(cw, 3), cell_h=ch, offset=offset), groups=out)
+
+def label(g):
+    return ("1;" if g["bold"] else "") + g["fg"] + ("" if g["bg"] == "def" else " on " + g["bg"])
+
+def table(path):
+    d = json.load(open(path))
+    print(f"== {d['profile']} ({d['background']}), background {d['condition']}: {d['palette']} palette  (window background {d['window_bg']})")
+    print(f"   {'kind':8} {'today':9} {'code':28} {'cells':>5} {'drawn':8} {'on':8} {'contrast':>8} {'low':>6}  sample")
+    for g in sorted(d["groups"], key=lambda g: (g["kind"], g["contrast"])):
+        print(f"   {g['kind']:8} {g['role']:9} {label(g):28} {g['n']:5d} {g['colour']:8} {g['bg_colour']:8} {g['contrast']:8.2f} {g['low']:6.2f}  {g['sample'].strip()[:28]}")
+
+def summary(paths):
+    print("D1 across Terminal.app configurations: each window's weakest text (contrast of the drawn colour with the cell's background)")
+    print(f"{'profile':15} {'bg':5} {'condition':9} {'palette':7} {'window':8} {'text codes':>10} {'<4.5':>4} {'<3':>3}  weakest three text codes")
+    for p in paths:
+        d = json.load(open(p))
+        t = sorted((g for g in d["groups"] if g["kind"] == "text"), key=lambda g: g["contrast"])
+        weak = "; ".join(f"{label(g)} {g['contrast']:.2f} '{g['sample'].strip()[:14]}'" for g in t[:3])
+        print(f"{d['profile']:15} {d['background']:5} {d['condition']:9} {d['palette']:7} {d['window_bg']:8} {len(t):10d} "
+              f"{sum(g['contrast'] < 4.5 for g in t):4d} {sum(g['contrast'] < 3 for g in t):3d}  {weak}")
+
+def compare(paths):
+    """Text by the code today's ltl writes there: its contrast with the
+    background unknown (the fallback, today's colours), then known (the set)."""
+    reads = [json.load(open(p)) for p in paths]
+    profiles = list(dict.fromkeys(d["profile"] for d in reads))
+    bgs = {d["profile"]: d["background"] for d in reads}
+    rows = {}
+    for d in reads:
+        for g in d["groups"]:
+            if g["kind"] != "text": continue
+            # a fill is a 256-colour code, the same in every palette
+            k = (g["bg"] != "def", not scheme(g["role"]), g["role"], g["bold"], g["bg"])
+            e = rows.setdefault(k, dict(sample=g["sample"].strip()[:22], cells={}))
+            c = e["cells"].setdefault(d["profile"], {})
+            c[d["condition"]] = min(c.get(d["condition"], 99), g["contrast"])
+    print("Text by the code today's ltl writes there: contrast with the background unknown (fallback), then known (the set); WCAG 2, 4.5:1 for text")
+    print("background: " + ", ".join(f"{p} {bgs[p]}" for p in profiles))
+    for title, fill, fixed in (("Scheme colours on the window's background (what the sets replace)", False, False),
+                               ("ltl's own 256-colour codes on the window's background (not replaced)", False, True),
+                               ("Text on a fill", True, None)):
+        print(f"\n{title}")
+        print(f"{'today':18} {'sample':22} " + " ".join(f"{p[:11]:>11}" for p in profiles))
+        for k, e in sorted(rows.items(), key=lambda kv: (kv[0][2], kv[0][3], kv[0][4])):
+            if k[0] != fill or (fixed is not None and k[1] != fixed): continue
+            name = ("1;" if k[3] else "") + k[2] + (f" on {k[4]}" if k[4] != "def" else "")
+            def cell(p):
+                c = e["cells"].get(p)
+                if not c: return " " * 11
+                f = lambda v: f"{v:5.2f}" if v is not None else "  -  "
+                return f"{f(c.get('unknown'))}>{f(c.get('known'))}"
+            print(f"{name[:18]:18} {e['sample']:22} " + " ".join(cell(p) for p in profiles))
+
+if __name__ == "__main__":
+    if sys.argv[1] == "--table":
+        table(sys.argv[2])
+    elif sys.argv[1] == "--summary":
+        summary(sys.argv[2:])
+    elif sys.argv[1] == "--compare":
+        compare(sys.argv[2:])
+    else:
+        print(json.dumps(read(*sys.argv[1:11]), indent=1))

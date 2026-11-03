@@ -98,3 +98,41 @@ t=results/terminal-app; w=results/windows-terminal
   "one set for all four=$t/profile-Clear-Dark.txt,$w/profile-Campbell.txt,$t/profile-Clear-Light.txt,$w/profile-One-Half-Light.txt" \
   > results/two-sets.txt
 ```
+
+## The prototype of D1: a dark and a light set (macOS)
+
+D1 (`features/749-terminal-colour-codes.md` § Decisions): when the background
+is known, `ltl` writes its text colours from a dark set or a light set of
+256-colour codes; when it is not, today's basic colours. These scripts design
+the two sets and show them, on a realistic run, in every Terminal.app
+configuration; the findings are in the feature doc § 9.
+
+1. `design.py` designs both sets from the measured backgrounds and colours in
+   `results/terminal-app/` and writes a palette file to `palettes/` (its
+   docstring gives the rule). `palettes/c1.tsv` to `c6.tsv` are the
+   iterations; `c6.tsv` is the selection.
+2. `e-outputs.sh <out> <access-log> <palette.tsv>` runs `ltl` once on the run
+   the architect validated (nine hours of one day of a web application
+   access log holding an outage, 30-minute buckets, failures highlighted,
+   the duration heatmap and both histograms, 190 columns) and writes the
+   three palettes of D1: `basic.ans` (the fallback), `dark.ans`,
+   `light.ans`, each through `e-palette.py`, checked cell by cell against
+   `ltl`'s own output.
+3. `e-measure.sh <work> <out>/<palette>` cycles the configurations: each
+   profile with its background known (the set for that background, light or
+   dark by `ltl`'s own rule from the measured background) and unknown (the
+   fallback). Each window (`e-show.sh`) prints the file as a terminal shows
+   `ltl`'s output, is captured at both ends and closes.
+4. `read-output.py` reads every glyph's drawn colour in the captures and its
+   contrast with the cell's background, grouped by the code today's `ltl`
+   writes there; `--summary` and `--compare` tabulate across windows.
+
+```bash
+./design.py --out palettes/c6.tsv
+./e-outputs.sh <out> <access-log> palettes/c6.tsv
+./e-measure.sh <work> <out>/c6                  # CONDITIONS=known skips the fallback windows
+```
+
+`results/e-prototype/c6/`: one table per window, `summary.txt` and
+`compare.txt`, Terminal.app 2.15 on macOS 26.6.2, the 11 shipped profiles but
+Solid Colors.
