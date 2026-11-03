@@ -3,7 +3,8 @@
 ## Status
 
 **In progress: research done, macOS and Windows Terminal measured and read
-together (§ 8); D1 locked (2026-11-03); a prototype of D1 is next.**
+together (§ 8); D1 locked (2026-11-03); the prototype of D1 on macOS has
+a selection for the architect's review (§ 9).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -275,6 +276,13 @@ matches § 5.2 and § 5.3:
   and harder to read (2.79 to 2.49:1); the users column's values turn black
   on blue (1.03 to 1.98:1), still unreadable.
 
+In the fixed-code views, `to256.pl` drew every `90` and `91` that `ltl`
+follows with its non-standard `109` in the default foreground, not in 244
+and 196. Those are the rules, separators, column headings and options line,
+and the per-minute rates. So what the bullets above say about the rules in
+the fixed-code views comes from the pattern's readings (§ 5.3), not from the
+views. `to256.pl` is corrected on the issue branch.
+
 The captures stay out of the repository (their window titles carry the
 user's name); `ltl-outputs.sh` and `measure.sh` remake them.
 
@@ -421,6 +429,10 @@ runs.
   (244, 4.95:1); the explain titles turn heavier; the users column's values
   stay unreadable (1.98:1).
 
+As in § 5.6, the fixed-code views drew the `90` rules and options line and
+the `91` rates in the default foreground (`to256.pl` reset them after `ltl`'s
+`109`). The 244 reading above is the pattern's (§ 6.3), not the views'.
+
 ## 7. Observations from the code reading
 
 Observations, not findings: each is a difference between the code and a
@@ -537,17 +549,149 @@ Terminal.app, brighter on Campbell, and lighter on One Half Light (10.86 to
 7.46:1), where the headings recede. A fixed code can replace the default
 foreground only once the background is known.
 
+## 9. The prototype of D1 on macOS
+
+### 9.1 What it shows, and how
+
+The architect's direction (2026-11-03): the three palettes of D1, each in
+the terminal conditions it is meant for and the fallback, shown on real
+`ltl` output, cycled through the terminal configurations automatically,
+iterated until the colours hold, and only the selection presented.
+
+- **The run** (validated by the architect in a live window): a whole-day
+  web application access log carrying execution time in microseconds, the
+  day of an outage, `-du us -st 04:00 -et 13:00 -bs 30m -n 4 -hf -hm
+  duration -hg` at 190 columns. Every colour class `ltl` writes is in it:
+  the metric columns, the HTTP families in the legend and the category
+  summary, highlighted fills, the heatmap, both histograms, the rules, the
+  run summary.
+- **The configurations:** each shipped Terminal.app profile but Solid Colors
+  (its background changes with each window), in two conditions:
+  background known, which shows the set for the profile's background (light
+  or dark by `ltl`'s own rule in `detect_terminal`, BT.709 luma above one
+  half, applied to the measured background), and background unknown, which
+  shows the fallback, today's colours. Nothing is detected at run time: the
+  condition is set, so the fallback is exercised too.
+- **The windows:** 190 by 59; the output is printed as a terminal shows
+  `ltl`'s (the top, then the rest, ending scrolled to the bottom), captured
+  at both ends and closed.
+- **The reading:** every glyph's drawn colour is read in the captures and
+  its WCAG 2 contrast taken with the cell's own background (the window's,
+  or the fill behind it), grouped by the code today's `ltl` writes in that
+  cell.
+- **The rewrite** is checked cell by cell against `ltl`'s output: every
+  character and attribute kept, every colour as the palette says.
+- **Instruments:** `design.py`, `e-outputs.sh`, `e-palette.py`,
+  `e-measure.sh`, `e-show.sh`, `read-output.py` in
+  `prototype/749-terminal-colour-codes/` (README there); iterations in its
+  `palettes/`, the selection's readings in `results/e-prototype/c6/`.
+
+### 9.2 How a set is chosen
+
+`design.py`, from the measured backgrounds and colours of § 5:
+
+- **What a set covers:** every colour `ltl` writes as text on the window's
+  background. That is the sixteen scheme colours, and `ltl`'s own fixed
+  256-colour text codes where they fail on that background. A fixed code
+  takes the code of the colour it belongs with: success with green, failure
+  with red, the users count with blue, the percentile lines with the
+  duration yellow. Fills, bars, histograms and the heatmap stay as `ltl`
+  draws them.
+- **Text over a fill** takes black or white, whichever reads on that fill.
+  It does not take the set's colour, which was chosen for the window
+  background.
+- **Target:** what the background's default profile draws for that colour
+  today (Clear Dark; Clear Light).
+- **Floor:** 4.5:1 on every background of the class. Dark is Clear Dark,
+  Basic, Pro and Homebrew. Light is Clear Light; Man Page and Novel count
+  as a penalty below the floor.
+- **Kind:** a colour keeps its hue (OKLCH, within 25 degrees of the
+  target's). Black, white, bright black and bright white stay grey.
+- **Choice:** the 256-colour index of its kind that reaches the floor,
+  nearest the target in OKLCH. Hue is weighted twice chroma and lightness
+  half, because the floor already sets lightness. Being duller than the
+  target costs three times as much as being more vivid.
+- **Distinctness:** colours shown side by side stay apart. These are the
+  legend's categories, the metric columns, and success with failure.
+- **Grey order:** the rules stay visibly lighter or darker than the file
+  details.
+
+### 9.3 The iterations
+
+| Candidate | What its readings or renders showed | What changed next |
+|---|---|---|
+| c1 | Every scheme colour at 4.5:1 on its own backgrounds. Text over fills got worse: the legend's highlighted 5xx count fell to 1.43:1. The histogram bars on light came out half bright yellow, half olive. Light yellow was olive; dark red terracotta, dark yellow khaki | Text over a fill: black or white by the fill. Fixed codes remapped in text only, never in bar glyphs. Hue anchored to the profile's own colour; hue weighted over lightness |
+| c2 | Bright black came out blue on both backgrounds, following Clear Dark's slate tint. Red came out rose, light green near-black | The four greys held grey. Duller than the target costs more than more vivid. Fixed codes take their sibling's code |
+| c3 | The 5xx red and the per-minute failure rate were pushed apart by a constraint with no reason behind it | Constraint removed |
+| c4 | First set to hold on every designed background. Light greys for file details and rules only 0.072 apart in OKLab | Larger grey gap |
+| c5 | Variant with Man Page and Novel as hard constraints: the light set turns olive and near-black green to reach Novel | Not taken; c4's light set kept |
+| c6 | The selection (§ 9.4, § 9.5) | — |
+
+### 9.4 The selection (`palettes/c6.tsv`)
+
+Contrast is the lowest on the class's designed backgrounds.
+
+| Colour, and what `ltl` writes in it | Dark set | Light set |
+|---|---|---|
+| red (`31`, `91`): 5xx, ERROR, per-minute failure rates; and the failure % (`160`) on dark | 203 #ff5f5f, 4.51 | 160 #d70000, 5.22 |
+| green (`32`): bytes, 2xx; and the success % (`34`) on light | 71 #5faf5f, 4.98 | 28 #008700, 4.54 |
+| yellow (`33`): 4xx, WARN | 178 #d7af00, 6.41 | 94 #875f00, 5.53 |
+| bright yellow (`93`): duration values; and the percentile lines (`184`) on light | 221 #ffd75f, 9.68 | 94 #875f00, 5.53 |
+| blue (`34`): users column, file index; and the users count (`111`) on light | 74 #5fafd7, 5.50 | 25 #005faf, 6.23 |
+| magenta (`35`): 3xx | 176 #d787d7, 5.33 | 128 #af00d7, 5.33 |
+| cyan (`36`, `96`): count column, message-table titles | 80 #5fd7d7, 7.79 (`96`: 116 #87d7d7) | 23 #005f5f, 7.24 |
+| white (`37`): run summary's file details | 254 #e4e4e4, 10.56 | 238 #444444, 9.41 |
+| bright black (`90`, index 8): rules, column headings, options line | 247 #9e9e9e, 5.01 | 241 #626262, 5.89 |
+| bright white (`97`) | 231 #ffffff | 242 #6c6c6c |
+| black (index 0) and every scheme colour over a fill | black or white by the fill | the same |
+
+### 9.5 Measured
+
+Text colours reading below 4.5:1 in each window (23 text colours read in
+each), today (background unknown) against the set (background known);
+`results/e-prototype/c6/summary.txt` and `compare.txt`:
+
+| Profile (background) | Today: below 4.5:1, below 3:1 | Set: below 4.5:1, below 3:1 |
+|---|---|---|
+| Clear Dark (dark) | 12, 8 | 0, 0 |
+| Basic, Pro, Homebrew (dark) | 7, 5 | 0, 0 |
+| Clear Light (light) | 17, 12 | 0, 0 |
+| Man Page (light) | 16, 12 | 2, 0 (green 28 at 4.17) |
+| Novel (light) | 17, 12 | 8, 0 (3.37 to 4.37) |
+| Silver Aerogel (light, mid grey) | 17, 14 | 11, 9 |
+| Grass, Ocean, Red Sands (dark, coloured) | 15 or 16, 11 | 10 or 11, 7 |
+
+Text over a fill reads as low as 1.03:1 today (the users count on its blue
+fill, Clear Dark) and 1.20:1 (the legend's highlighted 5xx count, red on its
+red fill); with the sets every text-over-fill pair reads 5.25:1 or more in
+every profile.
+
+### 9.6 What the sets do not reach
+
+- **Mid-tone and coloured backgrounds.** Silver Aerogel (#a8a8a8), Grass,
+  Ocean and Red Sands leave too little room for coloured text: on Grass only
+  near-white text reaches 4.5:1, and `ltl`'s default text reads 3.88:1 on
+  Red Sands. The sets improve every one of them, but no set of colours
+  reaches 4.5:1 there.
+- **Man Page and Novel.** Designing the light set for them as well (c5)
+  turns it olive and near-black green, so it is designed for Clear Light.
+  On Novel, eight colours read 3.37 to 4.37:1, against 1.11 to 3.87 today.
+- **Bars, histograms, fills and the heatmap on light.** They are outside
+  the sets and stay as `ltl` draws them. The duration histogram's bars are
+  `226` yellow on white (1.04:1), and the heatmap's light gradient starts
+  at `230`, near white.
+- **Text over a fill.** Black or white by the fill is #683's ask (a value
+  drawn over a bar keeps a fixed foreground colour, unreadable on dark bars),
+  applied here to every scheme colour over a fill. In the legend, the
+  highlighted counts stop being drawn in their category's colour.
+
 ## Resuming
 
 - Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
   measured on Campbell and One Half Light (§ 6); the two read together
-  (§ 8). Instruments for both on branch `749-terminal-colour-codes`.
-- Decided: D1 (dark or light 256-colour set when the background is known,
-  today's basic colours when not).
-- Next: the prototype of D1 the architect asked for on 2026-11-03: the three
-  palettes and background detection, drawn on a realistic 190-column `ltl`
-  run with heatmap and histogram in the Terminal.app profiles, each window
-  held a few seconds for him to watch before it closes, and read by the
-  automated capture analysis.
+  (§ 8); D1 locked; the prototype of D1 on macOS and its selection (§ 9).
+  Instruments on branch `749-terminal-colour-codes`.
+- Next: the architect's review of the selection (§ 9.4). After it, the same
+  process on Windows, as the architect asked (2026-11-03).
 - State outside the repository: none needed; the captures are remade by the
   instruments.
