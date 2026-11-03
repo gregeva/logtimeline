@@ -182,7 +182,7 @@ def table(path):
         print(f"   {g['kind']:8} {g['role']:9} {label(g):28} {g['n']:5d} {g['colour']:8} {g['bg_colour']:8} {g['contrast']:8.2f} {g['low']:6.2f}  {g['sample'].strip()[:28]}")
 
 def summary(paths):
-    print("D1 across Terminal.app configurations: each window's weakest text (contrast of the drawn colour with the cell's background)")
+    print("D1 across terminal configurations: each window's weakest text (contrast of the drawn colour with the cell's background)")
     print(f"{'run':12} {'profile':15} {'bg':5} {'condition':9} {'palette':7} {'window':8} {'text codes':>10} {'<4.5':>4} {'<3':>3}  weakest three text codes")
     for p in paths:
         d = json.load(open(p))

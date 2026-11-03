@@ -28,6 +28,8 @@
 # character and attribute kept, the histogram and heatmap cells unchanged.
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
+# Python reads and writes UTF-8, as ltl does, also where the locale does not (Windows: cp1252)
+export PYTHONUTF8=1
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 top=$(mkdir -p "$1" && cd "$1" && pwd)

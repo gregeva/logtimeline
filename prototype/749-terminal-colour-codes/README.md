@@ -61,11 +61,13 @@ On Windows (Windows Terminal), from Git Bash:
 
 ```bash
 ./ltl-outputs.sh <ltl-output-dir>              # as on macOS, with the host's own ltl
-./wt-measure.sh <work-dir>                     # the pattern on Campbell and One Half Light; tables to results/windows-terminal/
-./wt-measure.sh <work-dir> <ltl-output-dir>    # also draws ltl's output on both schemes, for looking at
+./wt-measure.sh <work-dir>                     # the pattern in every shipped scheme; tables to results/windows-terminal/
+./wt-measure.sh <work-dir> <ltl-output-dir>    # also draws ltl's output in every scheme, for looking at
 ```
 
-`wt-measure.sh` is `measure.sh`'s counterpart. `wt-capture.ps1` opens a new
+`wt-measure.sh` is `measure.sh`'s counterpart. It takes the shipped schemes
+from the installed Windows Terminal's `defaults.json`, and classes each
+measured background light or dark by `ltl`'s rule in `schemes.txt`. `wt-capture.ps1` opens a new
 Windows Terminal window in a given scheme (`wt --colorScheme`, the settings
 file untouched), in which `wt-show.sh` sets the UTF-8 code page and prints
 the file with `cat`; it captures the window from the screen at the display's
@@ -81,10 +83,12 @@ one `profile-*.txt` per profile, from Terminal.app 2.15 on macOS 26.6.2 with
 every profile as shipped. Solid Colors draws each new window on a different
 background, so its readings belong to the run that made them.
 
-`results/windows-terminal/`: `summary.txt`, `fixed-contrast.txt` and one
-`profile-*.txt` per scheme, from Windows Terminal 1.24.12741.0 on Windows 11
-build 26200.9711, Campbell and One Half Light as shipped, the settings file
-setting neither `intenseTextStyle` nor `adjustIndistinguishableColors`.
+`results/windows-terminal/`: `summary.txt`, `fixed-contrast.txt`,
+`schemes.txt` and one `profile-*.txt` per scheme, from Windows Terminal
+1.24.12741.0 on Windows 11 build 26200.9711, its 14 shipped schemes as
+shipped, the settings file setting neither `intenseTextStyle` nor
+`adjustIndistinguishableColors`. `fixed-contrast.txt`'s best single colour
+is for its first two schemes, Campbell and One Half Light.
 
 `results/two-sets.txt`: `two-sets.py` over both terminals' backgrounds,
 made with:
@@ -136,3 +140,36 @@ configuration; the findings are in the feature doc § 9.
 `results/e-prototype/c6/`: one table per window, `summary.txt` and
 `compare.txt`, Terminal.app 2.15 on macOS 26.6.2, the 11 shipped profiles but
 Solid Colors.
+
+## The sets across every surface on Windows
+
+The fourth stage of the feature doc § 10, briefed in § 11: a candidate's
+eight runs (`e-outputs.sh`, every surface in scope) in every shipped Windows
+Terminal scheme, with the background known and unknown, read as on macOS.
+
+1. `wt-measure.sh` measures every shipped scheme first. Its `schemes.txt`
+   gives each scheme's background and class, which selects the set for the
+   known condition.
+2. `e-outputs.sh <out> <palette.tsv>` writes the eight runs with the host's
+   own `ltl`. On Windows, `ltl` draws its bars and heatmap cells with `■`.
+3. `wt-e-measure.sh <work> <out>/<palette>` cycles every scheme and
+   condition. In each, a 190 by 51 window (`wt-e-capture.ps1`, `wt-e-show.sh`)
+   prints a run a page at a time, is captured after each page and closes.
+   51 rows is the most a 190-column window holds above the taskbar on a
+   1920 by 1080 display at 100%. All windows are captured first, then
+   `read-output.py` reads every page as on macOS.
+4. `tally.py` counts, per scheme, the groups of cells below the floor, today
+   against the set: text on the background and text over a fill against
+   4.5:1, bars and lines against 3:1, leaving out the histogram and the
+   heatmap. It is the count the feature doc § 10.1 reports: made over the
+   committed macOS tables, it gives § 10.1's figures in every profile.
+
+```bash
+./wt-measure.sh <work>
+./e-outputs.sh <out> palettes/s2-c4.tsv
+./wt-e-measure.sh <work> <out>/s2-c4            # RUNS=, CONDITIONS= and scheme names narrow a pass; CAPTURE=no re-reads
+```
+
+`results/windows-terminal/e-prototype/s2-c4/`: one table per window,
+`summary.txt`, `compare.txt` and `tally.txt`, from Windows Terminal
+1.24.12741.0 on Windows 11 build 26200.9711, the 14 shipped schemes.
