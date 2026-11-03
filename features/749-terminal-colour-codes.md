@@ -7,7 +7,8 @@ together (§ 8); D1 locked (2026-11-03); the D1 prototype's first stage
 on macOS (§ 9); a macOS candidate across every surface (§ 10.1), read in
 every shipped Windows Terminal scheme (§ 11); D1 amended: tone governs and
 the sets are 24-bit (§ 12); the tone-led sets accepted by the architect, the
-fill pairs checked on every column (§ 12.4).**
+fill pairs checked on every column (§ 12.4); the heatmap and the
+histogram brought into scope (§ 12.5).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -84,9 +85,12 @@ macOS/Linux terminals with non-default schemes too.
   default Terminal.app profile draws it, moved only slightly in lightness
   where it falls short of 4.5:1 ("the results should be very close, where
   the tweak is slight"). 256-colour codes cannot hold those colours (§ 12.1),
-  so the sets are 24-bit. The architect, shown the tone-led sets with the
-  question of 24-bit codes: "I like them. Much better … Otherwise I accept
-  the rest." What it changes from D1 as first locked:
+  so the sets are 24-bit. The architect, on the tone-led sets drawn (`t2`,
+  the agreed run and the ten-column run of § 12.4): "I like your new
+  proposals for the color. High contrast, stays in the same tones, works
+  both on dark background and light background", and on carrying them to
+  the heatmap: "the work that you did here with the 24-bit color … would go
+  a long way". What it changes from D1 as first locked:
   - The sets no longer reach 4.5:1 in every hue: on light, yellow, cyan and
     green stay short (§ 12.3).
   - On the schemes that darken their own colours for light (One Half Light,
@@ -726,7 +730,8 @@ settled over several stages, with capture and validation on Windows too.
   bars, and the rules and separators.
 - **The histogram and heatmap colours stay as they are,** having been chosen
   already: the histogram's bins and percentile band, and the heatmap's
-  gradients.
+  gradients. Brought into scope by the architect on 2026-11-03 (§ 12.5):
+  they inherit from the column colours, which the sets now change.
 
 The stages:
 1. On macOS, a set of real runs that together show every surface in scope.
@@ -1154,6 +1159,47 @@ code `ltl`'s histogram already highlights blue with (`highlighted_bg_num`):
 With t2, over the access-log and `fills` runs, no text over a fill falls
 below 4.5:1 in either profile (`results/e-prototype/t2/`).
 
+### 12.5 The heatmap and the histogram (the architect's scope, 2026-11-03)
+
+The architect, having seen `t2`: "The methodology that you use here now
+needs to be tested against the histograms and the heat map … as you've
+changed those column colors, you need to adapt the colors for the heat map
+metrics and the histogram metrics, as these are standard gradient color
+palettes which are inherited from the column colors themselves."
+
+Where their colours come from today (`ltl`):
+
+| Surface | Drawn | Colour | Record |
+|---|---|---|---|
+| Heatmap cells | `█` in one of 8 steps by density | the column's `gradient` (dark) or `gradient_light` (light), 256-colour codes | `features/heatmap.md`: "Base color matches metric column color"; § 7, light gradients "fade from light/pale shades to bright saturated colors" |
+| Heatmap highlighted cells | the cell over a background | the column's plain fill (`plain_bg_num`) | `features/heatmap.md` § 4: highlight uses the bar graph's `plain_bg` |
+| Heatmap percentile markers | `\|` | bright black (`90`) | `features/heatmap.md` |
+| Histogram bars | flat (`$histogram_color_gradient_enabled = 0`) | the column's plain fill code as a foreground | `features/histogram-charts.md`: "Base colors match bar graph plain_bg" |
+| Histogram highlighted part | stacked at the bottom | `highlighted_bg_num` (226, 46, 51, 27, 207, …); count's 51 is not the timeline's 36 (#666, open) | `features/histogram-charts.md`: "Highlight colors match bar graph highlight_bg" |
+| Histogram percentile rows | population row; highlighted row | the plain fill as text; black on a band of the highlight | `features/histogram-charts.md` (#653): "a light-background highlight palette is a separate decision … chosen from rendered candidates, after #665" |
+| Notice categories on light | text | the column's `gradient_light` last step | § 2 |
+
+Today's gradients, each step's contrast with Clear Dark (`gradient`) and
+Clear Light (`gradient_light`), lightest-density step first:
+
+| Column | Dark | Light |
+|---|---|---|
+| yellow | 2.00 … 12.50 | 1.01, 1.01, 1.02, 1.03, 1.36, 1.78, 2.33, 2.95 |
+| green | 1.69 … 10.95 | 1.06 … 2.78 |
+| cyan | 1.79 … 11.37, step 6 dimmer than step 5 (7.79 after 10.71) | 1.03 … 4.21 |
+| blue | 1.34, 1.16, 1.04, 1.27, 1.56, 2.61, 3.78, 5.48 | 1.35 … 4.97 |
+| magenta | 1.06 … 5.33 | 1.24 … 5.84 |
+| red | 1.05 … 5.68 | 1.27 … 7.19 |
+| orange | 2.34 … 7.38 | 1.30 … 3.67 |
+| pink | 3.08 … 8.20 | 1.24 … 3.30 |
+| teal | 1.79 … 10.41 | 1.12 … 4.38 |
+| purple | 1.17 … 4.46 | 1.35 … 9.64 |
+
+On light, the low-density steps of six gradients are all but the page's
+own colour; on dark, blue's first five steps and the first step of
+magenta, red and purple barely leave the background. Adjacent steps lie as
+close as 0.005 in OKLCH lightness (orange, both backgrounds).
+
 ## Resuming
 
 - Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
@@ -1220,6 +1266,7 @@ below 4.5:1 in either profile (`results/e-prototype/t2/`).
     colours, 24-bit, moved slightly in lightness only; `palettes/t1.tsv`
     accepted by the architect, `t2.tsv` with blue's highlight separated. The
     ninth run, `fills`, shows every column's plain and highlighted fill.
-- Next: the architect's reading of the fill pairs in `t2` (§ 12.4).
+- Next: the heatmap and the histogram by the same method (§ 12.5): the
+  surfaces' contracts and the method go to the architect first.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
