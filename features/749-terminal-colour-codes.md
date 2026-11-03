@@ -4,7 +4,8 @@
 
 **In progress: research done, macOS and Windows Terminal measured and read
 together (§ 8); D1 locked (2026-11-03); the D1 prototype's first stage
-on macOS (§ 9); the sets across every surface next (§ 10).**
+on macOS (§ 9); a macOS candidate across every surface (§ 10.1); handed
+over to the Windows host (§ 11).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -759,6 +760,94 @@ Open in the candidate, for the architect's eye and Windows' feedback:
   in places.
 - On the mid-tone and coloured backgrounds, no set reaches the floors.
 
+## 11. Windows: handover brief for the every-surface stage
+
+Assigned by the architect (2026-11-03) to a Claude session on the Windows
+development host, through the repository, as in § 6. It is the fourth
+stage of § 10: Windows' inputs and feedback on the macOS candidate. It is
+not a choice: nothing is selected until the architect has both hosts'
+readings. Start from `prototype/749-terminal-colour-codes/` on branch
+`749-terminal-colour-codes` (README there; candidate and instruments as of
+07da2f35).
+
+**Goal.** Measure every shipped Windows Terminal colour scheme as an input,
+then render candidate s2-c4 across every surface in scope in those schemes,
+with the background known and unknown, and read the captures as on macOS
+(§ 10.1).
+
+**Setup to record** (as § 6.1): the Windows build; the Windows Terminal
+version; font face and size; display scale; and `intenseTextStyle` and
+`adjustIndistinguishableColors` as written in the settings, or "absent".
+
+**1. Inputs: every shipped scheme.**
+- Extend `wt-measure.sh` (today Campbell and One Half Light) to every
+  colour scheme the installed Windows Terminal ships. Draw the pattern in
+  each, as § 6 did.
+- Write each scheme's `profile-<scheme>.txt` to `results/windows-terminal/`.
+  These give each scheme's background and the colours it draws for the
+  sixteen.
+- Class each scheme light or dark by `ltl`'s rule in `detect_terminal`:
+  BT.709 luma of the measured background above one half.
+
+**2. The runs.**
+- Run `./e-outputs.sh <out> palettes/s2-c4.tsv` from Git Bash, with the
+  host's own `ltl`. It writes the eight runs of § 10 in the three palettes
+  of D1.
+- The log-reading runs need the corpus files `e-outputs.sh` names under
+  `logs/`: one node's web access log and method server logs from the outage
+  day, and the custom-metrics CSV. If any is missing on the host, stop and
+  say which; do not substitute another log.
+- On Windows, `ltl` draws its bars and heatmap cells with `■`, not `█`
+  (`$default_chart_block`). That is the Windows rendering under test, so
+  keep it.
+
+**3. Capture.**
+- Write the Windows counterpart of `e-measure.sh` and `e-show.sh`, using
+  `wt-capture.ps1`'s way of opening a window in a given scheme and capturing
+  it. The page protocol stays the same: the window prints its file a page
+  at a time; after each page it signals and is captured, and it closes
+  after the last.
+- Use a window of 190 columns and as many rows as the display holds, the
+  same for every scheme. A run longer than the window is captured page by
+  page.
+- Windows close as soon as they are captured; nothing waits for a key.
+- Each scheme gets two conditions: background known (the set for its
+  class) and unknown (`basic.ans`, the fallback).
+
+**4. Reading.**
+- Read every window with `read-output.py`. Without `sips`, it decodes the
+  PNG itself and reads the screen's pixels as captured.
+- Write the per-window tables and `summary.txt` and `compare.txt` to
+  `results/windows-terminal/e-prototype/s2-c4/`.
+- Tally them as § 10.1 does: text on the background, text over a fill,
+  and bars and lines, today against s2-c4. Leave out the histogram and the
+  heatmap.
+
+**5. What to report** (§ 11's findings, in the form of § 10.1):
+- **Each scheme's background and class.**
+- **The tallies per scheme.**
+- **Where the candidate falls short on Windows that it does not on
+  macOS:** on One Half Light especially, which § 6 measured as repainting
+  the sixteen, and in any scheme whose background `ltl`'s rule classes
+  against intuition.
+- **What Windows draws differently:**
+  - bold over the set's 256-colour codes, against bold over basic codes
+    (§ 6.2);
+  - the `■` bars against their fills;
+  - the notice panel.
+- **The open points of § 10.1, read on Windows:** the light set's olive
+  yellow fills and dark green teal highlight; Man Page and Novel's
+  shortfalls, if any Windows scheme sits near them.
+
+**Recording.**
+- **Findings:** into this section on `release/0.20.0`, replacing this brief
+  (the brief stays in git history).
+- **Scripts and results:** on branch `749-terminal-colour-codes`.
+- **Captures:** stay out of the repository, since window titles can carry
+  the user's name.
+- **Publishing:** push both branches, each push its own command, then
+  comment on the issue pointing here.
+
 ## Resuming
 
 - Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
@@ -813,7 +902,7 @@ Open in the candidate, for the architect's eye and Windows' feedback:
     an empty line, and Terminal.app shows the last page one line short.
   - **The macOS candidate:** s2-c4, rendered and read across every surface
     (§ 10.1).
-- After macOS: the same capture and validation on Windows, then the
-  architect's choice.
+- Next: the Windows host, starting at § 11 (handed over by the architect,
+  2026-11-03). Then the architect's choice, with both hosts' readings.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
