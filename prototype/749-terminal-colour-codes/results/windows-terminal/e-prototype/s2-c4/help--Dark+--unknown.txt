@@ -1,0 +1,6 @@
+== help: Dark+ (dark), background unknown: basic palette  (window background #1e1e1e)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #666666  #1e1e1e      2.90   2.90  ────────────────────────────
+   text     90        90                              76 #666666  #1e1e1e      2.90   2.90  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #cccccc  #1e1e1e     10.38  10.38  LogTimeLine--acommand-linelo
+   text     def       1;def                           35 #cccccc  #1e1e1e     10.38  10.38  USAGEOPTIONSENVIRONMENTINFOE

@@ -1,0 +1,6 @@
+== error: Campbell (dark), background known: dark palette  (window background #0c0c0c)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #9e9e9e  #0c0c0c      7.30   7.30  ────────────────────────────
+   text     90        38;5;247                        76 #9e9e9e  #0c0c0c      7.30   7.30  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #cccccc  #0c0c0c     12.18  12.18  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;231                      35 #ffffff  #0c0c0c     19.56  19.56  Error:unknownoption'--bogus-

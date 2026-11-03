@@ -1,0 +1,6 @@
+== error: Tango Dark (dark), background known: dark palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #9e9e9e  #000000      7.84   7.84  ────────────────────────────
+   text     90        38;5;247                        76 #9e9e9e  #000000      7.84   7.84  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #d3d7cf  #000000     14.39  14.39  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;231                      35 #ffffff  #000000     21.00  21.00  Error:unknownoption'--bogus-

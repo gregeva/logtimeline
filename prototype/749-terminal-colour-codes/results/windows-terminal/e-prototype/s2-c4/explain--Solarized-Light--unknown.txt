@@ -1,0 +1,15 @@
+== explain: Solarized Light (light), background unknown: basic palette  (window background #fdf6e3)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        32 on 48;5;46                    9 #859900  #859900      1.00   1.00  █████████
+   graphic  36        36                             156 #2aa198  #fdf6e3      2.93   2.93  ────────────────────────────
+   graphic  32        32                              40 #859900  #fdf6e3      2.97   2.97  ████████████████████████████
+   graphic  90        90                             191 #073642  #fdf6e3     12.05  12.05  ────────────────────────────
+   text     32        32 on 48;5;46                   10 #859900  #00ff00      2.34   2.34  7811.9k622
+   text     36        1;36                            75 #93a1a1  #fdf6e3      2.48   2.48  TOPHIGHLIGHTEDMESSAGES(lines
+   text     38;5;34   38;5;34                          5 #00af00  #fdf6e3      2.73   2.73  •••••
+   text     32        32                              24 #859900  #fdf6e3      2.97   2.97  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     33        33                              18 #b58900  #fdf6e3      2.98   2.98  4xx:144xx:414xx:12
+   text     def       def                           1892 #657b83  #fdf6e3      4.13   4.13  Ananalysistechnique:aninvest
+   text     def       1;def                           24 #657b83  #fdf6e3      4.13   4.13  CONTRIBUTIONHIGHLIGHTING
+   text     91        91                               9 #cb4b16  #fdf6e3      4.27   4.27  0.20.70.2
+   text     90        90                              82 #073642  #fdf6e3     12.05  12.05  ,::ltl::'logtimeline[0.20.0-

@@ -1,0 +1,29 @@
+== access-latency: Tango Light (light), background unknown: basic palette  (window background #ffffff)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  93        93                             188 #fce94f  #ffffff      1.24   1.24  ────────────────────────────
+   graphic  31        31 on 48;5;196                  21 #cc0000  #ff0000      1.47   1.47  ■■■■■■■■■■■■■■■■■■■■■
+   graphic  96        96                             188 #34e2e2  #ffffff      1.60   1.60  ────────────────────────────
+   graphic  32        32                              10 #4e9a06  #ffffff      3.53   3.53  ■■■■■■■■■■
+   graphic  90        90                             794 #555753  #ffffff      7.31   7.31  ────────────────────────────
+   graphic  def       def                            164 #555753  #ffffff      7.31   7.31  ────────────────────────────
+   text     93        93                             312 #fce94f  #ffffff      1.24   1.24  2.3sP99:275ms1.9sP99:283ms1.
+   text     37        37                             344 #d3d7cf  #ffffff      1.46   1.46  CV:5.05CV:5.20CV:8.13CV:9.34
+   text     31        31 on 48;5;196                   5 #cc0000  #ff0000      1.47   1.47  23589
+   text     96        96                             114 #34e2e2  #ffffff      1.60   1.60  TOPOVERALLMESSAGES(retainedf
+   text     38;5;0    38;5;0 on 48;5;20               15 #000000  #0000d7      1.98   1.98  556786433223444
+   text     38;5;111  38;5;111                         2 #87afff  #ffffff      2.19   2.19  11
+   text     33        33 on 48;5;226                  14 #c4a000  #ffff00      2.33   2.33  36131311333331
+   text     38;5;0    38;5;0 on 48;5;21                1 #000000  #0000ff      2.44   2.44  6
+   text     33        33                             165 #c4a000  #ffffff      2.51   2.51  P95:2.6msP95:2.3msP95:200msP
+   text     32        32 on 48;5;46                    1 #4e9a06  #00ff00      2.57   2.57  √
+   text     38;5;34   38;5;34                         81 #00af00  #ffffff      2.94   2.94  98.6%100%99.3%99.9%99%99.8%9
+   text     36        36                             160 #06989a  #ffffff      3.52   3.52  P50:1.3msP50:1.3msP50:2.3msP
+   text     32        32                             223 #4e9a06  #ffffff      3.53   3.53  2xx:21170.4kB2xx:21265.5kB2x
+   text     91        91                              40 #ef2929  #ffffff      4.18   4.18  0.100.200.100.100.400.100.10
+   text     38;5;160  38;5;160                        83 #d70000  #ffffff      5.40   5.40  1.4%0%0.703%0.122%1.04%0.162
+   text     31        31                             170 #cc0000  #ffffff      5.89   5.89  P999:534msP999:380msP999:23.
+   text     35        35                              70 #75507b  #ffffff      6.58   6.58  3xx:223xx:93xx:13xx:103xx:13
+   text     38;5;0    38;5;0 on 48;5;34                3 #000000  #00af00      7.13   7.13  7GB
+   text     90        90                             261 #555753  #ffffff      7.31   7.31  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                           1137 #555753  #ffffff      7.31   7.31  2026-08-2104:007.12026-08-21
+   text     38;5;0    38;5;0 on 48;5;184               5 #000000  #d7d700     13.61  13.61  36.7m

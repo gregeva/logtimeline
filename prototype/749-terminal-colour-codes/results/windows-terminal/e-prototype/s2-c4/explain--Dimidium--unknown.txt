@@ -1,0 +1,15 @@
+== explain: Dimidium (dark), background unknown: basic palette  (window background #141414)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        32 on 48;5;46                    9 #60b442  #60b442      1.00   1.00  █████████
+   graphic  90        90                             191 #817e7e  #141414      4.58   4.58  ────────────────────────────
+   graphic  32        32                              40 #60b442  #141414      7.11   7.11  ████████████████████████████
+   graphic  36        36                             156 #1db6bb  #141414      7.42   7.42  ────────────────────────────
+   text     32        32 on 48;5;46                   10 #60b442  #00ff00      1.89   1.89  7811.9k622
+   text     90        90                              82 #817e7e  #141414      4.58   4.58  ,::ltl::'logtimeline[0.20.0-
+   text     91        91                               9 #ff643b  #141414      6.26   6.26  0.20.70.2
+   text     38;5;34   38;5;34                          5 #00af00  #141414      6.26   6.26  •••••
+   text     32        32                              24 #60b442  #141414      7.11   7.11  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     33        33                              18 #db9c11  #141414      7.70   7.70  4xx:144xx:414xx:12
+   text     def       def                           1892 #bab7b6  #141414      9.24   9.24  Ananalysistechnique:aninvest
+   text     36        1;36                            75 #32e0fb  #141414     11.57  11.57  TOPHIGHLIGHTEDMESSAGES(lines
+   text     def       1;def                           24 #dee3e4  #141414     14.22  14.22  CONTRIBUTIONHIGHLIGHTING

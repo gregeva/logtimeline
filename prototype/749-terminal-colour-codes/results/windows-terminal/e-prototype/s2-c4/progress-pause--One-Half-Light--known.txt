@@ -1,0 +1,4 @@
+== progress-pause: One Half Light (light), background known: light palette  (window background #fafafa)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     92        38;5;28                         93 #008700  #fafafa      4.51   4.51  Processingcompleted.Calculat
+   text     def       38;5;231 on 48;5;25             35 #ffffff  #005faf      6.45   6.45  Pressanykeytocontinue(orQtoq

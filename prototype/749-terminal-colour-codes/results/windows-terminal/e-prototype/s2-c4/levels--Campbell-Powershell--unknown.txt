@@ -1,0 +1,29 @@
+== levels: Campbell Powershell (dark), background unknown: basic palette  (window background #012456)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  31        31 on 48;5;196                  72 #c50f1f  #ff0000      1.52   1.52  ■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+   graphic  90        90                             774 #767676  #012456      3.33   3.33  ────────────────────────────
+   graphic  32        32                               8 #13a10e  #012456      4.42   4.42  ■■■■■■■■
+   graphic  96        96                             188 #61d6d6  #012456      8.72   8.72  ────────────────────────────
+   graphic  def       def                            164 #cccccc  #012456      9.42   9.42  ────────────────────────────
+   graphic  93        93                             188 #f9f1a5  #012456     13.08  13.08  ────────────────────────────
+   text     31        31 on 48;5;196                  28 #c50f1f  #ff0000      1.52   1.52  5341069107114647219889305645
+   text     38;5;0    38;5;0 on 48;5;20               14 #0c0c0c  #0000d7      1.85   1.85  22432422232222
+   text     38;5;0    38;5;0 on 48;5;21                2 #0c0c0c  #0000ff      2.28   2.28  53
+   text     31        31                              17 #c50f1f  #012456      2.49   2.49  FATAL-HL30(0.42%)
+   text     32        32 on 48;5;46                    3 #13a10e  #00ff00      2.50   2.50  √√√
+   text     38;5;160  38;5;160                        23 #d70000  #012456      2.80   2.80  ••FAILURECLASSIFIED5960
+   text     90        90                             208 #767676  #012456      3.33   3.33  ,::ltl::'logtimeline[0.20.0-
+   text     91        91                              50 #e74856  #012456      3.93   3.93  0.21.10.30.20.30.32.40.52.10
+   text     32        32                             123 #13a10e  #012456      4.42   4.42  INFO:39INFO:36INFO:80INFO:37
+   text     38;5;0    38;5;0 on 48;5;30                6 #0c0c0c  #008787      4.49   4.49  195432
+   text     36        36                               6 #3a96dd  #012456      4.75   4.75  305092
+   text     38;5;0    38;5;0 on 48;5;196              19 #0c0c0c  #ff0000      4.89   4.89  ERROR-HL5930(82.9%)
+   text     33        33                             112 #c19c00  #012456      5.78   5.78  WARN:14WARN:12WARN:12WARN:14
+   text     38;5;0    38;5;0 on 48;5;34                4 #0c0c0c  #00af00      6.64   6.64  INFO
+   text     38;5;111  38;5;111                         4 #87afff  #012456      6.92   6.92  1111
+   text     38;5;178  38;5;178                        23 #d7af00  #012456      7.22   7.22  UNCLASSIFIED1190(16.6%)
+   text     96        96                              92 #61d6d6  #012456      8.72   8.72  TOPOVERALLMESSAGES(retainedf
+   text     def       def                            873 #cccccc  #012456      9.42   9.42  2026-08-2104:001.92026-08-21
+   text     37        37                             443 #cccccc  #012456      9.42   9.42  Thesefile(s)wereprocessedwit
+   text     38;5;0    38;5;0 on 48;5;184               1 #0c0c0c  #d7d700     12.68  12.68  W
+   text     93        93                              78 #f9f1a5  #012456     13.08  13.08  TOPHIGHLIGHTEDMESSAGES(lines

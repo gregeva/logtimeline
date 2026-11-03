@@ -1,0 +1,15 @@
+== explain: Ottosson (dark), background unknown: basic palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        32 on 48;5;46                    9 #3fae3a  #3fae3a      1.00   1.00  █████████
+   graphic  90        90                             191 #808080  #000000      5.32   5.32  ────────────────────────────
+   graphic  36        36                             156 #00a7b2  #000000      7.17   7.17  ────────────────────────────
+   graphic  32        32                              40 #3fae3a  #000000      7.33   7.33  ████████████████████████████
+   text     32        32 on 48;5;46                   10 #3fae3a  #00ff00      2.09   2.09  7811.9k622
+   text     90        90                              82 #808080  #000000      5.32   5.32  ,::ltl::'logtimeline[0.20.0-
+   text     91        91                               9 #ff3e30  #000000      5.98   5.98  0.20.70.2
+   text     38;5;34   38;5;34                          5 #00af00  #000000      7.13   7.13  •••••
+   text     32        32                              24 #3fae3a  #000000      7.33   7.33  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     33        33                              18 #be9a4a  #000000      7.91   7.91  4xx:144xx:414xx:12
+   text     def       def                           1892 #bebebe  #000000     11.30  11.30  Ananalysistechnique:aninvest
+   text     36        1;36                            75 #00e1f0  #000000     13.03  13.03  TOPHIGHLIGHTEDMESSAGES(lines
+   text     def       1;def                           24 #ffffff  #000000     21.00  21.00  CONTRIBUTIONHIGHLIGHTING

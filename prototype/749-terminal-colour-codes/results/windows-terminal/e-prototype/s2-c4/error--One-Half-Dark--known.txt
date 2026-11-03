@@ -1,0 +1,6 @@
+== error: One Half Dark (dark), background known: dark palette  (window background #282c34)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #9e9e9e  #282c34      5.23   5.23  ────────────────────────────
+   text     90        38;5;247                        76 #9e9e9e  #282c34      5.23   5.23  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #dcdfe4  #282c34     10.48  10.48  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;231                      35 #ffffff  #282c34     14.00  14.00  Error:unknownoption'--bogus-

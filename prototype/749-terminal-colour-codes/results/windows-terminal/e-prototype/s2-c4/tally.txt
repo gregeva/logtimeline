@@ -1,0 +1,16 @@
+Groups below the floor, background unknown (today's colours) > known (the set), over 8 runs: access-heatmap, access-latency, error, explain, help, levels, progress-pause, udm
+profile              class window    text on the background (4.5)        text over a fill (4.5)          bars and lines (3.0)  text below 3
+Campbell             dark  #0c0c0c               18/70  >   0/70               21/32  >   0/32                5/29  >   4/29     4 > 0  
+One Half Light       light #fafafa               46/70  >   0/72               29/32  >   0/32               12/29  >   4/29    27 > 0  
+Dimidium             dark  #141414                8/70  >   0/70               20/32  >   0/32                4/29  >   4/29     0 > 0  
+Ottosson             dark  #000000                8/70  >   0/70               20/32  >   0/32                5/29  >   4/29     1 > 0  
+Campbell Powershell  dark  #012456               28/70  >   0/70               21/32  >   0/32                5/29  >   4/29    11 > 0  
+Vintage              dark  #000000               18/70  >   0/70               19/32  >   0/32                5/29  >   4/29     7 > 0  
+One Half Dark        dark  #282c34               19/70  >   0/70               26/32  >   0/32               11/29  >   4/29    11 > 0  
+Solarized Dark       dark  #002b36               27/70  >   0/70               26/32  >   0/32               11/29  >   4/29    12 > 0  
+Solarized Light      light #fdf6e3               57/70  >  17/72               26/32  >   0/32               14/29  >   4/29    33 > 0  
+Tango Dark           dark  #000000               18/70  >   0/70               20/32  >   0/32               11/29  >   4/29     7 > 0  
+Tango Light          light #ffffff               42/70  >   0/72               20/32  >   0/32               12/29  >   4/29    30 > 0  
+Dark+                dark  #1e1e1e               18/70  >   0/70               20/32  >   0/32               11/29  >   4/29     7 > 0  
+CGA                  dark  #000000               21/70  >   0/70               17/32  >   0/32               12/29  >   4/29    11 > 0  
+IBM 5153             dark  #000000               18/70  >   0/70               19/32  >   0/32               12/29  >   4/29    11 > 0  

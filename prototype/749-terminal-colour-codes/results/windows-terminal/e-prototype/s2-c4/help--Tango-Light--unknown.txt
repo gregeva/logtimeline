@@ -1,0 +1,6 @@
+== help: Tango Light (light), background unknown: basic palette  (window background #ffffff)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #555753  #ffffff      7.31   7.31  ────────────────────────────
+   text     90        90                              76 #555753  #ffffff      7.31   7.31  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #555753  #ffffff      7.31   7.31  LogTimeLine--acommand-linelo
+   text     def       1;def                           35 #555753  #ffffff      7.31   7.31  USAGEOPTIONSENVIRONMENTINFOE

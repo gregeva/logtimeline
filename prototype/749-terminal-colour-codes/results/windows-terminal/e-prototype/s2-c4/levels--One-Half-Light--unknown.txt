@@ -1,0 +1,29 @@
+== levels: One Half Light (light), background unknown: basic palette  (window background #fafafa)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  31        31 on 48;5;196                  72 #e45649  #ff0000      1.09   1.09  ■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+   graphic  93        93                             188 #e4c07a  #fafafa      1.66   1.66  ────────────────────────────
+   graphic  96        96                             188 #56b5c1  #fafafa      2.29   2.29  ────────────────────────────
+   graphic  32        32                               8 #50a14f  #fafafa      3.07   3.07  ■■■■■■■■
+   graphic  90        90                             774 #4f525d  #fafafa      7.46   7.46  ────────────────────────────
+   graphic  def       def                            164 #383a42  #fafafa     10.86  10.86  ────────────────────────────
+   text     37        37                             443 #fafafa  #fafafa      1.00   1.00  Thesefile(s)wereprocessedwit
+   text     38;5;0    38;5;0 on 48;5;20               14 #383a42  #0000d7      1.07   1.07  22432422232222
+   text     31        31 on 48;5;196                  28 #e45649  #ff0000      1.09   1.09  5341069107114647219889305645
+   text     38;5;0    38;5;0 on 48;5;21                2 #383a42  #0000ff      1.32   1.32  53
+   text     93        93                              78 #e4c07a  #fafafa      1.66   1.66  TOPHIGHLIGHTEDMESSAGES(lines
+   text     38;5;178  38;5;178                        23 #d7af00  #fafafa      2.01   2.01  UNCLASSIFIED1190(16.6%)
+   text     38;5;111  38;5;111                         4 #87afff  #fafafa      2.09   2.09  1111
+   text     96        96                              92 #56b5c1  #fafafa      2.29   2.29  TOPOVERALLMESSAGES(retainedf
+   text     32        32 on 48;5;46                    3 #50a14f  #00ff00      2.34   2.34  √√√
+   text     38;5;0    38;5;0 on 48;5;30                6 #383a42  #008787      2.60   2.60  195432
+   text     38;5;0    38;5;0 on 48;5;196              19 #383a42  #ff0000      2.84   2.84  ERROR-HL5930(82.9%)
+   text     32        32                             123 #50a14f  #fafafa      3.07   3.07  INFO:39INFO:36INFO:80INFO:37
+   text     91        91                              50 #df6c75  #fafafa      3.08   3.08  0.21.10.30.20.30.32.40.52.10
+   text     33        33                             112 #c18301  #fafafa      3.09   3.09  WARN:14WARN:12WARN:12WARN:14
+   text     36        36                               6 #0997b3  #fafafa      3.30   3.30  305092
+   text     31        31                              17 #e45649  #fafafa      3.51   3.51  FATAL-HL30(0.42%)
+   text     38;5;0    38;5;0 on 48;5;34                4 #383a42  #00af00      3.85   3.85  INFO
+   text     38;5;160  38;5;160                        23 #d70000  #fafafa      5.17   5.17  ••FAILURECLASSIFIED5960
+   text     38;5;0    38;5;0 on 48;5;184               1 #383a42  #d7d700      7.35   7.35  W
+   text     90        90                             208 #4f525d  #fafafa      7.46   7.46  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            873 #383a42  #fafafa     10.86  10.86  2026-08-2104:001.92026-08-21

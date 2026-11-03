@@ -1,0 +1,6 @@
+== help: Campbell Powershell (dark), background known: dark palette  (window background #012456)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #9e9e9e  #012456      5.65   5.65  ────────────────────────────
+   text     90        38;5;247                        76 #9e9e9e  #012456      5.65   5.65  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #cccccc  #012456      9.42   9.42  LogTimeLine--acommand-linelo
+   text     def       1;38;5;231                      35 #ffffff  #012456     15.13  15.13  USAGEOPTIONSENVIRONMENTINFOE

@@ -1,0 +1,4 @@
+== progress-pause: Tango Dark (dark), background unknown: basic palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     def       def on 44                       35 #d3d7cf  #3465a4      4.06   4.06  Pressanykeytocontinue(orQtoq
+   text     92        92                              93 #8ae234  #000000     13.01  13.01  Processingcompleted.Calculat
