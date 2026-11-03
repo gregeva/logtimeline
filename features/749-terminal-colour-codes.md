@@ -2,9 +2,9 @@
 
 ## Status
 
-**In progress: research done, macOS and Windows Terminal measured; the
-architect's decision is next.** Contracts in § 2 confirmed by the architect
-on 2026-11-02. The research is
+**In progress: research done, macOS and Windows Terminal measured and read
+together (§ 8); the architect's decision is next.** Contracts in § 2
+confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
 `prototype/749-terminal-colour-codes/` on branch `749-terminal-colour-codes`.
@@ -349,9 +349,9 @@ for the Clear pair, because these two backgrounds are further apart. The
 best single index per hue, taking the lower of its two ratios: yellow 100
 (#878700) 3.66, green 28 (#008700) 4.16, cyan 30 (#008787) 4.18, blue 63
 (#5f5fff) 4.25, magenta 163 (#d700af) 4.20, red 196 (#ff0000) 3.83, orange 130
-(#af5f00) 4.15. For cyan, blue, magenta and red the best index differs from
-the Clear pair's (§ 5.4): which single colour serves both depends on the
-pair of backgrounds, not only on the hue.
+(#af5f00) 4.15. For cyan, blue, magenta, red and orange the best index
+differs from the Clear pair's (§ 5.4): which single colour serves both
+depends on the pair of backgrounds, not only on the hue.
 
 ### 6.5 Text over a fill
 
@@ -436,12 +436,89 @@ called a defect.
 - **SGR `109`** is written after every bright code; it is in no defined SGR
   range.
 
+## 8. The two terminals read together
+
+### 8.1 Today against a straight move
+
+Each colour `ltl` writes, against the default dark and the light scheme of
+each terminal (§ 5.3, § 6.3), as written today and as the fixed code of the
+same name (`to256.pl`):
+
+| colour | Clear Dark | Campbell | Clear Light | One Half Light |
+|---|---|---|---|---|
+| `93` duration, as 226 | 8.21, 12.50 | 16.91, 18.22 | **1.58, 1.04** | **1.66, 1.03** |
+| `32` bytes, as 40 | 4.88, 6.85 | 5.71, 9.99 | **2.66, 1.89** | 3.07, **1.88** |
+| `36` count, as 44 | 7.21, 7.48 | 6.14, 10.90 | **1.93, 1.73** | 3.30, **1.72** |
+| `34` blue, as 21 | 4.27, **1.56** | **2.38, 2.28** | 3.82, 8.30 | 4.00, 8.23 |
+| `35` magenta, as 164 | 4.40, 3.11 | **2.44**, 4.54 | 3.80, 4.17 | 5.86, 4.13 |
+| `31` red, ERROR, as 160 | **2.79, 2.49** | 3.23, 3.62 | 4.65, 5.22 | 3.51, 5.17 |
+| `33` WARN, as 184 | 6.03, 8.70 | 7.47, 12.68 | **2.15, 1.49** | 3.09, **1.48** |
+| `90` rules, as 244 | **1.93**, 3.40 | 4.31, 4.95 | 5.88, 3.82 | 7.46, 3.78 |
+| `37` file details, as 254 | 10.56, 10.56 | 12.18, 15.39 | **1.64, 1.23** | **1.00, 1.22** |
+
+Bold: below 3:1. Below 3:1, today 11 of the 36, fixed 13: on the two dark
+schemes 4 become 3, on the two light schemes 7 become 10. Below 4.5:1, today
+22, fixed 20. A straight move helps the dark schemes, except blue, and makes
+the light schemes worse in yellow, green, cyan and WARN, the colours of the
+duration, bytes and count columns. On a light scheme the basic colours fail,
+and the same hues as fixed codes fail by more.
+
+### 8.2 What the background setting reaches today
+
+The background is settled by `-lbg` or `-dbg`. Without either, the terminal is asked
+(`detect_terminal`, OSC 11) only when the heatmap is on
+(`adapt_to_command_line_options`), never on Windows, and never with no
+terminal on standard input and output. A terminal that does not answer reads
+dark, and `%terminal` does not record whether an answer came. The setting is
+read by the heatmap's gradients and by `notice_style`. It is not read by the
+column colours, the category colours, the rules or the run summary: the two
+timelines of § 5.6 written with `-lbg` and with `-dbg` are identical but for
+the `-V` record (`light_bg`, timings). Asking costs 35 to 49 ms in Windows
+Terminal and the classic console host (`docs/terminal-output.md`, the
+start-up table).
+
+### 8.3 What a colour set chosen per background can reach
+
+The best index 16-231 per hue: the one whose lowest contrast across the
+backgrounds named is highest. Computed by `two-sets.py` from the measured
+backgrounds; table in `results/two-sets.txt` (the xterm colours are drawn
+exactly by both terminals, § 5.2, § 6.2):
+
+| hue | dark: Clear Dark, Campbell, Basic, Pro | light: Clear Light, One Half Light | light, with Man Page and Novel | one set for all four of § 8.1 |
+|---|---|---|---|---|
+| yellow | 227 #ffff5f 12.61 (11 of 15 reach 4.5) | 58 #5f5f00 6.44 (2: 58, 94) | 58 4.82 (1) | 100 #878700 3.51 |
+| green | 155 #afff5f 11.06 (19 of 21) | 22 #005f00 7.63 (2: 22, 28) | 22 5.71 (1) | 28 #008700 2.86 |
+| cyan | 87 #5fffff 11.02 (11 of 15) | 23 #005f5f 7.18 (2: 23, 24) | 23 5.37 (2) | 31 #0087af 3.25 |
+| blue | 75 #5fafff 5.79 (1 of 12) | 17 #00005f 17.27 (8) | 12.92 (5) | 68 #5f87d7 3.39 |
+| magenta | 207 #ff5fff 5.33 (2 of 21) | 53 #5f005f 12.18 (9) | 9.12 (6) | 134 #af5fd7 3.48 |
+| red | 209 #ff875f 5.68 (3 of 9) | 52 #5f0000 13.53 (4) | 10.13 (3) | 167 #d75f5f 3.53 |
+| orange | 215 #ffaf5f 7.38 (5 of 8) | 130 #af5f00 4.51 (1) | 3.38 (0) | 166 #d75f00 3.53 |
+| grey | 247-255 | 232-242 | 232-240 | none |
+
+So a set chosen for dark backgrounds reaches 4.5:1 in every hue on both
+terminals' dark schemes, though only one blue does (75, not the straight
+move's 21). A set chosen for light backgrounds reaches it in every hue on
+both terminals' light schemes, narrowly: yellow, green and cyan only as dark
+shades (olive, dark green, dark teal), so on light the duration column is no
+longer yellow to the eye. One set for both never reaches 4.5:1, at 2.86 to
+3.53 at best.
+
+### 8.4 Bold
+
+Bold over a basic code: Windows Terminal draws the bright variant at the same
+weight (§ 6.2); Terminal.app keeps the colour and adds weight (§ 5.2). Bold
+over an index 16-255 adds weight in its colour in both. Bold over the
+default foreground (the help and explain headings) is heavier in
+Terminal.app, brighter on Campbell, and lighter on One Half Light (10.86 to
+7.46:1), where the headings recede. A fixed code can replace the default
+foreground only once the background is known.
+
 ## Resuming
 
 - Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
-  measured on Campbell and One Half Light (§ 6). Instruments for both on
-  branch `749-terminal-colour-codes`.
-- Next: the architect's decision, with § 5 and § 6 in front of him, on any
-  host.
+  measured on Campbell and One Half Light (§ 6); the two read together
+  (§ 8). Instruments for both on branch `749-terminal-colour-codes`.
+- Next: the architect's decision, with § 5, § 6 and § 8 in front of him, on
+  any host.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
