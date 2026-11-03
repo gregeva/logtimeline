@@ -8,7 +8,8 @@ on macOS (§ 9); a macOS candidate across every surface (§ 10.1), read in
 every shipped Windows Terminal scheme (§ 11); D1 amended: tone governs and
 the sets are 24-bit (§ 12); the tone-led sets accepted by the architect, the
 fill pairs checked on every column (§ 12.4); the heatmap and the
-histogram brought into scope (§ 12.5).**
+histogram brought into scope (§ 12.5); the sets and the heatmap gradients
+validated by the architect (§ 12.6); the histogram is next.**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -1200,73 +1201,71 @@ own colour; on dark, blue's first five steps and the first step of
 magenta, red and purple barely leave the background. Adjacent steps lie as
 close as 0.005 in OKLCH lightness (orange, both backgrounds).
 
+The method put to the architect and confirmed ("yes, start with the heatmap
+gradients"): the gradients in 24-bit codes, each step's lightness spaced
+evenly, the faintest at least as visible as dark yellow's is today; the
+histogram's bars and highlighted part following the timeline's fills; the
+histogram on a light background from rendered candidates afterwards.
+
+### 12.6 The heatmap gradients (`palettes/t4.tsv`)
+
+**The first round (`t3`, not kept).** Each step kept the hue today's
+256-colour gradient gives it. The light gradients wander off their column's
+hue (red's through pinks and magentas, 218 to 200; blue's through cyan, 45;
+yellow's to red-orange, 202), and with the faint end made visible the
+detours showed. The architect: "your red thing there, man, it's fucking
+horrible … the 24-bit colors should be adapted to the gradients that heat
+maps use today, which are based in the color from the associated metrics
+column", and the runs were to show the metric columns, plain and
+highlighted, beside each heatmap.
+
+**The rule (`tone.py`, `t4`).** For each column, dark and light:
+- every step is in the column's own hue, its plain fill's;
+- each step keeps today's step's saturation: its chroma as a share of the
+  most that hue holds at its lightness;
+- the faintest step lies at least 0.207 from the background in OKLab, the
+  distance of today's dark yellow faintest step from Clear Dark. A cell is
+  seen by its colour; at 2.0:1 against white, a yellow can only be olive or
+  mustard. The densest step is at today's lightness, and the steps between
+  are evenly spaced in lightness, at least 0.036 apart (today's dark
+  yellow's closest pair);
+- a yellow darker than the yellow fill turns toward amber (today's 94),
+  reached at lightness 0.65, as today's yellow gradients turn through amber
+  and gold: darkened, a lemon yellow is olive.
+
+On dark the gradients stay near today's, the faint steps of blue, magenta,
+red and purple now visible; on light, red runs salmon to dark red and blue
+stays blue.
+
+**The runs.** `heat-<colour>`, one per column colour, read a synthetic log
+(`synth-metrics.py`): five hours of a log4j-style line every three seconds,
+ten log-normal metrics named after the column colours in the order
+user-defined metrics take them, a steady volume per bucket, and a third of
+the lines from 06:00 to 07:30 carrying a highlight token. Each run shows
+all ten metric columns, plain and highlighted, beside the heatmap of one.
+The real logs could not: the outage bucket dwarfs every sum, and a counting
+metric turns the heatmap off.
+
+**The architect (2026-11-03), on `t4` drawn in Clear Dark and Clear Light:
+"yes - thats perfect. I validate both sets. It not only looks beautiful".**
+The validated sets are `t4`: the text colours of § 12.2, the fills with
+blue's highlight at 27 (§ 12.4), and these gradients.
+
 ## Resuming
 
-- Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
-  measured on Campbell and One Half Light (§ 6); the two read together
-  (§ 8); D1 locked; the first stage of the D1 prototype on macOS (§ 9).
-  Instruments on branch `749-terminal-colour-codes`.
-- In progress, § 10 on macOS: producing candidate sets, not a selection.
-  Nothing is chosen until Windows has given its inputs and feedback
-  (architect, 2026-11-03).
-  - **Runs:** seven real runs together show every surface in scope. All are
-    at `--terminal-width 190`, and those that read logs use
-    `-st 04:00 -et 13:00 -bs 30m -n 4 -hf`.
-    1. The outage day's web access log with `-du us -hm duration -hg`.
-    2. The same log with `-du us -sm`: the latency column, and the summary
-       without colour.
-    3. The method server logs of the same node and morning
-       (`-et 12:30`): log levels and their highlighted variants.
-    4. The custom-metrics CSV with seven `-udm` metrics and one that matches
-       nothing (`-bs 10`): every user-defined column colour, and a notice
-       panel.
-    5. `--help` under `FORCE_COLOR=1`.
-    6. `--explain contribution-highlighting` under `FORCE_COLOR=1`.
-    7. A usage error.
-
-    The progress lines (`92`) and the pause prompt (`0;44`) cannot come
-    from a run here, so they are printed from `ltl`'s own codes for them.
-  - **Designer:** `design.py` on the issue branch designs every role.
-    These are text on the background, `ltl`'s fixed text codes, the bar
-    fills (plain and highlighted per column colour), the text over each
-    fill, and bold over the default foreground. A fill takes its hue from
-    the scheme colour of the same name, as the class's default profile
-    draws it, and stays nearer its own column's hue than any other
-    column's. Candidates are `palettes/s2-c1` to `s2-c3`. In s2-c3, light
-    yellow fills are olive (58, 100), light teal's highlighted fill drifts
-    to dark green (22), and light orange's plain fill is tan (137). On
-    white, those hues cannot stay light and still stand out as bars. A
-    design run takes about four minutes.
-  - **Instruments,** all built (issue branch, 08f91b5f). `e-outputs.sh`
-    writes the eight runs: the seven above, plus the progress lines and
-    the pause prompt printed from `ltl`'s own codes. `e-palette.py`
-    remaps by role, cell by cell:
-    - the histogram block and the heatmap's columns are left as `ltl`
-      writes them;
-    - a bar glyph drawn in a fill's colour follows the fill;
-    - text over a fill takes that fill's text colour.
-
-    Each rewrite is checked against `ltl`'s output: every character and
-    attribute kept, the histogram and heatmap cells unchanged.
-    `e-show.sh` prints any length a page at a time and `e-measure.sh`
-    captures every page. `read-output.py` reads the pages with NumPy, and
-    finds each later page's first line from the capture: `ltl` ends with
-    an empty line, and Terminal.app shows the last page one line short.
-  - **The macOS candidate:** s2-c4, rendered and read across every surface
-    (§ 10.1).
-  - **Windows:** s2-c4 rendered and read in all 14 shipped Windows
-    Terminal schemes, background known and unknown (§ 11). The
-    instruments are `wt-measure.sh` (every shipped scheme),
-    `wt-e-measure.sh` (the runs, page by page) and `tally.py` (§ 10.1's
-    count), on the issue branch.
-  - **A further design round:** s2-c5, the light set designed for every
-    light background of both hosts, designed but not rendered; the
-    architect kept s2-c4's light set (§ 11.7).
-  - **Tone governs (§ 12):** `tone.py` designs the sets from today's
-    colours, 24-bit, moved slightly in lightness only; `palettes/t1.tsv`
-    accepted by the architect, `t2.tsv` with blue's highlight separated. The
-    ninth run, `fills`, shows every column's plain and highlighted fill.
-- Next: the heatmap and the histogram by the same method (§ 12.5): the
-  surfaces' contracts and the method go to the architect first.
+- Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
+  and read together (§ 8); D1 locked, then amended: tone governs and the
+  sets are 24-bit (§ Decisions); the every-surface stage on macOS (§ 10)
+  and on Windows (§ 11); the tone-led sets (§ 12), validated by the
+  architect with the heatmap gradients (§ 12.6, `palettes/t4.tsv`).
+- Instruments on branch `749-terminal-colour-codes`,
+  `prototype/749-terminal-colour-codes/`: `tone.py` designs the sets,
+  `e-outputs.sh` writes the runs (§ 10's eight, `fills`, and the ten
+  `heat-<colour>` runs), `e-palette.py` rewrites them, `e-measure.sh`
+  captures them (conditions `known`, `unknown`, and `today`: the background
+  known, as `ltl` writes for it today), `read-output.py` and `tally.py` read
+  them.
+- Next: the histogram by the same method (§ 12.5): its bars and highlighted
+  part, and its light-background candidates.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
