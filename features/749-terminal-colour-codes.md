@@ -9,7 +9,8 @@ every shipped Windows Terminal scheme (§ 11); D1 amended: tone governs and
 the sets are 24-bit (§ 12); the tone-led sets accepted by the architect, the
 fill pairs checked on every column (§ 12.4); the heatmap and the
 histogram brought into scope (§ 12.5); the sets and the heatmap gradients
-validated by the architect (§ 12.6); the histogram is next.**
+validated by the architect (§ 12.6); the histogram inherits the columns'
+fills.**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -1254,6 +1255,14 @@ the ten of `@column_colors`; asked whether more should be added so that an
 eleventh column or metric no longer wraps to yellow, the architect: "No, I
 don't want any more than what you just showed. That is already ample."
 
+**The histogram needs no work of its own (architect, 2026-11-03):** "We
+don't need to do the histogram … they are the same colors for highlight and
+standard from the columns. We have already tested and set those." Its bars
+take the column's plain fill and its highlighted part the column's
+highlight (`plain_bg_num`, `highlighted_bg_num`); blue's is 27, the
+highlight the set gives the timeline. Count's histogram highlight (51)
+still differs from the timeline's (36), as #666 records.
+
 ## Resuming
 
 - Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
@@ -1268,7 +1277,9 @@ don't want any more than what you just showed. That is already ample."
   captures them (conditions `known`, `unknown`, and `today`: the background
   known, as `ltl` writes for it today), `read-output.py` and `tally.py` read
   them.
-- Next: the histogram by the same method (§ 12.5): its bars and highlighted
-  part, and its light-background candidates.
+- The histogram takes the columns' fills and needs no work of its own
+  (architect, § 12.6).
+- Not yet done: the validated sets (`t4`) have been read only on macOS;
+  Windows read the earlier candidate `s2-c4` (§ 11).
 - State outside the repository: none needed; the captures are remade by the
   instruments.
