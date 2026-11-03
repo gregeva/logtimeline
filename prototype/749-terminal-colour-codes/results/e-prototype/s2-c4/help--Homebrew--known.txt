@@ -1,0 +1,6 @@
+== help: Homebrew (dark), background known: dark palette  (window background #131313)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #9e9e9e  #131313      6.94   6.94  ────────────────────────────
+   text     90        38;5;247                        76 #9e9e9e  #131313      6.94   6.94  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #28fe14  #131313     13.52  13.52  LogTimeLine--acommand-linelo
+   text     def       1;38;5;231                      35 #ffffff  #131313     18.58  18.58  USAGEOPTIONSENVIRONMENTINFOE

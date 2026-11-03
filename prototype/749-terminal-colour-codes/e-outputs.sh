@@ -22,8 +22,9 @@
 # <out-dir>/<palette>/<run>/ with basic.ans (the fallback), dark.ans and
 # light.ans (through e-palette.py), basic-light.ans (the light set's base)
 # and frame.json. Each file gets a first line of its own carrying the marker
-# blocks and calibration cell read-output.py finds the grid by, and loses
-# its final newline. The rewrites are checked against their base: every
+# blocks and calibration cell read-output.py finds the grid by, loses its
+# final newline, and has any line wider than the window cut into rows as the
+# terminal wraps it (the command-line options line). The rewrites are checked against their base: every
 # character and attribute kept, the histogram and heatmap cells unchanged.
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
@@ -94,10 +95,32 @@ def module(name, file):
 ro, ep = module("ro", "read-output.py"), module("ep", "e-palette.py")
 M, C = "\x1b[38;2;254;0;129m█\x1b[0m", "\x1b[48;2;129;0;254m \x1b[0m"
 marker = M + " " * 49 + C + " " * (cols - 52) + M + "\x1b[0m"
+def wrap(text):
+    """a line wider than the window, cut into rows as the terminal wraps it,
+    each carrying the codes in force, so every line of the file is one row"""
+    cells = ro.parse(text)
+    width = {}
+    for r, c, g, st in cells: width[r] = max(width.get(r, 0), c + 1)
+    if all(w <= cols for w in width.values()): return text
+    start, n = {}, 0
+    for r in range(len(text.split("\n"))):
+        start[r] = n; n += max(1, -(-width.get(r, 0) // cols))
+    rows = {}
+    for r, c, g, st in cells: rows.setdefault(start[r] + c // cols, []).append((g, st))
+    out = []
+    for r in range(n):
+        line, prev = [], None
+        for g, st in rows.get(r, []):
+            key = tuple(sorted(st.items()))
+            if key != prev: line.append(ep.sgr(st)); prev = key
+            line.append(g)
+        if prev is not None: line.append("\x1b[0m")
+        out.append("".join(line))
+    return "\n".join(out)
 texts, rows = {}, None
 for name in ("basic", "basic-light", "dark", "light"):
     t = open(f"{out}/{name}.raw", encoding="utf-8").read()
-    texts[name] = marker + "\n" + (t[:-1] if t.endswith("\n") else t)
+    texts[name] = marker + "\n" + wrap(t[:-1] if t.endswith("\n") else t)
     open(f"{out}/{name}.ans", "w", encoding="utf-8").write(texts[name])
     n = len(texts[name].split("\n"))
     assert rows in (None, n), f"{out}: the palettes differ in length"

@@ -1,0 +1,6 @@
+== error: Red Sands (dark), background known: dark palette  (window background #95493d)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #9c8b88  #95493d      1.96   1.96  ────────────────────────────
+   text     90        38;5;247                        76 #9e9e9e  #95493d      2.38   2.33  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #d7c9a7  #95493d      3.88   3.71  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;231                      35 #ffffff  #95493d      6.37   6.37  Error:unknownoption'--bogus-

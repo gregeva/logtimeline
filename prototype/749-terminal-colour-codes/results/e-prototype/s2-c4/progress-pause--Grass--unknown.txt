@@ -1,0 +1,4 @@
+== progress-pause: Grass (dark), background unknown: basic palette  (window background #13773d)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     92        92                              93 #54ff40  #13773d      4.22   4.22  Processingcompleted.Calculat
+   text     def       def on 44                       35 #fff0a5  #0000b3     11.06  11.06  Pressanykeytocontinue(orQtoq

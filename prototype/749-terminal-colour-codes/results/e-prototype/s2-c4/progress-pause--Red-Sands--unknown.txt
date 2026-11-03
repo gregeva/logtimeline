@@ -1,0 +1,4 @@
+== progress-pause: Red Sands (dark), background unknown: basic palette  (window background #95493d)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     92        92                              93 #4dfb3b  #95493d      4.60   4.60  Processingcompleted.Calculat
+   text     def       def on 44                       35 #d7c9a7  #0000b3      7.75   7.39  Pressanykeytocontinue(orQtoq

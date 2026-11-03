@@ -1,0 +1,29 @@
+== levels: Red Sands (dark), background unknown: basic palette  (window background #95493d)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  31        31 on 48;5;196                  72 #ff0000  #990000      2.23   2.23  ████████████████████████████
+   graphic  90        90                             774 #a89996  #95493d      2.32   2.32  ────────────────────────────
+   graphic  def       def                            164 #c9af92  #95493d      3.04   3.04  ────────────────────────────
+   graphic  32        32                               8 #5cdd49  #95493d      3.61   3.61  ████████
+   graphic  96        96                             188 #51dfdd  #95493d      3.93   3.93  ────────────────────────────
+   graphic  93        93                             188 #e4d72a  #95493d      4.26   4.26  ────────────────────────────
+   text     38;5;160  38;5;160                        23 #d70000  #95493d      1.18   1.18  ••FAILURECLASSIFIED5960
+   text     38;5;0    38;5;0 on 48;5;20               14 #000001  #0000d7      1.98   1.98  22432422232222
+   text     31        31                              17 #6b0000  #95493d      2.03   1.92  FATAL-HL30(0.42%)
+   text     31        31 on 48;5;196                  28 #990000  #ff0000      2.23   2.19  5341069107114647219889305645
+   text     91        91                              50 #ff6b42  #95493d      2.25   2.24  0.21.10.30.20.30.32.40.52.10
+   text     32        32 on 48;5;46                    3 #00a600  #00ff00      2.37   2.37  √√√
+   text     38;5;0    38;5;0 on 48;5;21                2 #000008  #0000ff      2.44   2.44  53
+   text     90        90                             208 #adadad  #95493d      2.84   2.73  ,::ltl::'logtimeline[0.20.0-
+   text     38;5;111  38;5;111                         4 #87afff  #95493d      2.91   2.91  1111
+   text     38;5;178  38;5;178                        23 #d7af00  #95493d      3.04   2.98  UNCLASSIFIED1190(16.6%)
+   text     32        32                             123 #5cdd49  #95493d      3.61   3.61  INFO:39INFO:36INFO:80INFO:37
+   text     33        33                             112 #cecb45  #95493d      3.71   3.71  WARN:14WARN:12WARN:12WARN:14
+   text     36        36                               6 #5bd9e6  #95493d      3.79   3.79  305092
+   text     def       def                            876 #d7c9a7  #95493d      3.88   3.81  2026-08-2104:001.92026-08-21
+   text     37        37                             443 #dedede  #95493d      4.73   4.73  Thesefile(s)wereprocessedwit
+   text     38;5;0    38;5;0 on 48;5;30                6 #000000  #008787      4.82   4.73  195432
+   text     96        96                              92 #43fefe  #95493d      5.11   5.07  TOPOVERALLMESSAGES(retainedf
+   text     38;5;0    38;5;0 on 48;5;196              19 #000000  #ff0000      5.25   4.98  ERROR-HL5930(82.9%)
+   text     93        93                              78 #f6f527  #95493d      5.46   5.46  TOPHIGHLIGHTEDMESSAGES(lines
+   text     38;5;0    38;5;0 on 48;5;34                4 #000000  #00af00      7.13   7.10  INFO
+   text     38;5;0    38;5;0 on 48;5;184               1 #030300  #d7d700     13.38  13.38  W

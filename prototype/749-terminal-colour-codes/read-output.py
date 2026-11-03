@@ -29,7 +29,7 @@ colour is the ink at the 90th percentile of distance from the background
 across its cells (thin glyphs do not reach the full colour), its contrast
 that colour's, and its low the 10th percentile of the cells' own contrasts.
 """
-import json, os, re, shutil, struct, subprocess, sys, tempfile, unicodedata
+import importlib.util, json, os, re, shutil, struct, subprocess, sys, tempfile, unicodedata
 from statistics import median
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -128,7 +128,11 @@ def read(pages, shown, frame, wrows, profile, cond, background, palette, base, r
     def box(r, c):
         k = min(r // R, n - 1); rr = r - start[k]
         return imgs[k], int(round(y0 + rr * ch)), int(round(y0 + (rr + 1) * ch)), int(round(x0 + c * cw)), int(round(x0 + (c + 1) * cw))
-    role = {(r, c): st["fg"] for r, c, g, st in parse(open(base, encoding="utf-8").read())}
+    btext = open(base, encoding="utf-8").read()
+    role = {(r, c): st["fg"] for r, c, g, st in parse(btext)}
+    spec = importlib.util.spec_from_file_location("ep", os.path.join(os.path.dirname(os.path.abspath(__file__)), "e-palette.py"))
+    ep = importlib.util.module_from_spec(spec); spec.loader.exec_module(ep)
+    chart = ep.masks(btext)
     samples = []
     for r, c, g, st in [x for x in cells if x[2] == " " and x[3]["bg"] == "def" and 0 < x[0] < R][::7][:400]:
         im, ya, yb, xa, xb = box(r, c)
@@ -147,16 +151,16 @@ def read(pages, shown, frame, wrows, profile, cond, background, palette, base, r
             bg = vals[counts.argmax()]
         d = np.sqrt(((pix - bg) ** 2).sum(axis=1))
         ink = tuple(int(v) for v in pix[d.argmax()]); bgt = tuple(int(v) for v in bg)
-        k = (role.get((r, c), "def"), st["fg"], st["bold"], st["bg"], "graphic" if graphic(g) else "text")
+        k = (role.get((r, c), "def"), st["fg"], st["bold"], st["bg"], "graphic" if graphic(g) else "text", "chart" if chart(r, c) else "surface")
         e = groups.setdefault(k, dict(cells=[], text=""))
         e["cells"].append((float(d.max()), ink, bgt, contrast(ink, bgt)))
         if len(e["text"]) < 28: e["text"] += g
     out = []
-    for (rl, fg, bold, bgc, kind), e in groups.items():
+    for (rl, fg, bold, bgc, kind, region), e in groups.items():
         cs = sorted(e["cells"], key=lambda t: t[0])
         d, ink, bg, _ = cs[int(0.9 * (len(cs) - 1))]
         lows = sorted(t[3] for t in cs)
-        out.append(dict(role=rl, fg=fg, bold=bold, bg=bgc, kind=kind, n=len(cs), colour=hexc(ink), bg_colour=hexc(bg),
+        out.append(dict(role=rl, fg=fg, bold=bold, bg=bgc, kind=kind, region=region, n=len(cs), colour=hexc(ink), bg_colour=hexc(bg),
                         contrast=round(contrast(ink, bg), 2), low=round(lows[int(0.1 * (len(lows) - 1))], 2), sample=e["text"]))
     return dict(run=run, profile=profile, condition=cond, background=background, palette=palette, pages=n, window_bg=hexc(wbg),
                 grid=dict(x0=round(float(x0), 1), y0=y0, cell_w=round(float(cw), 3), cell_h=ch, page_starts=start), groups=out)
@@ -176,7 +180,7 @@ def summary(paths):
     print(f"{'run':12} {'profile':15} {'bg':5} {'condition':9} {'palette':7} {'window':8} {'text codes':>10} {'<4.5':>4} {'<3':>3}  weakest three text codes")
     for p in paths:
         d = json.load(open(p))
-        t = sorted((g for g in d["groups"] if g["kind"] == "text"), key=lambda g: g["contrast"])
+        t = sorted((g for g in d["groups"] if g["kind"] == "text" and g.get("region") != "chart"), key=lambda g: g["contrast"])
         weak = "; ".join(f"{label(g)} {g['contrast']:.2f} '{g['sample'].strip()[:14]}'" for g in t[:3])
         print(f"{d['run'][:12]:12} {d['profile']:15} {d['background']:5} {d['condition']:9} {d['palette']:7} {d['window_bg']:8} {len(t):10d} "
               f"{sum(g['contrast'] < 4.5 for g in t):4d} {sum(g['contrast'] < 3 for g in t):3d}  {weak}")
@@ -190,7 +194,7 @@ def compare(paths):
     rows = {}
     for d in reads:
         for g in d["groups"]:
-            if g["kind"] != "text": continue
+            if g["kind"] != "text" or g.get("region") == "chart": continue
             # a fill is a 256-colour code, the same in every palette
             k = (g["bg"] != "def", not scheme(g["role"]), d["run"], g["role"], g["bold"], g["bg"])
             e = rows.setdefault(k, dict(sample=g["sample"].strip()[:22], cells={}))

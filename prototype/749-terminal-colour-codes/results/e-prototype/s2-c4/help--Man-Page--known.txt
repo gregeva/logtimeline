@@ -1,0 +1,6 @@
+== help: Man Page (light), background known: light palette  (window background #fef49c)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;241                       188 #898670  #fef49c      3.26   3.26  ────────────────────────────
+   text     90        38;5;241                        76 #626262  #fef49c      5.41   4.89  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #000000  #fef49c     18.63  15.95  LogTimeLine--acommand-linelo
+   text     def       1;38;5;16                       35 #000000  #fef49c     18.63  18.63  USAGEOPTIONSENVIRONMENTINFOE

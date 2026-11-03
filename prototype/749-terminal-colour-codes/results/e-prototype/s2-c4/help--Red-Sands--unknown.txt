@@ -1,0 +1,6 @@
+== help: Red Sands (dark), background unknown: basic palette  (window background #95493d)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #a89996  #95493d      2.32   2.32  ────────────────────────────
+   text     90        90                              76 #adadad  #95493d      2.84   2.78  ,::ltl::'logtimeline[0.20.0-
+   text     def       1;def                           35 #e6c62b  #95493d      3.78   3.78  USAGEOPTIONSENVIRONMENTINFOE
+   text     def       def                          22037 #d7c9a7  #95493d      3.88   3.78  LogTimeLine--acommand-linelo

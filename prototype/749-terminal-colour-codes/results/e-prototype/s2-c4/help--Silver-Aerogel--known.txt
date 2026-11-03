@@ -1,0 +1,6 @@
+== help: Silver Aerogel (light), background known: light palette  (window background #a8a8a8)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;241                       188 #747474  #a8a8a8      1.97   1.97  ────────────────────────────
+   text     90        38;5;241                        76 #626262  #a8a8a8      2.57   2.45  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #000000  #a8a8a8      8.83   8.00  LogTimeLine--acommand-linelo
+   text     def       1;38;5;16                       35 #000000  #a8a8a8      8.83   8.83  USAGEOPTIONSENVIRONMENTINFOE

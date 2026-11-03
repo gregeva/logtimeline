@@ -1,0 +1,4 @@
+== progress-pause: Silver Aerogel (light), background known: light palette  (window background #a8a8a8)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     92        38;5;28                         93 #008700  #a8a8a8      1.98   1.98  Processingcompleted.Calculat
+   text     def       38;5;231 on 48;5;25             35 #ffffff  #005faf      6.45   6.45  Pressanykeytocontinue(orQtoq

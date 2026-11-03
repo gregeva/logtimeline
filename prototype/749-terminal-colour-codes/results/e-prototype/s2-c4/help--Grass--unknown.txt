@@ -1,0 +1,6 @@
+== help: Grass (dark), background unknown: basic palette  (window background #13773d)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #393939  #13773d      2.05   2.05  ────────────────────────────
+   text     90        90                              76 #393939  #13773d      2.05   1.98  ,::ltl::'logtimeline[0.20.0-
+   text     def       1;def                           35 #ffb03b  #13773d      3.09   3.09  USAGEOPTIONSENVIRONMENTINFOE
+   text     def       def                          22037 #fff0a5  #13773d      4.89   4.89  LogTimeLine--acommand-linelo

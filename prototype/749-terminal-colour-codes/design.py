@@ -136,7 +136,11 @@ GREYS = {0, 7, 8, 15}
 FIXED = {34: ("success %, success state", "s2"), 160: ("failure %, failure state", "s1"), 111: ("users count, format number", "s4"),
          44: ("notice category cyan", "s6"), 178: ("classification state (amber)", None), 135: ("classification state (violet)", None),
          208: ("orange column values", None), 213: ("pink column values", None), 43: ("teal column values", None),
-         93: ("purple column values", None)}
+         93: ("purple column values", None),
+         # notice_style's own light codes (frame and dim, categories)
+         244: ("notice frame and dimmed text on light", "s8"), 30: ("notice category cyan on light", "s6"),
+         35: ("notice category green on light", "s2"), 29: ("notice category teal on light", None),
+         166: ("notice category orange on light", None)}
 # colours shown together: every pair within a group, and the metric columns
 # with their neighbours (in @column_colors order)
 GROUPS = [("legend categories", ["s1", "s2", "s3", "s5", "s6"]), ("classification", ["f34", "f160", "f178", "f135"])]

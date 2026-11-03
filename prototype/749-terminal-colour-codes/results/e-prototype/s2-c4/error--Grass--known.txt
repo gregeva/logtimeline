@@ -1,0 +1,6 @@
+== error: Grass (dark), background known: dark palette  (window background #13773d)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #9e9e9e  #13773d      2.10   2.10  ────────────────────────────
+   text     90        38;5;247                        76 #9e9e9e  #13773d      2.10   2.02  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #fff0a5  #13773d      4.89   4.58  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;231                      35 #ffffff  #13773d      5.62   5.62  Error:unknownoption'--bogus-

@@ -1,0 +1,33 @@
+== udm: Novel (light), background known: light palette  (window background #dfdbc3)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;241                       773 #626262  #dfdbc3      4.37   4.37  ────────────────────────────
+   graphic  34        38;5;25                        417 #005faf  #dfdbc3      4.62   4.62  ████████████████████████████
+   graphic  38;5;30   38;5;23                        340 #005f5f  #dfdbc3      5.37   5.37  ╭───────────────────────────
+   graphic  96        38;5;23                        188 #005f5f  #dfdbc3      5.37   5.37  ────────────────────────────
+   graphic  def       def                            164 #4d2f2d  #dfdbc3      8.56   8.56  ────────────────────────────
+   text     38;5;30   38;5;23                          2 #4a8880  #dfdbc3      2.94   2.94  ——
+   text     32        38;5;28                          1 #028802  #dfdbc3      3.33   3.33  √
+   text     38;5;208  38;5;130                        18 #af5f00  #dfdbc3      3.38   3.38  0000020000.0100000
+   text     91        38;5;160                        15 #d70000  #dfdbc3      3.87   3.87  000000000000000
+   text     31        38;5;160                        12 #d70000  #dfdbc3      3.87   3.83  523765792631
+   text     38;5;160  38;5;160                        18 #d70000  #dfdbc3      3.87   3.87  FAILURECLASSIFIED0
+   text     35        38;5;128                        12 #af00d7  #dfdbc3      3.96   3.92  003708961629
+   text     38;5;178  38;5;94                         21 #875f00  #dfdbc3      4.11   3.99  UNCLASSIFIED118(100%)
+   text     90        38;5;241                       444 #626262  #dfdbc3      4.37   3.94  ,::ltl::'logtimeline[0.20.0-
+   text     38;5;244  38;5;241                       279 #626262  #dfdbc3      4.37   3.61  (2)commandusagewarnings·read
+   text     38;5;213  38;5;127                        42 #af00af  #dfdbc3      4.38   4.18  4402183181170186315164207175
+   text     38;5;0    38;5;231 on 48;5;29             74 #ffffff  #00875f      4.53   4.53  61.5965.5372.172.5872.9575.8
+   text     34        38;5;25                        101 #005faf  #dfdbc3      4.62   4.62  DATA:4.21DATA:9DATA:8DATA:8D
+   text     38;5;111  38;5;25                          2 #005faf  #dfdbc3      4.62   4.62  11
+   text     38;5;30   1;38;5;23                       12 #005f5f  #dfdbc3      5.37   5.37  ⚙YOUROPTIONS
+   text     96        38;5;23                         92 #005f5f  #dfdbc3      5.37   5.21  TOPOVERALLMESSAGES(retainedf
+   text     38;5;0    38;5;16 on 48;5;167             62 #000000  #d75f5f      5.69   5.53  1557078368283682836818368083
+   text     38;5;0    38;5;16 on 48;5;200             11 #040003  #ff00d7      6.19   6.13  55957365668
+   text     38;5;0    38;5;16 on 48;5;137              6 #000000  #af875f      6.45   6.45  0.090.
+   text     38;5;0    38;5;16 on 48;5;170             62 #000000  #d75fd7      6.51   6.40  1370135566655667556655566455
+   text     37        38;5;238                       155 #444444  #dfdbc3      6.98   6.64  Thesefile(s)wereprocessedwit
+   text     def       def                            365 #4d2f2d  #dfdbc3      8.56   7.75  2025-09-0911:000.42025-09-09
+   text     38;5;0    38;5;231 on 48;5;55             75 #ffffff  #5f00af      9.97   9.97  6070860708607086070860708607
+   text     38;5;0    38;5;231 on 48;5;19             74 #ffffff  #0000af     12.97  12.97  518.3228.7629.4429.2529.5929
+   text     38;5;16   1;38;5;16                       50 #000000  #dfdbc3     15.06  12.35  -udm'no_such_column::max'-ud
+   text     38;5;16   38;5;16                         87 #000000  #dfdbc3     15.06  14.79  nometricsproducedfrommatchin

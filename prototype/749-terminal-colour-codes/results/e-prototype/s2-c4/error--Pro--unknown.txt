@@ -1,0 +1,6 @@
+== error: Pro (dark), background unknown: basic palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #828282  #000000      5.46   5.46  ────────────────────────────
+   text     90        90                              76 #828282  #000000      5.46   5.46  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #f4f4f4  #000000     19.09  19.09  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;def                           35 #ffffff  #000000     21.00  21.00  Error:unknownoption'--bogus-
