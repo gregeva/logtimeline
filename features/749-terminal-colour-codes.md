@@ -5,7 +5,9 @@
 **In progress: research done, macOS and Windows Terminal measured and read
 together (§ 8); D1 locked (2026-11-03); the D1 prototype's first stage
 on macOS (§ 9); a macOS candidate across every surface (§ 10.1), read in
-every shipped Windows Terminal scheme (§ 11); the selection is next.**
+every shipped Windows Terminal scheme (§ 11); D1 amended: tone governs and
+the sets are 24-bit (§ 12); the tone-led sets accepted by the architect, the
+fill pairs checked on every column (§ 12.4).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -77,6 +79,22 @@ macOS/Linux terminals with non-default schemes too.
     the `-HL` twins, and the screenshot renderer's palette.
   - Bold over the default foreground (the help and explain headings) is not
     covered (§ 8.4).
+- **D1 amended (architect, 2026-11-03): tone governs, and the sets are
+  written as 24-bit codes.** Each colour stays today's colour as the class's
+  default Terminal.app profile draws it, moved only slightly in lightness
+  where it falls short of 4.5:1 ("the results should be very close, where
+  the tweak is slight"). 256-colour codes cannot hold those colours (§ 12.1),
+  so the sets are 24-bit. The architect, shown the tone-led sets with the
+  question of 24-bit codes: "I like them. Much better … Otherwise I accept
+  the rest." What it changes from D1 as first locked:
+  - The sets no longer reach 4.5:1 in every hue: on light, yellow, cyan and
+    green stay short (§ 12.3).
+  - On the schemes that darken their own colours for light (One Half Light,
+    Solarized Light, Man Page, Novel), a few colours read lower with the set
+    than the scheme draws them today (§ 12.3).
+  - Terminal.app before macOS 26, and tmux without its RGB setting, reduce
+    24-bit codes to the nearest 256-colour code (research § 6), which draws
+    the drift of § 12.1.
 
 ## 3. Records found by search
 
@@ -1002,6 +1020,140 @@ Solarized Light's green and orange, at 4.36 and 4.37:1, are a shortfall
 recorded as Man Page's is (§ 9.6, § 11.4). s2-c5 does not go forward. The
 architect has not yet seen the sets drawn: the selection waits on that.
 
+## 12. Tone governs (the architect's direction, 2026-11-03)
+
+The architect saw s2-c4 drawn for the first time, on the agreed run (the
+outage day's web access log, `-du us -st 04:00 -et 13:00 -bs 30m -n 4 -hf
+-hm duration -hg`), beside today's colours: "the fallback options are far
+better … your choices of colors just don't work. It doesn't even appear that
+you tried to keep it in the same hues and tones." Direction: a proposal where
+tone governs, visually consistent with the current colours; "the results
+should be very close, where the tweak is slight, not complete changes".
+
+### 12.1 Why s2-c4 moved the colours
+
+Measured against today's colours as Clear Dark and Clear Light draw them
+(OKLCH):
+
+| Set | Role | Today | s2-c4 |
+|---|---|---|---|
+| Dark | blue plain fill | #0000d7 | 111 #87afff, lightness +0.36 |
+| Dark | purple plain fill | #5f00af | 141 #af87ff, +0.30 |
+| Dark | red plain fill | #af0000 | 210 #ff8787, +0.28 |
+| Dark | rules and headings | #465c6d | 247 #9e9e9e, +0.24 |
+| Light | duration values | #e5c872 | 94 #875f00, −0.33 |
+| Light | count column | #69c6c9 | 23 #005f5f, −0.33 |
+| Light | yellow fills | #d7d700, #ffff00 | 58, 100 (olive), −0.38, −0.36 |
+| Light | teal highlighted fill | #00d7af | 22 #005f00, −0.36, hue −30° |
+
+Three of `design.py`'s rules did it: contrast was a hard floor while
+lightness cost a quarter of hue (`--wl 0.5`, `--wh 2.0`), so every colour
+short of the floor moved in tone first; a duller colour cost three times a
+more vivid one, so the cube's saturated codes won; and a column's two fills
+shared one text colour, black on dark, so the dark plain fills turned light
+to carry it.
+
+The 256-colour cube cannot hold today's colours either. The nearest code
+that reads no worse than today lies 0.04 to 0.09 from it in OKLab, with hue
+moved by up to 16°: Clear Dark's brick red #b45648 becomes rose (131
+#af5f5f), Clear Light's gold #c4ac62 olive (143 #afaf5f), its blue #5685a8
+grey (243 #767676). Terminal.app on macOS 26 and Windows Terminal draw
+24-bit codes exactly (§ 5.2, § 6.2).
+
+### 12.2 The tone-led sets (`palettes/t1.tsv`, then `t2.tsv`)
+
+`tone.py` (issue branch):
+- **Text:** every scheme colour starts from what the class's default
+  profile draws today, written as a 24-bit code. A colour below 4.5:1 on
+  that profile's background moves in OKLCH lightness only, hue and chroma
+  held, until it reaches 4.5:1 or has moved as far as the profile itself
+  moves that hue from its normal to its bright colour (0.05 to 0.12; 0.08
+  for greys and for `ltl`'s fixed 256-colour codes, which start from their
+  own colour).
+- **White on light:** white and bright white start from the profile's text
+  and bold text colours, as `ltl`'s light notice panel already writes black
+  where its dark one writes white (§ 2).
+- **Bold** over the default foreground: the profile's bold text colour.
+- **Fills:** today's 256-colour codes, sliced from `@column_colors`.
+- **Text over a fill:** black or white, whichever reads better on it, the
+  expected behaviour of #683 (a value drawn over a bar keeps a fixed
+  foreground colour, unreadable on dark bars).
+
+What moves on dark (Clear Dark draws it): red #b45648 to #d57464 (2.79 to
+4.16:1), the rules and headings #465c6d to #5c7385 (1.93 to 2.71), the
+failure code 160 to #f53629 (2.49 to 3.48), the purple column's values 93
+to #9758fe (2.22 to 3.29), the violet classification state 135 to #b776ff
+(3.77 to 4.51); blue, magenta and bright red by under 0.03. The rest keep
+today's colour. On light (Clear Light), the colours below 4.5:1 darken by up
+to 0.12, most by 0.04 to 0.09: for example duration values #e5c872 to
+#c8ab55 (1.58 to 2.16:1) and the count column #69c6c9 to #4fadb0 (1.93 to
+2.56). Red, the failure code, the purple column, the rules and the text
+colours keep today's.
+
+Before it was shown, all eight runs were captured in Clear Dark and Clear
+Light, set and today, and compared by eye: nothing changes character.
+
+### 12.3 Measured
+
+Captured in Clear Dark and Clear Light, the eight runs of § 10 (t1;
+`results/e-prototype/t1/`), groups below the floor, today against the set:
+
+| Profile | Text on the background | Text over a fill | Bars and lines | Text below 3:1 |
+|---|---|---|---|---|
+| Clear Dark | 24/70, 15/70 | 29/32, 1/32 | 11/29, 11/29 | 14, 7 |
+| Clear Light | 46/70, 31/72 | 29/32, 1/32 | 17/29, 12/29 | 37, 19 |
+
+The one group over a fill is the pause prompt: the default foreground over
+the set's blue, as today. The bars and lines include the rules, which stay
+dim (2.71:1 on Clear Dark).
+
+Computed for every measured profile and scheme from its drawn colours (one
+count per colour role, s1 to s15 and `ltl`'s fixed codes), roles below
+4.5:1 today against the set:
+- **Dark:** fewer in every one: Clear Dark 12 to 6, Campbell 9 to 1, One
+  Half Dark 10 to 6, Solarized Dark 15 to 3. The roles that read lower than
+  today stay above 4.5:1, except the rules on Campbell (4.31 to 3.96),
+  Campbell Powershell (3.33 to 3.06), Dimidium (4.58 to 3.72), Ottosson and
+  Vintage (5.32 to 4.25).
+- **Light:** Clear Light 26 to 16, Tango Light 23 to 16, One Half Light 26
+  to 22, Solarized Light 26 to 25; Man Page 23 to 25 and Novel 27 to 28.
+  Below 3:1, fewer in every one. Lower than the scheme draws it today:
+  One Half Light's cyan 3.30 to 2.53, magenta 5.86 to 4.48; Solarized
+  Light's bright green 4.99 to 2.55 and bright yellow 4.13 to 2.07; Man
+  Page's blue 11.29 to 4.14.
+
+### 12.4 The fill pairs
+
+The architect, on t1: "the highlight background color for the users metric
+is not differentiated enough from the normal bar color … Your tests will
+need to use a maximum of metrics columns, each with highlight active on a
+portion of the data." The ninth run, `fills`, reads the custom-metrics CSV
+with ten user-defined metrics, which take the ten column colours in order,
+and highlights every odd minute (`-h ' [0-9][0-9]:[0-5][13579]:[0-9][0-9],'`,
+`-bs 10 -n 0`): each column's plain and highlighted fill side by side.
+
+Distance between each column's plain and highlighted fill (OKLab), against
+yellow's and green's, which the architect read as distinct:
+
+| Column | Plain, highlighted | Distance |
+|---|---|---|
+| yellow | 184, 226 | 0.120 |
+| green | 34, 46 | 0.225 |
+| cyan | 30, 36 | 0.123 (36 is a sea green, hue −26°) |
+| **blue** | **20, 21** | **0.066** |
+| magenta | 127, 201 | 0.190 |
+| red | 124, 196 | 0.167 |
+| orange | 166, 208 | 0.120 |
+| pink | 169, 213 | 0.149 |
+| teal | 29, 43 | 0.235 |
+| purple | 55, 93 | 0.146 |
+
+Only blue falls below yellow. In t2 its highlight takes 27 (#005fff), the
+code `ltl`'s histogram already highlights blue with (`highlighted_bg_num`):
+0.156 from the plain fill, in both sets. The other pairs keep today's codes.
+With t2, over the access-log and `fills` runs, no text over a fill falls
+below 4.5:1 in either profile (`results/e-prototype/t2/`).
+
 ## Resuming
 
 - Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
@@ -1064,7 +1216,10 @@ architect has not yet seen the sets drawn: the selection waits on that.
   - **A further design round:** s2-c5, the light set designed for every
     light background of both hosts, designed but not rendered; the
     architect kept s2-c4's light set (§ 11.7).
-- Next: the architect sees the sets drawn (he has not yet), then the
-  selection, stage 5 of § 10, with both hosts' readings.
+  - **Tone governs (§ 12):** `tone.py` designs the sets from today's
+    colours, 24-bit, moved slightly in lightness only; `palettes/t1.tsv`
+    accepted by the architect, `t2.tsv` with blue's highlight separated. The
+    ninth run, `fills`, shows every column's plain and highlighted fill.
+- Next: the architect's reading of the fill pairs in `t2` (§ 12.4).
 - State outside the repository: none needed; the captures are remade by the
   instruments.
