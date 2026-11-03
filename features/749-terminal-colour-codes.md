@@ -4,8 +4,8 @@
 
 **In progress: research done, macOS and Windows Terminal measured and read
 together (§ 8); D1 locked (2026-11-03); the D1 prototype's first stage
-on macOS (§ 9); a macOS candidate across every surface (§ 10.1); handed
-over to the Windows host (§ 11).**
+on macOS (§ 9); a macOS candidate across every surface (§ 10.1), read in
+every shipped Windows Terminal scheme (§ 11); the selection is next.**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -760,93 +760,198 @@ Open in the candidate, for the architect's eye and Windows' feedback:
   in places.
 - On the mid-tone and coloured backgrounds, no set reaches the floors.
 
-## 11. Windows: handover brief for the every-surface stage
+## 11. Windows: the sets across every surface
 
-Assigned by the architect (2026-11-03) to a Claude session on the Windows
-development host, through the repository, as in § 6. It is the fourth
-stage of § 10: Windows' inputs and feedback on the macOS candidate. It is
-not a choice: nothing is selected until the architect has both hosts'
-readings. Start from `prototype/749-terminal-colour-codes/` on branch
-`749-terminal-colour-codes` (README there; candidate and instruments as of
-07da2f35).
+Measured on 2026-11-03 by a Claude session on the Windows development host,
+as the architect assigned, from the brief this section held (git history of
+this file, 65356b4b). It is the fourth stage of § 10: Windows' inputs and
+its readings of candidate s2-c4. Nothing is selected here.
 
-**Goal.** Measure every shipped Windows Terminal colour scheme as an input,
-then render candidate s2-c4 across every surface in scope in those schemes,
-with the background known and unknown, and read the captures as on macOS
-(§ 10.1).
+### 11.1 Method
 
-**Setup to record** (as § 6.1): the Windows build; the Windows Terminal
-version; font face and size; display scale; and `intenseTextStyle` and
-`adjustIndistinguishableColors` as written in the settings, or "absent".
-
-**1. Inputs: every shipped scheme.**
-- Extend `wt-measure.sh` (today Campbell and One Half Light) to every
-  colour scheme the installed Windows Terminal ships. Draw the pattern in
-  each, as § 6 did.
-- Write each scheme's `profile-<scheme>.txt` to `results/windows-terminal/`.
-  These give each scheme's background and the colours it draws for the
-  sixteen.
-- Class each scheme light or dark by `ltl`'s rule in `detect_terminal`:
-  BT.709 luma of the measured background above one half.
-
-**2. The runs.**
-- Run `./e-outputs.sh <out> palettes/s2-c4.tsv` from Git Bash, with the
-  host's own `ltl`. It writes the eight runs of § 10 in the three palettes
-  of D1.
-- The log-reading runs need the corpus files `e-outputs.sh` names under
-  `logs/`: one node's web access log and method server logs from the outage
-  day, and the custom-metrics CSV. If any is missing on the host, stop and
-  say which; do not substitute another log.
-- On Windows, `ltl` draws its bars and heatmap cells with `■`, not `█`
-  (`$default_chart_block`). That is the Windows rendering under test, so
-  keep it.
-
-**3. Capture.**
-- Write the Windows counterpart of `e-measure.sh` and `e-show.sh`, using
-  `wt-capture.ps1`'s way of opening a window in a given scheme and capturing
-  it. The page protocol stays the same: the window prints its file a page
-  at a time; after each page it signals and is captured, and it closes
-  after the last.
-- Use a window of 190 columns and as many rows as the display holds, the
-  same for every scheme. A run longer than the window is captured page by
-  page.
-- Windows close as soon as they are captured; nothing waits for a key.
-- Each scheme gets two conditions: background known (the set for its
-  class) and unknown (`basic.ans`, the fallback).
-
-**4. Reading.**
-- Read every window with `read-output.py`. Without `sips`, it decodes the
-  PNG itself and reads the screen's pixels as captured.
-- Write the per-window tables and `summary.txt` and `compare.txt` to
+- **Where:** as § 6.1. Windows Terminal 1.24.12741.0 (ARM64) on Windows 11
+  25H2, build 26200.9711; display 1920 by 1080 at 100% scale (96 DPI). The
+  settings file sets no font face or size (Windows Terminal's defaults; the
+  measured cell is 9 by 19 pixels), and neither `intenseTextStyle` nor
+  `adjustIndistinguishableColors` (absent). Each window's scheme was set
+  with `wt --colorScheme`, the settings file untouched.
+- **Inputs:** the pattern of § 5.1 drawn and read in all 14 colour schemes
+  the installed Windows Terminal ships. Campbell's and One Half Light's
+  tables came out unchanged from § 6's run.
+- **Runs:** the eight runs of § 10, written by the host's own `ltl` with
+  `palettes/s2-c4.tsv`. Here `ltl` draws its bars with `■`, kept as the
+  Windows rendering under test.
+- **Capture:** each run in a window of 190 by 51, the most rows a
+  190-column window holds above the taskbar on this display. Each window
+  printed its run a page at a time, was captured after each page and
+  closed. That is 14 schemes, background known (the set for the scheme's
+  class) and unknown (today's colours), 224 windows. As in Terminal.app,
+  the last page shows one line short of the file (its final empty line);
+  `read-output.py` finds each page's first line from the capture.
+- **Reading:** `read-output.py` as on macOS. `tally.py` makes § 10.1's
+  count: over the committed macOS tables it gives § 10.1's figures in
+  every profile. The two hosts' tallies are the same count, with the same
+  70 groups of text on the background, 32 over a fill and 29 bars and
+  lines.
+- **Instruments and results:** `prototype/749-terminal-colour-codes/` on
+  branch `749-terminal-colour-codes` (d87fa95e). The schemes are in
+  `results/windows-terminal/`, the runs in
   `results/windows-terminal/e-prototype/s2-c4/`.
-- Tally them as § 10.1 does: text on the background, text over a fill,
-  and bars and lines, today against s2-c4. Leave out the histogram and the
-  heatmap.
 
-**5. What to report** (§ 11's findings, in the form of § 10.1):
-- **Each scheme's background and class.**
-- **The tallies per scheme.**
-- **Where the candidate falls short on Windows that it does not on
-  macOS:** on One Half Light especially, which § 6 measured as repainting
-  the sixteen, and in any scheme whose background `ltl`'s rule classes
-  against intuition.
-- **What Windows draws differently:**
-  - bold over the set's 256-colour codes, against bold over basic codes
-    (§ 6.2);
-  - the `■` bars against their fills;
-  - the notice panel.
-- **The open points of § 10.1, read on Windows:** the light set's olive
-  yellow fills and dark green teal highlight; Man Page and Novel's
-  shortfalls, if any Windows scheme sits near them.
+### 11.2 Each scheme's background and class
 
-**Recording.**
-- **Findings:** into this section on `release/0.20.0`, replacing this brief
-  (the brief stays in git history).
-- **Scripts and results:** on branch `749-terminal-colour-codes`.
-- **Captures:** stay out of the repository, since window titles can carry
-  the user's name.
-- **Publishing:** push both branches, each push its own command, then
-  comment on the issue pointing here.
+By `ltl`'s rule (BT.709 luma of the measured background above one half):
+
+| Scheme | Background | Luma | Class |
+|---|---|---|---|
+| Campbell (the default) | #0c0c0c | 0.047 | dark |
+| Campbell Powershell | #012456 | 0.126 | dark |
+| Dimidium | #141414 | 0.078 | dark |
+| Ottosson, Vintage, Tango Dark, CGA, IBM 5153 | #000000 | 0 | dark |
+| One Half Dark | #282c34 | 0.171 | dark |
+| Solarized Dark | #002b36 | 0.136 | dark |
+| Dark+ | #1e1e1e | 0.118 | dark |
+| One Half Light | #fafafa | 0.980 | light |
+| Solarized Light | #fdf6e3 | 0.965 | light |
+| Tango Light | #ffffff | 1.000 | light |
+
+Every scheme classes as its name says, none near one half. Windows ships no
+mid-tone or coloured background like macOS's Silver Aerogel, Grass, Ocean
+or Red Sands; the nearest is Campbell Powershell's navy.
+
+### 11.3 The tallies
+
+Groups of cells with one code that fall below the floor (4.5:1 for text,
+3:1 for bars and lines), today against s2-c4, as § 10.1:
+
+| Scheme | Text on the background (70 groups) | of which below 3:1 today | Text over a fill (32) | Bars and lines (29) |
+|---|---|---|---|---|
+| Campbell | 18, 0 | 4 | 21, 0 | 5, 4 |
+| Campbell Powershell | 28, 0 | 11 | 21, 0 | 5, 4 |
+| Dimidium | 8, 0 | 0 | 20, 0 | 4, 4 |
+| Ottosson | 8, 0 | 1 | 20, 0 | 5, 4 |
+| Vintage | 18, 0 | 7 | 19, 0 | 5, 4 |
+| One Half Dark | 19, 0 | 11 | 26, 0 | 11, 4 |
+| Solarized Dark | 27, 0 | 12 | 26, 0 | 11, 4 |
+| Tango Dark, Dark+ | 18, 0 | 7 | 20, 0 | 11, 4 |
+| CGA | 21, 0 | 11 | 17, 0 | 12, 4 |
+| IBM 5153 | 18, 0 | 11 | 19, 0 | 12, 4 |
+| One Half Light | 46, 0 | 27 | 29, 0 | 12, 4 |
+| Solarized Light | 57, 17 (none below 3) | 33 | 26, 0 | 14, 4 |
+| Tango Light | 42, 0 | 30 | 20, 0 | 12, 4 |
+
+With the light set, the light schemes count 72 text groups. Their runs are
+`ltl`'s output for a light background, whose notice panel writes five
+codes where the dark output writes three (§ 2).
+
+- **Text:** in 13 of the 14 schemes the set leaves no text below 4.5:1,
+  on the background or over a fill. The exception is Solarized Light
+  (§ 11.4).
+- **Bars and lines:** the four readings left in every scheme are bar
+  glyphs over their own fill (§ 11.5).
+- **macOS's one text reading does not appear here.** On Clear Dark and
+  Clear Light, the notice panel's thin `——` rule stayed below its full
+  colour (§ 10.1). Here it reads at 4.5:1 or more.
+
+### 11.4 Where the candidate falls short on Windows
+
+- **Solarized Light** (background #fdf6e3, a cream) has 17 text groups
+  below 4.5:1 with the set, none below 3:1:
+  - **7 are the scheme's own text colour** (#657b83, 4.13:1 on its
+    background), one group per run of ordinary text. No set changes it.
+  - **10 are the light set's green and orange.** Green 28 reads 4.36:1
+    there: bytes, 2xx, `INFO`, success, the progress lines. Orange 130
+    reads 4.37:1: the orange column's values. Both read 4.51:1 on One Half
+    Light and 4.70 on Tango Light. The design put them at 4.54 and 4.55 on
+    Clear Light (#fbfbfb), which leaves no margin for a darker light
+    background.
+  - **As bars, two light fills fall to the 3:1 the design holds fills to**
+    on Clear Light. The magenta plain fill (170) reads 2.99:1 against
+    Solarized Light's background and orange's tan plain fill (137) 3.02.
+    On One Half Light they read 3.09 and 3.12.
+- **One Half Light holds.** It repaints the sixteen (§ 6.2), but with the
+  set no text falls below 4.5:1. The set writes none of the sixteen, so the
+  repainting no longer reaches these colours. Today 46 of its 70 text
+  groups fall below 4.5:1, 27 of them below 3.
+- **No scheme's background classes against intuition** (§ 11.2).
+
+### 11.5 What Windows draws differently
+
+- **Bold**, from the pattern in all 14 schemes (`summary.txt`, items 1 and
+  3; `profile-*.txt`, group C):
+  - Bold over a basic code takes the code's bright variant in every
+    scheme (One Half Dark changes only `30`; Dark+ all but `37`), at the
+    same weight: ink 1.00 to 1.05 times. Larger ratios, up to 2.69, occur
+    only where the plain colour is within 1.92:1 of the background, and
+    the ink count (pixels at least 48 from the background) misses it.
+  - Bold over index 16-255 keeps its colour and draws 1.12 to 1.13 times
+    heavier.
+
+  In the runs:
+  - **Help and explain headings** (bold over the default foreground).
+    Today they take each scheme's bold colour. On One Half Light that is
+    lighter than the body (7.46:1 against 10.86). On Solarized Dark (4.75),
+    Solarized Light (4.13), Tango Light, One Half Dark and Dark+ it is the
+    body's own colour, so the headings stand out by nothing. With the set
+    (231 on dark, 16 on light) they read 14.0 to 21.0:1, and heavier.
+  - **The explain page's message-table titles** (bold `36`). Today they
+    read 1.60:1 on Tango Light, 2.29 on One Half Light and 2.48 on
+    Solarized Light. With the set (bold 80 on dark, 23 on light) they
+    read 6.95 to 12.19 in every scheme.
+  - **The notice panel's pick** (bold `37`). Today it does not show on the
+    light schemes (1.00 to 1.16:1). With the background known as light,
+    `ltl` writes it bold black (16): 19.47 to 21.0.
+- **`■` bars.** `■` is a square smaller than the cell:
+  - **Bars over a fill** (the metric columns' bodies) draw the glyph in
+    the fill's colour, so they read solid.
+  - **The occurrence bars** have no fill, so they read as a row of
+    squares, today and with the set.
+  - **The occurrences column's failure bar** in the highlighted-failure
+    runs draws `■` in red (`31`) over a red fill (196). On macOS `█` hides
+    the fill. Here the fill shows around each square: today's darker red
+    (Campbell's #c50f1f) draws dark squares on the bar (1.52:1 between the
+    two), and the set's lighter red (203) draws pale ones (1.34:1). Three
+    of the four bar readings in every scheme are this bar, one per run that
+    draws it. The fourth is the explain page's own example bar, written
+    with `█` on every host, over its green fill.
+- **The notice panel.** On a dark background, `ltl` writes the panel's
+  secondary text faint (§ 2), and the set leaves faint as it is. Windows
+  Terminal draws faint toward the background. In the custom-metrics run's
+  279 faint cells, with the set and today alike, it reads:
+  - 1.65:1 on Solarized Dark;
+  - 2.63 to 3.41 on Campbell Powershell, Dimidium, One Half Dark, CGA,
+    IBM 5153, Dark+, Ottosson, Vintage and Campbell;
+  - 3.90 on Tango Dark.
+
+  These equal the pattern's faint default text in each scheme
+  (`summary.txt`, item 4). On the light schemes faint is drawn darker
+  (10.36 to 16.13:1 today), and with the light set `ltl` writes its grey
+  instead. Neither host's tallies see faint text: `read-output.py` groups
+  it with the plain text of the same code, and reads a group's colour at
+  its 90th percentile. The panel's frame, title and categories read at
+  4.5:1 or more (text) and 3:1 or more (lines) with the set in every
+  scheme.
+
+### 11.6 The open points of § 10.1, read on Windows
+
+- **The light set's olive yellow fills (58, 100) and dark green teal
+  highlight (22).** Windows Terminal draws index 16-255 at the same values
+  as Terminal.app (§ 6.2), so these fills are the same colours on both
+  hosts; only the background behind them changes. As bars on the three
+  light schemes they read:
+  - 58: 6.23 to 6.72:1;
+  - 100: 3.54 to 3.82;
+  - 22: 7.38 to 7.96.
+
+  Whether olive and dark green will do is for the architect's eye.
+  `wt-e-measure.sh` remakes the captures.
+- **Man Page's and Novel's shortfalls.** Solarized Light is the Windows
+  scheme nearest them. Its background's relative luminance (0.92) lies
+  between Clear Light's (0.97) and Man Page's (0.88). It falls short in
+  Man Page's way, by less. The light set's green 28 reads 4.36:1 on
+  Solarized Light; computed from the measured backgrounds, it reads 4.17
+  on Man Page and 3.37 on Novel. The magenta plain fill reads 2.99, 2.86
+  and 2.31.
 
 ## Resuming
 
@@ -902,7 +1007,12 @@ version; font face and size; display scale; and `intenseTextStyle` and
     an empty line, and Terminal.app shows the last page one line short.
   - **The macOS candidate:** s2-c4, rendered and read across every surface
     (§ 10.1).
-- Next: the Windows host, starting at § 11 (handed over by the architect,
-  2026-11-03). Then the architect's choice, with both hosts' readings.
+  - **Windows:** s2-c4 rendered and read in all 14 shipped Windows
+    Terminal schemes, background known and unknown (§ 11). The
+    instruments are `wt-measure.sh` (every shipped scheme),
+    `wt-e-measure.sh` (the runs, page by page) and `tally.py` (§ 10.1's
+    count), on the issue branch.
+- Next: the selection, stage 5 of § 10, the architect's, with both hosts'
+  readings.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
