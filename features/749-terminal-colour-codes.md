@@ -1249,7 +1249,10 @@ metric turns the heatmap off.
 **The architect (2026-11-03), on `t4` drawn in Clear Dark and Clear Light:
 "yes - thats perfect. I validate both sets. It not only looks beautiful".**
 The validated sets are `t4`: the text colours of § 12.2, the fills with
-blue's highlight at 27 (§ 12.4), and these gradients.
+blue's highlight at 27 (§ 12.4), and these gradients. The column colours stay
+the ten of `@column_colors`; asked whether more should be added so that an
+eleventh column or metric no longer wraps to yellow, the architect: "No, I
+don't want any more than what you just showed. That is already ample."
 
 ## Resuming
 
