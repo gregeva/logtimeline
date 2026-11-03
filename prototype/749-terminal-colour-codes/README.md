@@ -173,3 +173,12 @@ Terminal scheme, with the background known and unknown, read as on macOS.
 `results/windows-terminal/e-prototype/s2-c4/`: one table per window,
 `summary.txt`, `compare.txt` and `tally.txt`, from Windows Terminal
 1.24.12741.0 on Windows 11 build 26200.9711, the 14 shipped schemes.
+
+`design.py --light-hard` names the light backgrounds the light set must
+clear, a profile measured here as `windows-terminal/<scheme>`.
+`palettes/s2-c5.tsv` is the light set designed for every light background of
+both hosts (the feature doc § 11.7):
+
+```bash
+./design.py --light-hard Clear-Light,windows-terminal/One-Half-Light,windows-terminal/Solarized-Light,windows-terminal/Tango-Light --out palettes/s2-c5.tsv
+```

@@ -25,7 +25,10 @@ For text on the window's background (s, f):
 - target: what the class's default Terminal.app profile draws for it today
   (Clear Dark; Clear Light), or a fixed code's own colour;
 - floor: 4.5:1 against every hard background of the class; the soft ones
-  count as a penalty;
+  count as a penalty. Dark: Clear Dark, Basic, Pro and Homebrew. Light:
+  --light-hard (default Clear-Light), with --light-soft as the penalty
+  (default Man-Page,Novel); a profile measured on another host is named
+  host/name, as windows-terminal/Solarized-Light;
 - kind: a chromatic role keeps its hue (OKLCH, within --hue-tol degrees of
   the target's) at a chroma of 0.06 or more; the greys stay grey;
 - choice: nearest the target in OKLCH, hue weighted --wh, chroma --wc,
@@ -66,7 +69,7 @@ FILL_HUE_TOL = arg("--fill-hue-tol", 30.0)
 FILL_SIBLING = {"yellow": 3, "green": 2, "cyan": 6, "blue": 4, "magenta": 5, "red": 1}
 OUT = arg("--out", os.path.join(here, "palettes", "candidate.tsv"))
 
-src = open(os.path.join(root, "ltl")).read()
+src = open(os.path.join(root, "ltl"), encoding="utf-8").read()
 xterm16 = [tuple(map(int, t)) for t in re.findall(r"\[\s*(\d+),\s*(\d+),\s*(\d+)\s*\]",
            re.search(r"my @notice_xterm16 = \((.*?)\);", src, re.S).group(1))]
 column_colors = [(m.group(1), int(m.group(3)), int(m.group(2))) for m in re.finditer(
@@ -109,7 +112,9 @@ def weighted(x, target):
     return math.sqrt((W_L * (L1 - L2)) ** 2 + (W_C * dc) ** 2 + (W_H * dh) ** 2)
 
 def table(name):
-    return open(os.path.join(here, "results", "terminal-app", f"profile-{name}.txt")).read()
+    # a profile is Terminal.app's by its name, or another host's as host/name
+    host, _, prof = name.rpartition("/")
+    return open(os.path.join(here, "results", host or "terminal-app", f"profile-{prof}.txt"), encoding="utf-8").read()
 def background(name):
     h = re.search(r"#([0-9a-f]{6})", table(name).splitlines()[0]).group(1)
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
@@ -120,9 +125,11 @@ def drawn(name):
         if n < 16: out[n] = tuple(int(m.group(2)[i:i+2], 16) for i in (0, 2, 4))
     return out
 
+listed = lambda s: [p for p in s.split(",") if p]
 CLASSES = {
     "dark": dict(defaults=["Clear-Dark"], hard=["Clear-Dark", "Basic", "Pro", "Homebrew"], soft=[]),
-    "light": dict(defaults=["Clear-Light"], hard=["Clear-Light"], soft=["Man-Page", "Novel"]),
+    "light": dict(defaults=["Clear-Light"], hard=listed(arg("--light-hard", "Clear-Light")),
+                  soft=listed(arg("--light-soft", "Man-Page,Novel"))),
 }
 NAMES = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "bright black", "bright red", "bright green",
          "bright yellow", "bright blue", "bright magenta", "bright cyan", "bright white"]
@@ -271,7 +278,7 @@ def design_fills(cls):
 if __name__ == "__main__":
     sets = {cls: {**design_text(cls), **design_fills(cls), "e": 231 if cls == "dark" else 16} for cls in CLASSES}
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, "w") as f:
+    with open(OUT, "w", encoding="utf-8", newline="\n") as f:
         f.write(f"# D1 candidate sets by design.py (every surface): hue tolerance {HUE_TOL}, separation {SEP}, soft {SOFT}, "
                 f"weights L {W_L} C {W_C} H {W_H}, fill floor {FILL_FLOOR}, pair separation {PAIR_SEP}, grey gap {GREY_GAP}\n")
         for cls, c in CLASSES.items():
