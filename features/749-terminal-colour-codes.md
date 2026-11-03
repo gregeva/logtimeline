@@ -3,8 +3,8 @@
 ## Status
 
 **In progress: research done, macOS and Windows Terminal measured and read
-together (§ 8); D1 locked (2026-11-03); the prototype of D1 on macOS has
-a selection for the architect's review (§ 9).**
+together (§ 8); D1 locked (2026-11-03); the D1 prototype's first stage
+on macOS (§ 9); the sets across every surface next (§ 10).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -549,7 +549,10 @@ Terminal.app, brighter on Campbell, and lighter on One Half Light (10.86 to
 7.46:1), where the headings recede. A fixed code can replace the default
 foreground only once the background is known.
 
-## 9. The prototype of D1 on macOS
+## 9. The prototype of D1 on macOS: first stage
+
+This stage covered only text on the window's background in one timeline
+run. The architect's review widened the scope (§ 10).
 
 ### 9.1 What it shows, and how
 
@@ -685,13 +688,43 @@ every profile.
   applied here to every scheme colour over a fill. In the legend, the
   highlighted counts stop being drawn in their category's colour.
 
+## 10. The sets across every surface (the architect's scope, 2026-11-03)
+
+§ 9 was a first stage. It covered only the text on the window's background
+in one timeline run, and left fills and bars as `ltl` draws them. On
+reviewing it, the architect set the scope. Nothing is locked: the sets are
+settled over several stages, with capture and validation on Windows too.
+
+- **Every surface** in research § 1.3 and § 1.4: the timeline's header,
+  rules, legend, occurrence bars, metric columns, success and failure, and
+  latency column; the run summary; the message and thread-pool tables; the
+  banner; help and explain; the error line; the pause prompt; the progress
+  lines; and the notice surfaces.
+- **Text over a fill is important:** it is designed with the fills, not
+  settled by a rule.
+- **Bars and lines are in scope:** the occurrence bars, the metric columns'
+  bar bodies (`plain_bg`, `highlighted_bg`), the summary's contribution
+  bars, and the rules and separators.
+- **The histogram and heatmap colours stay as they are,** having been chosen
+  already: the histogram's bins and percentile band, and the heatmap's
+  gradients.
+
+The stages:
+1. On macOS, a set of real runs that together show every surface in scope.
+2. Every colour role designed in both sets, the fills with the text over
+   them.
+3. Iterating across the Terminal.app configurations until the readings and
+   renders hold.
+4. The same capture and validation on Windows.
+5. The selection, for the architect.
+
 ## Resuming
 
 - Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
   measured on Campbell and One Half Light (§ 6); the two read together
-  (§ 8); D1 locked; the prototype of D1 on macOS and its selection (§ 9).
+  (§ 8); D1 locked; the first stage of the D1 prototype on macOS (§ 9).
   Instruments on branch `749-terminal-colour-codes`.
-- Next: the architect's review of the selection (§ 9.4). After it, the same
-  process on Windows, as the architect asked (2026-11-03).
+- Next: § 10, the sets across every surface, stage 1 (the runs) on macOS.
+  The selection goes to the architect only at the end, after Windows.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
