@@ -174,6 +174,12 @@ Terminal scheme, with the background known and unknown, read as on macOS.
 `summary.txt`, `compare.txt` and `tally.txt`, from Windows Terminal
 1.24.12741.0 on Windows 11 build 26200.9711, the 14 shipped schemes.
 
+`wt-e-view.sh <out>/<palette> <scheme>...` shows a candidate to the
+architect: one Windows Terminal window, a tab per scheme, each opening on the
+palette's swatch card (`e-swatch.py`, every role in its colour) followed by
+the eight runs a page at a time. `t` flips the page between today's colours
+and the scheme's set; Space and `b` turn pages; `n` and `p` change runs.
+
 `design.py --light-hard` names the light backgrounds the light set must
 clear, a profile measured here as `windows-terminal/<scheme>`.
 `palettes/s2-c5.tsv` is the light set designed for every light background of
