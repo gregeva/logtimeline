@@ -37,7 +37,11 @@ For text on the window's background (s, f):
 For fills (b, t):
 - a fill stays visible as a bar: --fill-floor (3:1) against every hard
   background of the class, plain and highlighted;
-- it keeps its hue (within --fill-hue-tol of today's fill);
+- it keeps its hue, nearer its own column's than any other column's: within
+  --fill-hue-tol of the scheme colour of the same
+  name as the class's default profile draws it (yellow, green, cyan, blue,
+  magenta, red), so fills and text share a family; within --hue-tol of
+  today's fill for orange, pink, teal and purple;
 - a column's highlighted fill stands out from its plain one: at least
   --pair-sep apart in OKLab, and further from the background in contrast or
   more vivid;
@@ -56,7 +60,10 @@ arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv els
 HUE_TOL, SEP, SOFT = arg("--hue-tol", 25.0), arg("--sep", 0.08), arg("--soft", 0.25)
 W_L, W_C, W_H = arg("--wl", 0.5), arg("--wc", 1.0), arg("--wh", 2.0)
 FILL_FLOOR, PAIR_SEP, GREY_GAP = arg("--fill-floor", 3.0), arg("--pair-sep", 0.10), arg("--grey-gap", 0.10)
-FILL_HUE_TOL = arg("--fill-hue-tol", 35.0)
+FILL_HUE_TOL = arg("--fill-hue-tol", 30.0)
+# a column's fills take their hue from the scheme colour of the same name,
+# as the class's default profile draws it; the others keep today's fill hue
+FILL_SIBLING = {"yellow": 3, "green": 2, "cyan": 6, "blue": 4, "magenta": 5, "red": 1}
 OUT = arg("--out", os.path.join(here, "palettes", "candidate.tsv"))
 
 src = open(os.path.join(root, "ltl")).read()
@@ -198,23 +205,34 @@ def design_fills(cls):
     c = CLASSES[cls]
     hard = [background(p) for p in c["hard"]]
     def fill_ok(n): return min(cr(rgb(n), b) for b in hard) >= FILL_FLOOR
-    def cands(today):
-        L0, C0, H0 = lch(rgb(today))
+    # each column's identity hue; a candidate belongs to the column whose
+    # identity hue is nearest its own, so orange does not slide into red
+    ident = {}
+    for name, p0, h0 in column_colors:
+        sib = FILL_SIBLING.get(name)
+        ident[name] = lch(drawn(c["defaults"][0])[sib])[2] if sib else lch(rgb(p0))[2]
+    def cands(today, name, nearest=True):
+        H0 = ident[name]
+        tol = FILL_HUE_TOL if name in FILL_SIBLING else HUE_TOL
         out = []
         for n in range(16, 256):
             L, C, H = lch(rgb(n))
-            if hue_gap(H, H0) > FILL_HUE_TOL or C < 0.06 or not fill_ok(n): continue
+            if hue_gap(H, H0) > tol or C < 0.06 or not fill_ok(n): continue
+            if nearest and min(ident, key=lambda k: hue_gap(H, ident[k])) != name: continue
             out.append((0.0 if n == today else weighted(rgb(n), oklab(rgb(today))), n))
-        return sorted(out)[:12]
+        out = sorted(out)[:12]
+        # a column whose hue sits close to another's (teal by cyan) may have
+        # nothing nearer its own: then the tolerance alone decides
+        return out if out or not nearest else cands(today, name, False)
     def text_for(p, h):
         best = max((16, 231), key=lambda t: min(cr(rgb(t), rgb(p)), cr(rgb(t), rgb(h))))
         return best, min(cr(rgb(best), rgb(p)), cr(rgb(best), rgb(h)))
     def own_text(n):
         return max((16, 231), key=lambda t: cr(rgb(t), rgb(n)))
     options = {}
-    for name, p0, h0 in column_colors:
+    def pairs_for(name, p0, h0, nearest):
         opts, split = [], []
-        for (dp, p), (dh, h) in itertools.product(cands(p0), cands(h0)):
+        for (dp, p), (dh, h) in itertools.product(cands(p0, name, nearest), cands(h0, name, nearest)):
             if p == h or de(oklab(rgb(p)), oklab(rgb(h))) < PAIR_SEP: continue
             # the highlighted fill stands out: more contrast with the background, or more vivid
             if min(cr(rgb(h), b) for b in hard) <= min(cr(rgb(p), b) for b in hard) and lch(rgb(h))[1] <= lch(rgb(p))[1] + 0.02: continue
@@ -222,7 +240,11 @@ def design_fills(cls):
             if tc >= 4.5: opts.append((dp + dh, p, h, t, t))
             else: split.append((dp + dh, p, h, own_text(p), own_text(h)))
         # no pair shares a text colour: each fill takes its own black or white
-        opts = opts or split
+        return opts or split
+    for name, p0, h0 in column_colors:
+        # a column whose hue sits close to another's (teal by cyan) may have no
+        # pair nearer its own hue: then the tolerance alone decides
+        opts = pairs_for(name, p0, h0, True) or pairs_for(name, p0, h0, False)
         if not opts: raise SystemExit(f"{cls} {name}: no fill pair")
         options[name] = sorted(opts)[:8]
     names = [n for n, _, _ in column_colors]

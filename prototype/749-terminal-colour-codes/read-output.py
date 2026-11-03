@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Reads a terminal window's captures of ltl output, cell by cell.
 
-  read-output.py <top.png> <bottom.png> <shown.ans> <frame.json> <window-rows> <profile> <condition> <background> <palette> <base.ans>  > read.json
+  read-output.py <pages-dir> <shown.ans> <frame.json> <window-rows> <profile> <condition> <background> <palette> <base.ans> <run>  > read.json
   read-output.py --table <read.json>
   read-output.py --summary <read.json>...
   read-output.py --compare <read.json>...
 
-<top.png> is the window showing the first <window-rows> lines of <shown.ans>
-(the exact file printed), <bottom.png> the same window scrolled to the end.
-The grid comes from the top capture's marker blocks (column pitch) and
+<pages-dir> holds page-0.png, page-1.png, ...: the window after each page of
+<shown.ans> (the exact file printed) was printed, <window-rows> lines a
+page, page k ending at line min((k+1)R, total) and so showing the R lines
+before it. The grid comes from page 0's marker blocks (column pitch) and
 calibration cell (its top and height: a background fills the whole cell),
-and holds for the bottom capture, the same window. Every cell of
+and holds for every page, the same window. Each line is read on the page
+that printed it. Every cell of
 <shown.ans> is parsed for its character and the codes in force (foreground,
 background, bold); a line the top capture shows is read there, the rest in
 the bottom capture. Each cell holding a glyph is read:
@@ -27,10 +29,25 @@ colour is the ink at the 90th percentile of distance from the background
 across its cells (thin glyphs do not reach the full colour), its contrast
 that colour's, and its low the 10th percentile of the cells' own contrasts.
 """
-import json, os, re, sys, unicodedata
+import json, os, re, shutil, struct, subprocess, sys, tempfile, unicodedata
 from statistics import median
+import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analyse import load, dist, contrast, hexc
+from analyse import dist, contrast, hexc, SRGB
+
+def load_np(png):
+    """the capture as an sRGB array (height, width, 3), through sips as a BMP"""
+    bmp = os.path.join(tempfile.mkdtemp(), "c.bmp")
+    cmd = ["sips"] + (["-m", SRGB] if os.path.exists(SRGB) else []) + ["-s", "format", "bmp", png, "--out", bmp]
+    subprocess.run(cmd, check=True, capture_output=True)
+    d = open(bmp, "rb").read()
+    off, = struct.unpack_from("<I", d, 10)
+    w, h, _, bpp = struct.unpack_from("<iiHH", d, 18)
+    stride = (w * bpp // 8 + 3) & ~3
+    a = np.frombuffer(d, np.uint8, count=stride * abs(h), offset=off).reshape(abs(h), stride)[:, :w * bpp // 8]
+    a = a.reshape(abs(h), w, bpp // 8)[:, :, 2::-1]
+    shutil.rmtree(os.path.dirname(bmp))
+    return a[::-1] if h > 0 else a
 
 def parse(text):
     st = dict(fg="def", bg="def", bold=False, faint=False, ul=False, rev=False)
@@ -79,50 +96,60 @@ def scheme(code):
     p = code.split(";")
     return len(p) == 1 or (p[1] == "5" and int(p[2]) < 16)
 
-def geometry(w, h, px, man):
-    mark, cal = (254, 0, 129), (129, 0, 254)
-    top = [(x, y) for y in range(min(h, 120)) for x in range(w) if dist(px(x, y), mark) < 40]
-    left = [p for p in top if p[0] < w / 2]
-    right = [p for p in top if p[0] >= w / 2]
-    lx0 = min(x for x, _ in left)
-    cw = (min(x for x, _ in right) - lx0) / (man["cols"] - 1)
-    cpts = [(x, y) for y in range(min(h, 120)) for x in range(w) if dist(px(x, y), cal) < 40]
-    cx0, cy0, cy1 = min(x for x, _ in cpts), min(y for _, y in cpts), max(y for _, y in cpts)
+def geometry(img, man):
+    top = img[:120].astype(int)
+    def near(c): return np.argwhere(np.sqrt(((top - np.array(c)) ** 2).sum(axis=2)) < 40)
+    mk, cal = near((254, 0, 129)), near((129, 0, 254))
+    w = img.shape[1]
+    left, right = mk[mk[:, 1] < w / 2], mk[mk[:, 1] >= w / 2]
+    cw = (right[:, 1].min() - left[:, 1].min()) / (man["cols"] - 1)
     col = [s["col"] for s in man["swatches"] if s["id"] == "calib"][0]
-    return cx0 - col * cw, cy0, cw, cy1 - cy0 + 1
+    return cal[:, 1].min() - col * cw, int(cal[:, 0].min()), cw, int(cal[:, 0].max() - cal[:, 0].min() + 1)
 
-def read(top_png, bottom_png, shown, frame, wrows, profile, cond, background, palette, base):
-    man, wrows = json.load(open(frame)), int(wrows)
-    wt, ht, pt = load(top_png)
-    wb, hb, pb = load(bottom_png)
-    x0, y0, cw, ch = geometry(wt, ht, pt, man)
-    offset = man["rows"] - wrows
-    def where(r, c):
-        px, rr = (pt, r) if r < wrows else (pb, r - offset)
-        return px, (int(round(x0 + c * cw)), int(round(y0 + rr * ch)), int(round(x0 + (c + 1) * cw)), int(round(y0 + (rr + 1) * ch)))
+def read(pages, shown, frame, wrows, profile, cond, background, palette, base, run):
+    man, R = json.load(open(frame)), int(wrows)
+    total = man["rows"]
+    n = -(-total // R)
+    imgs = [load_np(os.path.join(pages, f"page-{k}.png")).astype(int) for k in range(n)]
+    x0, y0, cw, ch = geometry(imgs[0], man)
+    start = [0] + [max(0, min((k + 1) * R, total) - R) for k in range(1, n)]
     cells = parse(open(shown, encoding="utf-8").read())
+    # each later page's first line, found from the capture: the offset near
+    # the expected one whose rows carry ink where the lines carry glyphs
+    glyphs = {r for r, c, g, st in cells if g != " " or st["bg"] != "def"}
+    wb = imgs[0][int(y0) + int(ch) // 2, 2].astype(int)
+    def inked(im, row):
+        ya = int(round(y0 + row * ch)); band = im[ya + 2:ya + int(ch) - 2, int(x0):int(x0 + man["cols"] * cw)]
+        return bool((np.sqrt(((band - wb) ** 2).sum(axis=2)) > 60).any())
+    for k in range(1, n):
+        rows_ink = [inked(imgs[k], row) for row in range(R)]
+        score = lambda off: sum(rows_ink[row] == ((off + row) in glyphs) for row in range(R))
+        start[k] = max(range(max(0, start[k] - 3), min(total - R, start[k] + 3) + 1), key=score)
+    def box(r, c):
+        k = min(r // R, n - 1); rr = r - start[k]
+        return imgs[k], int(round(y0 + rr * ch)), int(round(y0 + (rr + 1) * ch)), int(round(x0 + c * cw)), int(round(x0 + (c + 1) * cw))
     role = {(r, c): st["fg"] for r, c, g, st in parse(open(base, encoding="utf-8").read())}
     samples = []
-    for r, c, g, st in [x for x in cells if x[2] == " " and x[3]["bg"] == "def" and 0 < x[0] < wrows][::7][:400]:
-        px, (xa, ya, xb, yb) = where(r, c)
-        samples.append(px((xa + xb) // 2, (ya + yb) // 2))
+    for r, c, g, st in [x for x in cells if x[2] == " " and x[3]["bg"] == "def" and 0 < x[0] < R][::7][:400]:
+        im, ya, yb, xa, xb = box(r, c)
+        samples.append(tuple(im[(ya + yb) // 2, (xa + xb) // 2]))
     wbg = tuple(int(median(s[i] for s in samples)) for i in range(3))
     groups = {}
     for r, c, g, st in cells:
         if g == " " or r == 0:
             continue
-        px, (xa, ya, xb, yb) = where(r, c)
-        pix = [px(x, y) for y in range(ya, yb) for x in range(xa, xb)]
+        im, ya, yb, xa, xb = box(r, c)
+        pix = im[ya:yb, xa:xb].reshape(-1, 3)
         if st["bg"] == "def":
-            bg = wbg
+            bg = np.array(wbg)
         else:
-            counts = {}
-            for p in pix: counts[p] = counts.get(p, 0) + 1
-            bg = max(counts, key=counts.get)
-        ink = max(pix, key=lambda p: dist(p, bg))
-        k = (role[(r, c)], st["fg"], st["bold"], st["bg"], "graphic" if graphic(g) else "text")
+            vals, counts = np.unique(pix, axis=0, return_counts=True)
+            bg = vals[counts.argmax()]
+        d = np.sqrt(((pix - bg) ** 2).sum(axis=1))
+        ink = tuple(int(v) for v in pix[d.argmax()]); bgt = tuple(int(v) for v in bg)
+        k = (role.get((r, c), "def"), st["fg"], st["bold"], st["bg"], "graphic" if graphic(g) else "text")
         e = groups.setdefault(k, dict(cells=[], text=""))
-        e["cells"].append((dist(ink, bg), ink, bg, contrast(ink, bg)))
+        e["cells"].append((float(d.max()), ink, bgt, contrast(ink, bgt)))
         if len(e["text"]) < 28: e["text"] += g
     out = []
     for (rl, fg, bold, bgc, kind), e in groups.items():
@@ -131,28 +158,27 @@ def read(top_png, bottom_png, shown, frame, wrows, profile, cond, background, pa
         lows = sorted(t[3] for t in cs)
         out.append(dict(role=rl, fg=fg, bold=bold, bg=bgc, kind=kind, n=len(cs), colour=hexc(ink), bg_colour=hexc(bg),
                         contrast=round(contrast(ink, bg), 2), low=round(lows[int(0.1 * (len(lows) - 1))], 2), sample=e["text"]))
-    return dict(profile=profile, condition=cond, background=background, palette=palette,
-                captures=[os.path.basename(top_png), os.path.basename(bottom_png)], window_bg=hexc(wbg),
-                grid=dict(x0=round(x0, 1), y0=y0, cell_w=round(cw, 3), cell_h=ch, offset=offset), groups=out)
+    return dict(run=run, profile=profile, condition=cond, background=background, palette=palette, pages=n, window_bg=hexc(wbg),
+                grid=dict(x0=round(float(x0), 1), y0=y0, cell_w=round(float(cw), 3), cell_h=ch, page_starts=start), groups=out)
 
 def label(g):
     return ("1;" if g["bold"] else "") + g["fg"] + ("" if g["bg"] == "def" else " on " + g["bg"])
 
 def table(path):
     d = json.load(open(path))
-    print(f"== {d['profile']} ({d['background']}), background {d['condition']}: {d['palette']} palette  (window background {d['window_bg']})")
+    print(f"== {d['run']}: {d['profile']} ({d['background']}), background {d['condition']}: {d['palette']} palette  (window background {d['window_bg']})")
     print(f"   {'kind':8} {'today':9} {'code':28} {'cells':>5} {'drawn':8} {'on':8} {'contrast':>8} {'low':>6}  sample")
     for g in sorted(d["groups"], key=lambda g: (g["kind"], g["contrast"])):
         print(f"   {g['kind']:8} {g['role']:9} {label(g):28} {g['n']:5d} {g['colour']:8} {g['bg_colour']:8} {g['contrast']:8.2f} {g['low']:6.2f}  {g['sample'].strip()[:28]}")
 
 def summary(paths):
     print("D1 across Terminal.app configurations: each window's weakest text (contrast of the drawn colour with the cell's background)")
-    print(f"{'profile':15} {'bg':5} {'condition':9} {'palette':7} {'window':8} {'text codes':>10} {'<4.5':>4} {'<3':>3}  weakest three text codes")
+    print(f"{'run':12} {'profile':15} {'bg':5} {'condition':9} {'palette':7} {'window':8} {'text codes':>10} {'<4.5':>4} {'<3':>3}  weakest three text codes")
     for p in paths:
         d = json.load(open(p))
         t = sorted((g for g in d["groups"] if g["kind"] == "text"), key=lambda g: g["contrast"])
         weak = "; ".join(f"{label(g)} {g['contrast']:.2f} '{g['sample'].strip()[:14]}'" for g in t[:3])
-        print(f"{d['profile']:15} {d['background']:5} {d['condition']:9} {d['palette']:7} {d['window_bg']:8} {len(t):10d} "
+        print(f"{d['run'][:12]:12} {d['profile']:15} {d['background']:5} {d['condition']:9} {d['palette']:7} {d['window_bg']:8} {len(t):10d} "
               f"{sum(g['contrast'] < 4.5 for g in t):4d} {sum(g['contrast'] < 3 for g in t):3d}  {weak}")
 
 def compare(paths):
@@ -166,7 +192,7 @@ def compare(paths):
         for g in d["groups"]:
             if g["kind"] != "text": continue
             # a fill is a 256-colour code, the same in every palette
-            k = (g["bg"] != "def", not scheme(g["role"]), g["role"], g["bold"], g["bg"])
+            k = (g["bg"] != "def", not scheme(g["role"]), d["run"], g["role"], g["bold"], g["bg"])
             e = rows.setdefault(k, dict(sample=g["sample"].strip()[:22], cells={}))
             c = e["cells"].setdefault(d["profile"], {})
             c[d["condition"]] = min(c.get(d["condition"], 99), g["contrast"])
@@ -176,16 +202,16 @@ def compare(paths):
                                ("ltl's own 256-colour codes on the window's background (not replaced)", False, True),
                                ("Text on a fill", True, None)):
         print(f"\n{title}")
-        print(f"{'today':18} {'sample':22} " + " ".join(f"{p[:11]:>11}" for p in profiles))
-        for k, e in sorted(rows.items(), key=lambda kv: (kv[0][2], kv[0][3], kv[0][4])):
+        print(f"{'run':10} {'today':18} {'sample':22} " + " ".join(f"{p[:11]:>11}" for p in profiles))
+        for k, e in sorted(rows.items(), key=lambda kv: kv[0][2:]):
             if k[0] != fill or (fixed is not None and k[1] != fixed): continue
-            name = ("1;" if k[3] else "") + k[2] + (f" on {k[4]}" if k[4] != "def" else "")
+            name = f"{k[2][:10]:10} " + ("1;" if k[4] else "") + k[3] + (f" on {k[5]}" if k[5] != "def" else "")
             def cell(p):
                 c = e["cells"].get(p)
                 if not c: return " " * 11
                 f = lambda v: f"{v:5.2f}" if v is not None else "  -  "
                 return f"{f(c.get('unknown'))}>{f(c.get('known'))}"
-            print(f"{name[:18]:18} {e['sample']:22} " + " ".join(cell(p) for p in profiles))
+            print(f"{name[:29]:29} {e['sample']:22} " + " ".join(cell(p) for p in profiles))
 
 if __name__ == "__main__":
     if sys.argv[1] == "--table":
