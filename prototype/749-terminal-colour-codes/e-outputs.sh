@@ -11,6 +11,8 @@
 #   access-latency  the same, without the heatmap (the latency column) and with -sm
 #   levels          the method server logs of the same node and morning: log levels
 #   udm             seven user-defined metrics and one matching nothing: every column colour, a notice panel
+#   fills           ten user-defined metrics, which take the ten column colours in order, with every odd
+#                   minute highlighted: each column's plain and highlighted fill side by side
 #   help            --help (FORCE_COLOR)
 #   explain         --explain contribution-highlighting (FORCE_COLOR)
 #   error           a usage error (FORCE_COLOR)
@@ -52,6 +54,10 @@ run() {  # run <name> <flags> : ltl's output for that run
                  -udm system_cpu_total::max -udm tcp_inuse::max -udm tcp_established::max -udm ctx_switches::max \
                  -udm tcp_timewait::max -udm system_mem_percent::max -udm java_mem_rss::max -udm no_such_column::max \
                  logs/UDM/connection-server-custom-metrics.csv ;;
+        fills) perl ./ltl --disable-progress $flags -bs 10 -n 0 --terminal-width $cols -h ' [0-9][0-9]:[0-5][13579]:[0-9][0-9],' \
+                   -udm system_cpu_total::sum -udm tcp_inuse::sum -udm tcp_established::sum -udm java_num_connections::sum \
+                   -udm tcp_timewait::sum -udm system_mem_percent::sum -udm java_mem_rss::sum -udm ephemeral_ports_used::sum \
+                   -udm tcp_alloc::sum -udm java_fd_count::sum logs/UDM/connection-server-custom-metrics.csv ;;
         help) FORCE_COLOR=1 perl ./ltl --disable-progress $flags --terminal-width $cols --help ;;
         explain) FORCE_COLOR=1 perl ./ltl --disable-progress $flags --terminal-width $cols --explain contribution-highlighting ;;
         error) FORCE_COLOR=1 perl ./ltl --disable-progress $flags --terminal-width $cols --bogus-option $A 2>&1 || true ;;
@@ -68,7 +74,7 @@ run() {  # run <name> <flags> : ltl's output for that run
             printf '\n\033[0;44m%s\033[0m\n' "$prompt" ;;
     esac
 }
-runs=(access-heatmap access-latency levels udm help explain error progress-pause)
+runs=(access-heatmap access-latency levels udm fills help explain error progress-pause)
 
 for r in "${runs[@]}"; do
     b=$top/base/$r
@@ -76,7 +82,7 @@ for r in "${runs[@]}"; do
     if [[ ! -s $b/basic.raw ]]; then
         run "$r" -dbg > "$b/basic.raw" 2>&1
         run "$r" -lbg > "$b/basic-light.raw" 2>&1
-        case $r in access-*|levels|udm) run "$r" "-V -dbg" > "$b/basic.V.txt" 2>&1 ;; esac
+        case $r in access-*|levels|udm|fills) run "$r" "-V -dbg" > "$b/basic.V.txt" 2>&1 ;; esac
     fi
 done
 if grep -l ' at .* line [0-9]' "$top"/base/*/basic.V.txt; then echo "runtime warnings in the -V captures" >&2; exit 1; fi

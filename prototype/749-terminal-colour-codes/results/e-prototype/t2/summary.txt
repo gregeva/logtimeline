@@ -1,0 +1,10 @@
+D1 across terminal configurations: each window's weakest text (contrast of the drawn colour with the cell's background)
+run          profile         bg    condition palette window   text codes <4.5  <3  weakest three text codes
+fills        Clear Dark      dark  known     dark    #292f3b          39    4   1  38;2;92;115;133 2.71 ',::ltl::'logti'; 38;2;151;88;254 3.29 '.8k5k'; 38;2;245;54;41 3.48 'FAILURECLASSIF'
+access-heatm Clear Dark      dark  known     dark    #292f3b          19    2   1  38;2;92;115;133 2.71 ',::ltl::'logti'; 38;2;245;54;41 3.48 '1.4%0%0.703%0.'; 38;2;191;125;207 4.51 '3xx:223xx:93xx'
+fills        Clear Dark      dark  unknown   basic   #292f3b          39   24  16  38;5;0 on 48;5;55 1.03 '42.4k.7k.7k.7k'; 38;5;0 on 48;5;20 1.03 '63.452.673.71.'; 38;5;0 on 48;5;21 1.20 '21232219822372'
+access-heatm Clear Dark      dark  unknown   basic   #292f3b          19   11   8  38;5;0 on 48;5;20 1.03 '55678643322344'; 38;5;0 on 48;5;21 1.20 '6'; 31 on 48;5;196 1.20 '23589'
+fills        Clear Light     light known     light   #fbfbfb          39    8   6  38;2;200;171;85 2.16 '1744523.9kkk65'; 38;2;5;186;151 2.39 '5.41.93'; 38;2;79;173;176 2.56 '73886515kkk254'
+access-heatm Clear Light     light known     light   #fbfbfb          19    5   3  38;2;92;200;204 1.92 'TOPOVERALLMESS'; 38;2;200;171;85 2.16 '2.3s1.9s1.8m1.'; 38;2;111;150;228 2.83 '11'
+fills        Clear Light     light unknown   basic   #fbfbfb          39   28  19  38;5;0 on 48;5;20 1.13 '63.452.673.71.'; 38;5;0 on 48;5;55 1.20 '42.4k.7k.7k.7k'; 38;5;0 on 48;5;21 1.40 '21232219822372'
+access-heatm Clear Light     light unknown   basic   #fbfbfb          19   15  11  38;5;0 on 48;5;20 1.13 '55678643322344'; 31 on 48;5;196 1.20 '23589'; 38;5;0 on 48;5;21 1.40 '6'

@@ -16,6 +16,7 @@ roles of a palette file design.py writes:
 - a scheme colour on the window's background takes the set's code (s<i>);
 - one of ltl's fixed text codes the palette remaps takes its code (f<N>);
 - bold over the default foreground takes the emphasis colour (e).
+A palette value is a 256-colour index or a 24-bit #rrggbb.
 Every character and attribute is kept. The output is written cell by cell
 with its own codes, which draws the same; the non-standard 109 is not
 written. On standard error: how many cells each role changed.
@@ -32,7 +33,7 @@ def load(path, cls):
     for line in open(path):
         if line.startswith("#"): continue
         f = line.rstrip("\n").split("\t")
-        if len(f) > col and f[col] not in ("-", ""): pal[f[0]] = int(f[col])
+        if len(f) > col and f[col] not in ("-", ""): pal[f[0]] = f[col] if f[col].startswith("#") else int(f[col])
     return pal
 
 def rgb(n):
@@ -43,6 +44,11 @@ def lum(c):
     r, g, b = map(f, c); return 0.2126*r + 0.7152*g + 0.0722*b
 def cr(a, b):
     x, y = sorted((lum(a), lum(b)), reverse=True); return (x+0.05)/(y+0.05)
+
+def code(prefix, v):
+    """the SGR parameters for a palette value: a 256-colour index or a 24-bit #rrggbb"""
+    if isinstance(v, str): return "%s;2;%d;%d;%d" % (prefix, int(v[1:3], 16), int(v[3:5], 16), int(v[5:7], 16))
+    return "%s;5;%d" % (prefix, v)
 
 def index(code):
     p = code.split(";")
@@ -77,23 +83,23 @@ def remap(st, glyph, pal, count):
     graphic = ro.graphic(glyph)
     fill, ink = num(bg, "48"), num(fg, "38")
     if ro.scheme(bg) and f"s{index(bg)}" in pal:
-        st["bg"] = "48;5;%d" % pal[f"s{index(bg)}"]; count["scheme background"] += 1
+        st["bg"] = code("48", pal[f"s{index(bg)}"]); count["scheme background"] += 1
     elif fill is not None and f"b{fill}" in pal:
-        st["bg"] = "48;5;%d" % pal[f"b{fill}"]; count["fill"] += 1
+        st["bg"] = code("48", pal[f"b{fill}"]); count["fill"] += 1
     newfill = num(st["bg"], "48")
     if graphic and ink is not None and f"b{ink}" in pal:
-        st["fg"] = "38;5;%d" % pal[f"b{ink}"]; count["bar glyph"] += 1
+        st["fg"] = code("38", pal[f"b{ink}"]); count["bar glyph"] += 1
     elif newfill is not None and newfill >= 16 and not graphic:
         t = pal.get(f"t{fill}") if fill is not None and f"b{fill}" in pal else None
         if t is None:
             f = rgb(newfill); t = 16 if cr((0, 0, 0), f) >= cr((255, 255, 255), f) else 231
-        st["fg"] = "38;5;%d" % t; count["text over a fill"] += 1
+        st["fg"] = code("38", t); count["text over a fill"] += 1
     elif ro.scheme(fg) and f"s{index(fg)}" in pal:
-        st["fg"] = "38;5;%d" % pal[f"s{index(fg)}"]; count[f"s{index(fg)}"] += 1
+        st["fg"] = code("38", pal[f"s{index(fg)}"]); count[f"s{index(fg)}"] += 1
     elif ink is not None and f"f{ink}" in pal:
-        st["fg"] = "38;5;%d" % pal[f"f{ink}"]; count[f"f{ink}"] += 1
+        st["fg"] = code("38", pal[f"f{ink}"]); count[f"f{ink}"] += 1
     elif fg == "def" and st["bold"] and "e" in pal:
-        st["fg"] = "38;5;%d" % pal["e"]; count["emphasis"] += 1
+        st["fg"] = code("38", pal["e"]); count["emphasis"] += 1
     return st
 
 def sgr(st):

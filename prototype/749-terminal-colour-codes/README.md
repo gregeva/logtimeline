@@ -188,3 +188,32 @@ both hosts (the feature doc § 11.7):
 ```bash
 ./design.py --light-hard Clear-Light,windows-terminal/One-Half-Light,windows-terminal/Solarized-Light,windows-terminal/Tango-Light --out palettes/s2-c5.tsv
 ```
+
+## Tone governs (macOS)
+
+The feature doc § 12: D1 amended, each set keeps today's colours as the
+class's default Terminal.app profile draws them, written as 24-bit codes and
+moved slightly in lightness only where they fall short of 4.5:1.
+
+1. `tone.py --out palettes/t2.tsv` designs both sets from
+   `results/terminal-app/` (its docstring gives the rule). The fills are
+   sliced from `ltl`'s `@column_colors` and kept, but a highlighted fill
+   nearer its plain fill than yellow's pair, which takes the histogram's
+   highlight for that column. A palette value is a 256-colour index or a
+   24-bit `#rrggbb`; `e-palette.py` writes either.
+2. `e-outputs.sh` writes nine runs: the eight above and `fills`, ten
+   user-defined metrics over the custom-metrics CSV, which take the ten
+   column colours in order, with every odd minute highlighted, so each
+   column's plain and highlighted fill stand side by side.
+3. `e-measure.sh` and `tally.py` as above.
+
+```bash
+./tone.py --out palettes/t2.tsv
+./e-outputs.sh <out> palettes/t2.tsv
+RUNS="fills access-heatmap" ./e-measure.sh <work> <out>/t2 "Clear Dark" "Clear Light"
+./tally.py <work>/shots/*/read.json
+```
+
+`results/e-prototype/t1/` (all eight runs) and `t2/` (the access-log and
+`fills` runs): Clear Dark and Clear Light, one table per window,
+`summary.txt`, `compare.txt` and `tally.txt`.

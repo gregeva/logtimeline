@@ -1,0 +1,101 @@
+Text by the code today's ltl writes there: contrast with the background unknown (fallback), then known (the set); WCAG 2, 4.5:1 for text
+background: Clear Dark dark, Clear Light light
+
+Scheme colours on the window's background (what the sets replace)
+run        today              sample                  Clear Dark Clear Light
+access-lat 31                 P999:534msP999:380msP9  2.79> 4.16  4.65> 4.65
+access-lat 32                 2xx:21170.4kB2xx:21265  4.88> 4.88  2.66> 3.33
+access-lat 33                 P95:2.6msP95:2.3msP95:  6.03> 6.03  2.15> 3.01
+access-lat 35                 3xx:223xx:93xx:13xx:10  4.40> 4.51  3.80> 4.52
+access-lat 36                 P50:1.3msP50:1.3msP50:  7.21> 7.21  1.93> 2.56
+access-lat 37                 CV:5.05CV:5.20CV:8.13C 10.56>10.56  1.64> 9.12
+access-lat 90                 ,::ltl::'logtimeline[0  1.93> 2.71  5.88> 5.88
+access-lat 91                 0.100.200.100.100.400.  4.11> 4.54  3.16> 4.52
+access-lat 93                 2.3sP99:275ms1.9sP99:2  8.21> 8.21  1.58> 2.16
+access-lat 96                 TOPOVERALLMESSAGES(ret  8.57> 8.57  1.48> 1.92
+error      90                 ,::ltl::'logtimeline[0  1.93> 2.71  5.88> 5.88
+explain    32                 2xx:4.2k2xx:9.1k2xx:7.  4.88> 4.88  2.66> 3.33
+explain    33                 4xx:144xx:414xx:12      6.03> 6.03  2.15> 3.01
+explain    1;36               TOPHIGHLIGHTEDMESSAGES  7.21> 7.21  1.93> 2.56
+explain    90                 ,::ltl::'logtimeline[0  1.93> 2.71  5.88> 5.88
+explain    91                 0.20.70.2               4.11> 4.54  3.16> 4.52
+help       90                 ,::ltl::'logtimeline[0  1.93> 2.71  5.88> 5.88
+levels     31                 FATAL-HL30(0.42%)       2.79> 4.16  4.65> 4.65
+levels     32                 INFO:39INFO:36INFO:80I  4.88> 4.88  2.66> 3.33
+levels     33                 WARN:14WARN:12WARN:12W  6.03> 6.03  2.15> 3.01
+levels     36                 305092                  7.21> 7.21  1.93> 2.56
+levels     37                 Thesefile(s)wereproces 10.56>10.56  1.64> 9.12
+levels     90                 ,::ltl::'logtimeline[0  1.93> 2.71  5.88> 5.88
+levels     91                 0.21.10.30.20.30.32.40  4.11> 4.54  3.16> 4.52
+levels     93                 TOPHIGHLIGHTEDMESSAGES  8.21> 8.21  1.58> 2.16
+levels     96                 TOPOVERALLMESSAGES(ret  8.57> 8.57  1.48> 1.92
+progress-p 92                 Processingcompleted.Ca  6.06> 6.06  2.14> 2.66
+udm        31                 523765792631            2.79> 4.16  4.65> 4.65
+udm        32                 √                       4.88> 4.88  2.66> 3.33
+udm        34                 DATA:4.21DATA:9DATA:8D  4.27> 4.53  3.82> 4.50
+udm        35                 003708961629            4.40> 4.51  3.80> 4.52
+udm        37                 nometricsproducedfromm 10.56>10.56  1.64> 9.12
+udm        1;37               -udm'no_such_column::m 10.56>10.56  1.64>  -  
+udm        90                 ,::ltl::'logtimeline[0  1.93> 2.71  5.88> 5.88
+udm        91                 000000000000000         4.11> 4.54  3.16> 4.52
+udm        96                 TOPOVERALLMESSAGES(ret  8.57> 8.57  1.48> 1.92
+
+ltl's own 256-colour codes on the window's background (not replaced)
+run        today              sample                  Clear Dark Clear Light
+access-lat 38;5;111           11                      6.14> 6.14  2.11> 2.83
+access-lat 38;5;160           1.4%0%0.703%0.122%1.04  2.49> 3.48  5.22> 5.22
+access-lat 38;5;34            98.6%100%99.3%99.9%99%  4.56> 4.56  2.85> 3.97
+access-lat def                2026-08-2104:007.12026 10.76>10.76  9.12> 9.12
+error      def                Usage:ltl[-bs<N>][-n<N 10.76>10.76  9.12> 9.12
+error      1;def              Error:unknownoption'-- 11.78>11.78 10.91>10.91
+explain    38;5;34            •••••                   4.56> 4.56  2.85> 3.97
+explain    def                Ananalysistechnique:an 10.76>10.76  9.12> 9.12
+explain    1;def              CONTRIBUTIONHIGHLIGHTI 11.78>11.78 10.91>10.91
+help       def                LogTimeLine--acommand- 10.76>10.76  9.12> 9.12
+help       1;def              USAGEOPTIONSENVIRONMEN 11.78>11.78 10.91>10.91
+levels     38;5;111           1111                    6.14> 6.14  2.11> 2.83
+levels     38;5;160           ••FAILURECLASSIFIED596  2.49> 3.48  5.22> 5.22
+levels     38;5;178           UNCLASSIFIED1190(16.6%  6.41> 6.41  2.03> 2.71
+levels     def                2026-08-2104:001.92026 10.76>10.76  9.12> 9.12
+udm        38;5;111           11                      6.14> 6.14  2.11> 2.83
+udm        38;5;16            nometricsproducedfromm               -  >20.29
+udm        1;38;5;16          -udm'no_such_column::m               -  >20.29
+udm        38;5;160           FAILURECLASSIFIED0      2.49> 3.48  5.22> 5.22
+udm        38;5;178           UNCLASSIFIED118(100%)   6.41> 6.41  2.03> 2.71
+udm        38;5;208           0000020000.0100000      5.57> 5.57  2.33> 3.14
+udm        38;5;213           4402183181170186315164  6.50> 6.50  2.00> 2.68
+udm        38;5;244           (2)commandusagewarning               -  > 4.52
+udm        38;5;30            ——                                   -  > 2.45
+udm        1;38;5;30          ⚙YOUROPTIONS                         -  > 4.54
+udm        38;5;44            ——                      4.02> 4.02  1.50>  -  
+udm        1;38;5;44          ⚙YOUROPTIONS            7.48> 7.48  1.73>  -  
+udm        def                (2)commandusagewarning 10.76>10.76  9.12> 9.12
+
+Text on a fill
+run        today              sample                  Clear Dark Clear Light
+access-lat 31 on 48;5;196     23589                   1.20> 5.25  1.20> 5.25
+access-lat 32 on 48;5;46      √                       2.01>15.30  2.01>15.30
+access-lat 33 on 48;5;226     36131311333331          2.08>19.56  2.08>19.56
+access-lat 38;5;0 on 48;5;184 36.7m                   6.69>13.61  7.77>13.61
+access-lat 38;5;0 on 48;5;20  556786433223444         1.03>10.60  1.13>10.60
+access-lat 38;5;0 on 48;5;21  6                       1.20> 8.59  1.40> 8.59
+access-lat 38;5;0 on 48;5;34  7GB                     3.50> 7.13  4.07> 7.13
+explain    32 on 48;5;46      7811.9k622              2.01>15.30  2.01>15.30
+levels     31 on 48;5;196     5341069107114647219889  1.20> 5.25  1.20> 5.25
+levels     32 on 48;5;46      √√√                     2.01>15.30  2.01>15.30
+levels     38;5;0 on 48;5;184 W                       6.69>13.61  7.77>13.61
+levels     38;5;0 on 48;5;196 ERROR-HL5930(82.9%)     2.58> 5.25  3.00> 5.25
+levels     38;5;0 on 48;5;20  22432422232222          1.03>10.60  1.13>10.60
+levels     38;5;0 on 48;5;21  53                      1.20> 8.59  1.40> 8.59
+levels     38;5;0 on 48;5;30  195432                  2.37> 4.82  2.75> 4.82
+levels     38;5;0 on 48;5;34  INFO                    3.50> 7.13  4.07> 7.13
+progress-p def on 44          Pressanykeytocontinue(  2.52>  -    2.39>  -  
+progress-p def on 48;2;113;15 Pressanykeytocontinue(   -  > 2.37            
+progress-p def on 48;2;74;121 Pressanykeytocontinue(               -  > 2.02
+udm        38;5;0 on 48;5;124 1557078368283682836818  1.39> 7.44  1.61> 7.44
+udm        38;5;0 on 48;5;127 1370135566655667556655  1.69> 6.10  1.97> 6.10
+udm        38;5;0 on 48;5;166 0.090.                  2.72> 5.53  3.16> 5.53
+udm        38;5;0 on 48;5;169 55957365668             3.02> 6.15  3.51> 6.15
+udm        38;5;0 on 48;5;20  518.3228.7629.4429.252  1.03>10.60  1.13>10.60
+udm        38;5;0 on 48;5;29  61.5965.5372.172.5872.  2.28> 4.63  2.64> 4.63
+udm        38;5;0 on 48;5;55  6070860708607086070860  1.03> 9.97  1.20> 9.97

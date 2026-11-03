@@ -1,0 +1,6 @@
+== help: Clear Dark (dark), background known: dark palette  (window background #292f3b)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;2;92;115;133                188 #5c7385  #292f3b      2.71   2.71  ────────────────────────────
+   text     90        38;2;92;115;133                 76 #5c7385  #292f3b      2.71   2.64  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #e6e6e6  #292f3b     10.76  10.76  LogTimeLine--acommand-linelo
+   text     def       1;38;2;240;240;240              35 #f0f0f0  #292f3b     11.78  11.78  USAGEOPTIONSENVIRONMENTINFOE
