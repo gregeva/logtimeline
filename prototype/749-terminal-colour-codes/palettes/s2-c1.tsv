@@ -1,0 +1,71 @@
+# D1 candidate sets by design.py (every surface): hue tolerance 25.0, separation 0.08, soft 0.25, weights L 0.5 C 1.0 H 2.0, fill floor 3.0, pair separation 0.1, grey gap 0.1
+# dark: targets from Clear-Dark; floors on Clear-Dark, Basic, Pro, Homebrew; penalty on none
+# light: targets from Clear-Light; floors on Clear-Light; penalty on Man-Page, Novel
+# source	name	use	dark	dark_rgb	dark_min	light	light_rgb	light_min
+s0	black	text over a fill: see t	16	#000000	1.00	16	#000000	20.29
+s1	red	5xx, ERROR, FATAL, P999	203	#ff5f5f	4.51	160	#d70000	5.22
+s2	green	bytes, 2xx, file marks	71	#5faf5f	4.98	28	#008700	4.54
+s3	yellow	4xx, WARN, P95	178	#d7af00	6.41	94	#875f00	5.53
+s4	blue	users column, file index, pause prompt fill	74	#5fafd7	5.50	25	#005faf	6.23
+s5	magenta	3xx	176	#d787d7	5.33	128	#af00d7	5.33
+s6	cyan	count column, P50	80	#5fd7d7	7.79	23	#005f5f	7.24
+s7	white	file details, notice text	254	#e4e4e4	10.56	238	#444444	9.41
+s8	bright black	rules, headings, options line, notice frame	247	#9e9e9e	5.01	241	#626262	5.89
+s9	bright red	per-minute failure rates	203	#ff5f5f	4.51	160	#d70000	5.22
+s10	bright green	progress lines	71	#5faf5f	4.98	28	#008700	4.54
+s11	bright yellow	duration values, P99, table titles	221	#ffd75f	9.68	94	#875f00	5.53
+s12	bright blue		39	#00afff	5.48	25	#005faf	6.23
+s13	bright magenta		177	#d787ff	5.63	128	#af00d7	5.33
+s14	bright cyan	message-table titles	116	#87d7d7	8.14	23	#005f5f	7.24
+s15	bright white	notice pick	231	#ffffff	13.43	242	#6c6c6c	5.07
+f34	38;5;34	success %, success state (as s2)	-			28	#008700	4.54
+f160	38;5;160	failure %, failure state (as s1)	203	#ff5f5f	4.51	-		
+f111	38;5;111	users count, format number (as s4)	-			25	#005faf	6.23
+f44	38;5;44	notice category cyan (as s6)	-			23	#005f5f	7.24
+f178	38;5;178	classification state (amber)	-			94	#875f00	5.53
+f135	38;5;135	classification state (violet)	141	#af87ff	4.94	92	#8700d7	6.74
+f208	38;5;208	orange column values	-			130	#af5f00	4.55
+f213	38;5;213	pink column values	-			127	#af00af	5.90
+f43	38;5;43	teal column values	-			23	#005f5f	7.24
+f93	38;5;93	purple column values	141	#af87ff	4.94	-		
+b184	48;5;184	yellow plain fill	184	#d7d700	8.70	136	#af8700	3.23
+b226	48;5;226	yellow highlighted fill	226	#ffff00	12.50	64	#5f8700	4.10
+t184	text	over the yellow plain fill	16	#000000	1.00	16	#000000	20.29
+t226	text	over the yellow highlighted fill	16	#000000	1.00	16	#000000	20.29
+b34	48;5;34	green plain fill	34	#00af00	4.56	28	#008700	4.54
+b46	48;5;46	green highlighted fill	46	#00ff00	9.78	22	#005f00	7.70
+t34	text	over the green plain fill	16	#000000	1.00	231	#ffffff	1.03
+t46	text	over the green highlighted fill	16	#000000	1.00	231	#ffffff	1.03
+b30	48;5;30	cyan plain fill	30	#008787	3.08	23	#005f5f	7.24
+b36	48;5;36	cyan highlighted fill	36	#00af87	4.78	29	#00875f	4.38
+t30	text	over the cyan plain fill	16	#000000	1.00	231	#ffffff	1.03
+t36	text	over the cyan highlighted fill	16	#000000	1.00	231	#ffffff	1.03
+b20	48;5;20	blue plain fill	33	#0087ff	3.78	19	#0000af	12.53
+b21	48;5;21	blue highlighted fill	105	#8787ff	4.44	21	#0000ff	8.30
+t20	text	over the blue plain fill	16	#000000	1.00	231	#ffffff	1.03
+t21	text	over the blue highlighted fill	16	#000000	1.00	231	#ffffff	1.03
+b127	48;5;127	magenta plain fill	206	#ff5fd7	5.03	163	#d700af	4.50
+b201	48;5;201	magenta highlighted fill	201	#ff00ff	4.28	201	#ff00ff	3.03
+t127	text	over the magenta plain fill	16	#000000	1.00	16	#000000	20.29
+t201	text	over the magenta highlighted fill	16	#000000	1.00	16	#000000	20.29
+b124	48;5;124	red plain fill	209	#ff875f	5.68	88	#870000	10.00
+b196	48;5;196	red highlighted fill	196	#ff0000	3.36	160	#d70000	5.22
+t124	text	over the red plain fill	16	#000000	1.00	231	#ffffff	1.03
+t196	text	over the red highlighted fill	16	#000000	1.00	231	#ffffff	1.03
+b166	48;5;166	orange plain fill	166	#d75f00	3.53	166	#d75f00	3.67
+b208	48;5;208	orange highlighted fill	208	#ff8700	5.57	196	#ff0000	3.86
+t166	text	over the orange plain fill	16	#000000	1.00	16	#000000	20.29
+t208	text	over the orange highlighted fill	16	#000000	1.00	16	#000000	20.29
+b169	48;5;169	pink plain fill	169	#d75faf	3.93	169	#d75faf	3.30
+b213	48;5;213	pink highlighted fill	213	#ff87ff	6.50	164	#d700d7	4.17
+t169	text	over the pink plain fill	16	#000000	1.00	16	#000000	20.29
+t213	text	over the pink highlighted fill	16	#000000	1.00	16	#000000	20.29
+b29	48;5;29	teal plain fill	36	#00af87	4.78	29	#00875f	4.38
+b43	48;5;43	teal highlighted fill	43	#00d7af	7.25	23	#005f5f	7.24
+t29	text	over the teal plain fill	16	#000000	1.00	231	#ffffff	1.03
+t43	text	over the teal highlighted fill	16	#000000	1.00	231	#ffffff	1.03
+b55	48;5;55	purple plain fill	141	#af87ff	4.94	55	#5f00af	9.64
+b93	48;5;93	purple highlighted fill	99	#875fff	3.27	93	#8700ff	5.84
+t55	text	over the purple plain fill	16	#000000	1.00	231	#ffffff	1.03
+t93	text	over the purple highlighted fill	16	#000000	1.00	231	#ffffff	1.03
+e	bold	bold over the default foreground	231	#ffffff	13.43	16	#000000	20.29
