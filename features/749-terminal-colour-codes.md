@@ -953,6 +953,51 @@ codes where the dark output writes three (§ 2).
   on Man Page and 3.37 on Novel. The magenta plain fill reads 2.99, 2.86
   and 2.31.
 
+### 11.7 The light set designed for every light background (s2-c5)
+
+The architect's direction (2026-11-03), on § 11.4: one more design round,
+with the light set clearing its floors on the light backgrounds of both
+hosts. `design.py` with Clear Light, One Half Light, Solarized Light and
+Tango Light all hard (Man Page and Novel still a penalty) gives
+`palettes/s2-c5.tsv` (issue branch, 9677725d). With the defaults it still
+gives s2-c4 exactly. The dark set is unchanged. Only Solarized Light
+binds: s2-c4 already clears One Half Light and Tango Light.
+
+What moves in the light set, contrast on Clear Light and on Solarized
+Light, computed from the measured backgrounds:
+
+| Role | s2-c4 | s2-c5 |
+|---|---|---|
+| green: bytes, 2xx, `INFO`, success, the progress lines, the notice green | 28 #008700: 4.54, 4.36 | 22 #005f00: 7.70, 7.38 |
+| the orange column's values | 130 #af5f00: 4.55, 4.37 | 94 #875f00: 5.53, 5.31 |
+| the notice category orange | 130 #af5f00 | 124 #af0000, a red: 7.19, 6.90 |
+| the magenta fills, plain and highlighted, as bars | 170 #d75fd7, 201 #ff00ff: 3.12, 2.99 and 3.03, 2.91; black text | 90 #870087, 127 #af00af: 8.53, 8.18 and 5.90, 5.66; white text |
+| the pink fills | 200 plain, 169 highlighted | the two swapped |
+
+- **The 256-colour codes have no green between 28 and 22.** The cube's
+  green steps from 135 to 95, so the next green that clears Solarized
+  Light is 22, at OKLCH lightness 0.42 against 28's 0.54. It reads 7.70:1
+  on Clear Light, where 4.5 is the floor. This is the near-black green of
+  c5 (§ 9.3), here for Solarized Light instead of Novel.
+- **The orange column takes the light set's yellow.** No orange code
+  between 130 and the yellow 94 clears Solarized Light within the hue
+  tolerance. The orange column's values would draw in the same colour as
+  the duration values, 4xx and `WARN`. `design.py` keeps only neighbouring
+  metric columns apart, and duration and orange are not neighbours.
+- **The notice categories lose a colour.** The notice green takes 22,
+  which the notice teal already has (s2-c4), so green and teal notices
+  draw alike. The notice orange turns red.
+- **The magenta fills turn dark purple** to raise the plain fill on
+  Solarized Light from 2.99 to 3:1.
+- **A 24-bit code would clear it with no visible move.** `38;2;0;132;0`
+  (#008400) reads 4.53:1 on Solarized Light, 0.009 from 28 in OKLab;
+  `38;2;172;93;0` (#ac5d00) reads 4.51, 0.008 from 130. Terminal.app and
+  Windows Terminal draw `38;2` exactly (§ 5.2, § 6.2). D1 sets the sets in
+  256-colour codes.
+
+Not rendered: the design alone shows two pairs of roles drawn alike, and
+the architect decides whether this candidate goes forward.
+
 ## Resuming
 
 - Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
@@ -1012,7 +1057,9 @@ codes where the dark output writes three (§ 2).
     instruments are `wt-measure.sh` (every shipped scheme),
     `wt-e-measure.sh` (the runs, page by page) and `tally.py` (§ 10.1's
     count), on the issue branch.
-- Next: the selection, stage 5 of § 10, the architect's, with both hosts'
-  readings.
+  - **A further design round:** s2-c5, the light set designed for every
+    light background of both hosts, designed but not rendered (§ 11.7).
+- Next: the architect's call on s2-c5 (§ 11.7), then the selection, stage 5
+  of § 10, with both hosts' readings.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
