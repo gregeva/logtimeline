@@ -3,12 +3,12 @@
 ## Status
 
 **In progress: research done, macOS and Windows Terminal measured and read
-together (§ 8); the architect's decision is next.** Contracts in § 2
-confirmed by the architect on 2026-11-02. The research is
+together (§ 8); D1 locked (2026-11-03); a prototype of D1 is next.**
+Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
 `prototype/749-terminal-colour-codes/` on branch `749-terminal-colour-codes`.
-No decision has been taken; nothing in `ltl` has changed.
+Nothing in `ltl` has changed.
 
 - **Issue:** #749 (research whether ltl's colours and bold should move to
   256-colour codes).
@@ -51,6 +51,30 @@ macOS/Linux terminals with non-default schemes too.
 | Background | Dark by default; `-lbg` or the terminal's reply selects light, `-dbg` wins over both; on light every colour takes its light-gradient steps; the terminal is asked only when something reads the answer (today the heatmap) | `docs/design-language.md` § Backgrounds; `features/665-background-setting-global.md` § 2 |
 | Notice panel, ask pop-up, notice browser | On light: secondary text grey (`38;5;244`), body text black (`38;5;16`). On dark: secondary text faint, the analyst's pick bold bright white | `features/412-notice-surfaces.md` D10 (on a light background, secondary text is an explicit grey, not faint); `docs/design-language.md` § The new style |
 | Documentation screenshots | The renderer takes the sixteen basic colours from Terminal.app's Clear Dark and Clear Light palettes, indices 16-255 from the xterm formula | `features/598-screenshot-capture.md` |
+
+## Decisions
+
+- **D1 (locked by the architect, 2026-11-03): when the background is known,
+  `ltl` writes its text colours from a dark set or a light set of 256-colour
+  codes; when it is not, it keeps today's basic colours.** Why (§ 8): of
+  the options measured, it is the only one under which no scheme reads worse
+  than today, and it reaches 4.5:1 in every hue wherever the background is
+  known. The one straight 256-colour set lowers the light schemes further
+  (§ 8.1). One set for both backgrounds never reaches 4.5:1 (§ 8.3). Two sets
+  with the dark set for an unknown background put tmux, piped output and
+  Windows' classic console on a light scheme below today. What it brings with
+  it:
+  - The background setting has to record whether the terminal answered;
+    `%terminal` does not today (§ 8.2).
+  - Windows gains only once `ltl` asks there (§ 7, Windows never asks the
+    background).
+  - Three palettes are kept: basic, dark and light.
+  - Where the background is known, the user's scheme no longer sets these
+    colours.
+  - The rest of research § 1.7 follows: `summary_bar_color`, `decode_line`,
+    the `-HL` twins, and the screenshot renderer's palette.
+  - Bold over the default foreground (the help and explain headings) is not
+    covered (§ 8.4).
 
 ## 3. Records found by search
 
@@ -518,7 +542,12 @@ foreground only once the background is known.
 - Done: research (§ 4); macOS Terminal.app measured (§ 5); Windows Terminal
   measured on Campbell and One Half Light (§ 6); the two read together
   (§ 8). Instruments for both on branch `749-terminal-colour-codes`.
-- Next: the architect's decision, with § 5, § 6 and § 8 in front of him, on
-  any host.
+- Decided: D1 (dark or light 256-colour set when the background is known,
+  today's basic colours when not).
+- Next: the prototype of D1 the architect asked for on 2026-11-03: the three
+  palettes and background detection, drawn on a realistic 190-column `ltl`
+  run with heatmap and histogram in the Terminal.app profiles, each window
+  held a few seconds for him to watch before it closes, and read by the
+  automated capture analysis.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
