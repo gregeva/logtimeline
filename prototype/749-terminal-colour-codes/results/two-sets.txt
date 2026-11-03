@@ -1,0 +1,36 @@
+== dark, both terminals: Clear-Dark, Campbell, Basic, Pro
+  yellow   best 38;5;227 #ffff5f 12.61 | reaching 4.5 on all: 11 of 15 (227, 226, 190, 221, 220, 185) | fixed code 226: 12.50
+  green    best 38;5;155 #afff5f 11.06 | reaching 4.5 on all: 19 of 21 (155, 119, 85, 84, 83, 82) | fixed code 40: 6.85
+  cyan     best 38;5;87  #5fffff 11.02 | reaching 4.5 on all: 11 of 15 (87, 51, 50, 81, 80, 45) | fixed code 44: 7.48
+  blue     best 38;5;75  #5fafff  5.79 | reaching 4.5 on all:  1 of 12 (75) | fixed code 21: 1.56
+  magenta  best 38;5;207 #ff5fff  5.33 | reaching 4.5 on all:  2 of 21 (207, 206) | fixed code 164: 3.11
+  red      best 38;5;209 #ff875f  5.68 | reaching 4.5 on all:  3 of  9 (209, 204, 203) | fixed code 160: 2.49
+  orange   best 38;5;215 #ffaf5f  7.38 | reaching 4.5 on all:  5 of  8 (215, 179, 208, 173, 172) | fixed code 208: 5.57
+  greys reaching 4.5 on all: [247, 248, 249, 250, 251, 252, 253, 254, 255]
+== light, both terminals: Clear-Light, One-Half-Light, Man-Page, Novel
+  yellow   best 38;5;58  #5f5f00  4.82 | reaching 4.5 on all:  1 of 15 (58) | fixed code 226: 1.03
+  green    best 38;5;22  #005f00  5.71 | reaching 4.5 on all:  1 of 21 (22) | fixed code 40: 1.40
+  cyan     best 38;5;23  #005f5f  5.37 | reaching 4.5 on all:  2 of 15 (23, 24) | fixed code 44: 1.29
+  blue     best 38;5;17  #00005f 12.92 | reaching 4.5 on all:  5 of 12 (17, 18, 19, 20, 21) | fixed code 21: 6.16
+  magenta  best 38;5;53  #5f005f  9.12 | reaching 4.5 on all:  6 of 21 (53, 54, 89, 90, 91, 126) | fixed code 164: 3.09
+  red      best 38;5;52  #5f0000 10.13 | reaching 4.5 on all:  3 of  9 (52, 88, 124) | fixed code 160: 3.87
+  orange   best 38;5;130 #af5f00  3.38 | reaching 4.5 on all:  0 of  8 | fixed code 208: 1.73
+  greys reaching 4.5 on all: [232, 233, 234, 235, 236, 237, 238, 239, 240]
+== light, the two defaults' light partners: Clear-Light, One-Half-Light
+  yellow   best 38;5;58  #5f5f00  6.44 | reaching 4.5 on all:  2 of 15 (58, 94) | fixed code 226: 1.03
+  green    best 38;5;22  #005f00  7.63 | reaching 4.5 on all:  2 of 21 (22, 28) | fixed code 40: 1.88
+  cyan     best 38;5;23  #005f5f  7.18 | reaching 4.5 on all:  2 of 15 (23, 24) | fixed code 44: 1.72
+  blue     best 38;5;17  #00005f 17.27 | reaching 4.5 on all:  8 of 12 (17, 18, 19, 20, 21, 26) | fixed code 21: 8.23
+  magenta  best 38;5;53  #5f005f 12.18 | reaching 4.5 on all:  9 of 21 (53, 54, 89, 90, 91, 126) | fixed code 164: 4.13
+  red      best 38;5;52  #5f0000 13.53 | reaching 4.5 on all:  4 of  9 (52, 88, 124, 160) | fixed code 160: 5.17
+  orange   best 38;5;130 #af5f00  4.51 | reaching 4.5 on all:  1 of  8 (130) | fixed code 208: 2.31
+  greys reaching 4.5 on all: [232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242]
+== one set for all four: Clear-Dark, Campbell, Clear-Light, One-Half-Light
+  yellow   best 38;5;100 #878700  3.51 | reaching 4.5 on all:  0 of 15 | fixed code 226: 1.03
+  green    best 38;5;28  #008700  2.86 | reaching 4.5 on all:  0 of 21 | fixed code 40: 1.88
+  cyan     best 38;5;31  #0087af  3.25 | reaching 4.5 on all:  0 of 15 | fixed code 44: 1.72
+  blue     best 38;5;68  #5f87d7  3.39 | reaching 4.5 on all:  0 of 12 | fixed code 21: 1.56
+  magenta  best 38;5;134 #af5fd7  3.48 | reaching 4.5 on all:  0 of 21 | fixed code 164: 3.11
+  red      best 38;5;167 #d75f5f  3.53 | reaching 4.5 on all:  0 of  9 | fixed code 160: 2.49
+  orange   best 38;5;166 #d75f00  3.53 | reaching 4.5 on all:  0 of  8 | fixed code 208: 2.31
+  greys reaching 4.5 on all: none

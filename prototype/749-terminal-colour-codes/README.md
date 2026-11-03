@@ -38,6 +38,10 @@ this folder holds what produced them.
 8. `profile-colours.py` decodes a Terminal.app profile's stored colours
    (background, text, bold text, the sixteen), for reading a profile's
    settings beside its captures.
+9. `two-sets.py` reads the measured backgrounds from the `profile-*.txt`
+   tables of both terminals and finds, per hue, the best fixed code for a set
+   of dark backgrounds, a set of light ones, and one set for both: what a
+   colour set chosen per background could reach.
 
 ## Running it
 
@@ -81,3 +85,16 @@ background, so its readings belong to the run that made them.
 `profile-*.txt` per scheme, from Windows Terminal 1.24.12741.0 on Windows 11
 build 26200.9711, Campbell and One Half Light as shipped, the settings file
 setting neither `intenseTextStyle` nor `adjustIndistinguishableColors`.
+
+`results/two-sets.txt`: `two-sets.py` over both terminals' backgrounds,
+made with:
+
+```bash
+t=results/terminal-app; w=results/windows-terminal
+./two-sets.py \
+  "dark, both terminals=$t/profile-Clear-Dark.txt,$w/profile-Campbell.txt,$t/profile-Basic.txt,$t/profile-Pro.txt" \
+  "light, both terminals=$t/profile-Clear-Light.txt,$w/profile-One-Half-Light.txt,$t/profile-Man-Page.txt,$t/profile-Novel.txt" \
+  "light, the two defaults' light partners=$t/profile-Clear-Light.txt,$w/profile-One-Half-Light.txt" \
+  "one set for all four=$t/profile-Clear-Dark.txt,$w/profile-Campbell.txt,$t/profile-Clear-Light.txt,$w/profile-One-Half-Light.txt" \
+  > results/two-sets.txt
+```
