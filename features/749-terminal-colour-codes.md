@@ -995,8 +995,12 @@ Light, computed from the measured backgrounds:
   Windows Terminal draw `38;2` exactly (§ 5.2, § 6.2). D1 sets the sets in
   256-colour codes.
 
-Not rendered: the design alone shows two pairs of roles drawn alike, and
-the architect decides whether this candidate goes forward.
+Not rendered: the design alone shows two pairs of roles drawn alike.
+
+**The architect's call (2026-11-03): s2-c4's light set is kept.**
+Solarized Light's green and orange, at 4.36 and 4.37:1, are a shortfall
+recorded as Man Page's is (§ 9.6, § 11.4). s2-c5 does not go forward. The
+architect has not yet seen the sets drawn: the selection waits on that.
 
 ## Resuming
 
@@ -1058,8 +1062,9 @@ the architect decides whether this candidate goes forward.
     `wt-e-measure.sh` (the runs, page by page) and `tally.py` (§ 10.1's
     count), on the issue branch.
   - **A further design round:** s2-c5, the light set designed for every
-    light background of both hosts, designed but not rendered (§ 11.7).
-- Next: the architect's call on s2-c5 (§ 11.7), then the selection, stage 5
-  of § 10, with both hosts' readings.
+    light background of both hosts, designed but not rendered; the
+    architect kept s2-c4's light set (§ 11.7).
+- Next: the architect sees the sets drawn (he has not yet), then the
+  selection, stage 5 of § 10, with both hosts' readings.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
