@@ -36,7 +36,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from analyse import dist, contrast, hexc, SRGB
 
 def load_np(png):
-    """the capture as an sRGB array (height, width, 3), through sips as a BMP"""
+    """the capture as an sRGB array (height, width, 3): on macOS through sips
+    (to sRGB, as a BMP); elsewhere (a Windows capture, already in the
+    screen's pixels) decoded by analyse.py's PNG reader"""
+    if not shutil.which("sips"):
+        from analyse import read_png
+        w, h, bpp, rows = read_png(png)
+        return np.frombuffer(b"".join(bytes(r) for r in rows), np.uint8).reshape(h, w, bpp)[:, :, :3]
     bmp = os.path.join(tempfile.mkdtemp(), "c.bmp")
     cmd = ["sips"] + (["-m", SRGB] if os.path.exists(SRGB) else []) + ["-s", "format", "bmp", png, "--out", bmp]
     subprocess.run(cmd, check=True, capture_output=True)
