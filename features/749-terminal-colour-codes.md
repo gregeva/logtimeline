@@ -1,9 +1,11 @@
-# Should ltl's colours and bold move to 256-colour codes? (Issue #749)
+# Two 24-bit colour sets, for a dark and a light background (Issue #749)
 
 ## Status
 
-**In progress: research done, macOS and Windows Terminal measured and read
-together (§ 8); D1 locked (2026-11-03); the D1 prototype's first stage
+**In progress, reframed by the architect on 2026-11-03 from research to
+implementation: two 24-bit colour sets, one for a dark and one for a light
+background, validated (§ 12). Research done, macOS and Windows Terminal
+measured and read together (§ 8); D1 locked (2026-11-03); the D1 prototype's first stage
 on macOS (§ 9); a macOS candidate across every surface (§ 10.1), read in
 every shipped Windows Terminal scheme (§ 11); D1 amended: tone governs and
 the sets are 24-bit (§ 12); the tone-led sets accepted by the architect, the
@@ -14,12 +16,13 @@ fills.**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
-`prototype/749-terminal-colour-codes/` on branch `749-terminal-colour-codes`.
-Nothing in `ltl` has changed.
+`prototype/749-terminal-colour-codes/` on branch `749-24-bit-colour-sets`.
+Nothing in `ltl` has changed yet.
 
-- **Issue:** #749 (research whether ltl's colours and bold should move to
-  256-colour codes).
-- **Outcome wanted:** a finding for the architect to decide on, not a change.
+- **Issue:** #749 (two 24-bit colour sets, for a dark and a light
+  background).
+- **Outcome wanted:** `ltl` writes its colours from the two validated sets
+  when the background is known, and today's colours when it is not.
 
 ---
 
@@ -31,20 +34,32 @@ sixteen basic colours, and bold only over a 256-colour or 24-bit foreground.
 The rule came from Windows Terminal's "One Half Light" scheme, where the
 basic colours are repainted and bold turns them lighter at normal weight.
 `ltl` itself still writes basic codes for its first six column colours, every
-category colour and its help text's bold. This issue measures, on `ltl`'s own
-output, what that costs today and what a move would give up, so the architect
-can decide whether `ltl` follows its own rule.
+category colour and its help text's bold. This issue measured, on `ltl`'s own
+output, what that costs today and what a move would give up (§ 4 to § 11),
+and prototyped the move until the architect validated two sets (§ 12). It now
+implements them: `ltl` follows its own rule wherever it knows the background.
 
 ## 1. Requirement (issue body)
 
-Research and a prototype of whether `ltl` should write its colours and bold as
-256-colour codes (`38;5;N`) or 24-bit codes (`38;2;R;G;B`) instead of the
-sixteen basic colours. Done when findings show, on `ltl`'s own output (help
-and explain text included), how the basic colours render today and how
-256-colour codes would, in Windows Terminal on a light and a dark scheme and
-on macOS; what moving would give up or change; and the architect has
-decided. Open in the issue: whether basic colours are a problem on
-macOS/Linux terminals with non-default schemes too.
+Reframed by the architect on 2026-11-03: "Originally, this was a request for
+research on the topic … we have gone way farther than just simply research.
+And we are going to implement this … this will be essentially implementation
+of two distinct 24-bit color sets for light and dark backgrounds."
+
+Implement two distinct 24-bit colour sets in `ltl`, one for a dark background
+and one for a light background. When the background is known, `ltl` writes
+its colours from the set for that background; when it is not, it keeps
+today's colours. The sets are those validated in § 12: every colour today's,
+written as a 24-bit code and moved slightly in lightness only where it does
+not read; a value over a bar black or white, whichever reads; each column's
+highlighted fill apart from its plain fill; each column's heatmap gradient in
+the column's own colour; the histogram taking the columns' fills; ten column
+colours. Done when `ltl` writes its colours from the two validated sets when
+the background is known, and today's colours when it is not. Open: the
+validated sets have been read on macOS only (§ 11 read an earlier candidate).
+
+The research requirement this replaces (whether to move, what it would give
+up, for the architect to decide) is met by § 4 to § 12.
 
 ## 2. Contracts (confirmed by the architect, 2026-11-02)
 
@@ -80,8 +95,9 @@ macOS/Linux terminals with non-default schemes too.
     colours.
   - The rest of research § 1.7 follows: `summary_bar_color`, `decode_line`,
     the `-HL` twins, and the screenshot renderer's palette.
-  - Bold over the default foreground (the help and explain headings) is not
-    covered (§ 8.4).
+  - Bold over the default foreground (the help and explain headings): not
+    covered by D1 as first locked (§ 8.4); the validated sets give it the
+    profile's bold text colour (§ 12.2).
 - **D1 amended (architect, 2026-11-03): tone governs, and the sets are
   written as 24-bit codes.** Each colour stays today's colour as the class's
   default Terminal.app profile draws it, moved only slightly in lightness
@@ -353,7 +369,7 @@ this file, e4d0e49b).
   and emphasis: bold default text #4f525d (79,82,93), faint #1c1d21
   (28,29,33), `2;38;5;184` #6b6b00 (107,107,0).
 - **Instruments:** `wt-measure.sh`, `wt-capture.ps1` and `wt-show.sh` in
-  `prototype/749-terminal-colour-codes/` on branch `749-terminal-colour-codes`
+  `prototype/749-terminal-colour-codes/` on branch `749-24-bit-colour-sets`
   (4deb31bf); the tables are in its `results/windows-terminal/`.
 
 ### 6.2 What Windows Terminal does with each kind of code
@@ -819,7 +835,8 @@ its readings of candidate s2-c4. Nothing is selected here.
   70 groups of text on the background, 32 over a fill and 29 bars and
   lines.
 - **Instruments and results:** `prototype/749-terminal-colour-codes/` on
-  branch `749-terminal-colour-codes` (d87fa95e). The schemes are in
+  branch `749-24-bit-colour-sets` (then named `749-terminal-colour-codes`;
+  d87fa95e). The schemes are in
   `results/windows-terminal/`, the runs in
   `results/windows-terminal/e-prototype/s2-c4/`.
 
@@ -1270,7 +1287,7 @@ still differs from the timeline's (36), as #666 records.
   sets are 24-bit (§ Decisions); the every-surface stage on macOS (§ 10)
   and on Windows (§ 11); the tone-led sets (§ 12), validated by the
   architect with the heatmap gradients (§ 12.6, `palettes/t4.tsv`).
-- Instruments on branch `749-terminal-colour-codes`,
+- Instruments on branch `749-24-bit-colour-sets`,
   `prototype/749-terminal-colour-codes/`: `tone.py` designs the sets,
   `e-outputs.sh` writes the runs (§ 10's eight, `fills`, and the ten
   `heat-<colour>` runs), `e-palette.py` rewrites them, `e-measure.sh`
@@ -1281,5 +1298,7 @@ still differs from the timeline's (36), as #666 records.
   (architect, § 12.6).
 - Not yet done: the validated sets (`t4`) have been read only on macOS;
   Windows read the earlier candidate `s2-c4` (§ 11).
+- Next: the implementation, from § 1. Before code, this doc gains its
+  acceptance criteria, agreed with the architect.
 - State outside the repository: none needed; the captures are remade by the
   instruments.

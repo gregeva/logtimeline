@@ -1,7 +1,9 @@
 # Terminal colour codes: research (#749)
 
-Starting point for the prototype of #749 (research whether `ltl`'s colours
-and bold should move to 256-colour codes). It sets what `ltl` writes today
+Starting point for the prototype of #749 (two 24-bit colour sets, for a dark
+and a light background), from its research stage, when the issue asked
+whether `ltl`'s colours and bold should move to 256-colour codes; the issue
+has since become their implementation. It sets what `ltl` writes today
 beside what terminals do with each kind of colour code, so the prototype
 knows what to measure. The measurements it led to are in the issue's feature
 doc, `features/749-terminal-colour-codes.md` § 5. This is research, not a

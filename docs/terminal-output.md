@@ -160,10 +160,12 @@ foreground of its first six colours (yellow, green, cyan, blue, magenta, red)
 as basic codes (`93`, `32`, `36`, `34`, `35`, `31`), and `%colors` writes
 basic codes throughout, while the other column colours and every background
 are 256-colour codes. How those basic foregrounds render across schemes, and
-under `bs_bold()` in help text, is not yet measured. Whether `ltl` should move
-to 256-colour codes at all is to be researched and prototyped before anything
-changes: #749 (research whether ltl's colours and bold should move to
-256-colour codes).
+under `bs_bold()` in help text, is measured in
+`features/749-terminal-colour-codes.md` § 5, § 6 and § 8. `ltl` is to write
+its colours from two 24-bit sets, one for a dark and one for a light
+background, wherever it knows the background, and keep these codes where it
+does not: #749 (two 24-bit colour sets, for a dark and a light background),
+in progress.
 
 ---
 
