@@ -1,0 +1,69 @@
+== Solarized-Light.png  (background beside group A: #fdf6e3)
+A  bold on basic codes and the default foreground (other = 1;code)
+      code    plain    other    colour | ink plain other ratio | contrast plain other
+        39 #657b83 #657b83      same |  378  378  1.00 |  4.13  4.13
+        30 #002b36 #073642   DIFF 18 |  378  378  1.00 | 13.92 12.05
+        31 #dc322f #cb4b16   DIFF 39 |  378  378  1.00 |  4.29  4.27
+        32 #859900 #586e75  DIFF 133 |  378  378  1.00 |  2.97  4.99
+        33 #b58900 #657b83  DIFF 154 |  378  378  1.00 |  2.98  4.13
+        34 #268bd2 #839496  DIFF 111 |  378  370  0.98 |  3.41  2.93
+        35 #d33682 #6c71c4  DIFF 136 |  378  378  1.00 |  4.21  4.06
+        36 #2aa198 #93a1a1  DIFF 105 |  378  370  0.98 |  2.93  2.48
+        37 #eee8d5 #fdf6e3   DIFF 25 |    0    0  0.00 |  1.14  1.00
+        90 #073642 #073642      same |  378  378  1.00 | 12.05 12.05
+        91 #cb4b16 #cb4b16      same |  378  378  1.00 |  4.27  4.27
+        92 #586e75 #586e75      same |  378  378  1.00 |  4.99  4.99
+        93 #657b83 #657b83      same |  378  378  1.00 |  4.13  4.13
+        94 #839496 #839496      same |  370  370  1.00 |  2.93  2.93
+        95 #6c71c4 #6c71c4      same |  378  378  1.00 |  4.06  4.06
+        96 #93a1a1 #93a1a1      same |  370  370  1.00 |  2.48  2.48
+        97 #fdf6e3 #fdf6e3      same |    0    0  0.00 |  1.00  1.00
+B  palette index beside basic code (block colours)
+     38;5;0 #002b36   30 #002b36  same  contrast 13.92 / 13.92
+     38;5;1 #dc322f   31 #dc322f  same  contrast  4.29 /  4.29
+     38;5;2 #859900   32 #859900  same  contrast  2.97 /  2.97
+     38;5;3 #b58900   33 #b58900  same  contrast  2.98 /  2.98
+     38;5;4 #268bd2   34 #268bd2  same  contrast  3.41 /  3.41
+     38;5;5 #d33682   35 #d33682  same  contrast  4.21 /  4.21
+     38;5;6 #2aa198   36 #2aa198  same  contrast  2.93 /  2.93
+     38;5;7 #eee8d5   37 #eee8d5  same  contrast  1.14 /  1.14
+     38;5;8 #073642   90 #073642  same  contrast 12.05 / 12.05
+     38;5;9 #cb4b16   91 #cb4b16  same  contrast  4.27 /  4.27
+    38;5;10 #586e75   92 #586e75  same  contrast  4.99 /  4.99
+    38;5;11 #657b83   93 #657b83  same  contrast  4.13 /  4.13
+    38;5;12 #839496   94 #839496  same  contrast  2.93 /  2.93
+    38;5;13 #6c71c4   95 #6c71c4  same  contrast  4.06 /  4.06
+    38;5;14 #93a1a1   96 #93a1a1  same  contrast  2.48 /  2.48
+    38;5;15 #fdf6e3   97 #fdf6e3  same  contrast  1.00 /  1.00
+    38;5;16 #000000   30 #002b36  DIFF 69  contrast 19.47 / 13.92
+   38;5;244 #808080   90 #073642  DIFF 155  contrast  3.66 / 12.05
+   38;5;231 #ffffff   97 #fdf6e3  DIFF 29  contrast  1.08 /  1.00
+   38;5;232 #080808   30 #002b36  DIFF 58  contrast 18.57 / 13.92
+C  bold over index 16-255 (other = 1;38;5;N)
+      code    plain    other    colour | ink plain other ratio | contrast plain other
+        16 #000000 #000000      same |  378  422  1.12 | 19.47 19.47
+       184 #d7d700 #d7d700      same |  370  419  1.13 |  1.43  1.43
+        34 #00af00 #00af00      same |  378  422  1.12 |  2.73  2.73
+       160 #d70000 #d70000      same |  378  422  1.12 |  5.01  5.01
+       226 #ffff00 #ffff00      same |  370  419  1.13 |  1.00  1.00
+       208 #ff8700 #ff8700      same |  378  422  1.12 |  2.23  2.23
+       244 #808080 #808080      same |  378  422  1.12 |  3.66  3.66
+       111 #87afff #87afff      same |  366  410  1.12 |  2.03  2.03
+D  faint (other = 2;code)
+      code    plain    other    colour | ink plain other ratio | contrast plain other
+        39 #657b83 #323d41  DIFF 104 |  378  378  1.00 |  4.13 10.36
+        37 #eee8d5 #77746a  DIFF 198 |    0  378 378.00 |  1.14  4.34
+        33 #b58900 #5a4400  DIFF 114 |  378  378  1.00 |  2.98  8.61
+        30 #002b36 #00151b   DIFF 35 |  378  378  1.00 | 13.92 17.33
+      i184 #d7d700 #6b6b00  DIFF 153 |  370  378  1.02 |  1.43  5.22
+       i16 #000000 #000000      same |  378  378  1.00 | 19.47 19.47
+E  24-bit beside the 256-colour index of the same RGB
+     38;2;215;215;0 #d7d700   38;5;184 #d7d700  same
+       38;2;215;0;0 #d70000   38;5;160 #d70000  same
+   38;2;128;128;128 #808080   38;5;244 #808080  same
+       38;2;0;175;0 #00af00    38;5;34 #00af00  same
+F  text over a fill: extreme ink pixel and its contrast with the fill
+    38;5;0 #002b36 on #d7d700  9.73 |       30 #002b36 on #d7d700  9.73 |  38;5;16 #000000 on #d7d700 13.61
+    38;5;0 #002b36 on #00af00  5.10 |       30 #002b36 on #00af00  5.10 |  38;5;16 #000000 on #00af00  7.13
+    38;5;0 #002b36 on #0000d7  1.42 |       30 #002b36 on #0000d7  1.42 |  38;5;16 #000000 on #0000d7  1.98
+

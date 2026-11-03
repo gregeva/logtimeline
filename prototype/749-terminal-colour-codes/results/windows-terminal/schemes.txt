@@ -1,0 +1,17 @@
+Each shipped scheme's background, measured beside the pattern, classed by ltl's rule
+(detect_terminal: BT.709 luma of the background above one half is light)
+scheme               background   luma  class
+Campbell             #0c0c0c     0.047  dark
+One Half Light       #fafafa     0.980  light
+Dimidium             #141414     0.078  dark
+Ottosson             #000000     0.000  dark
+Campbell Powershell  #012456     0.126  dark
+Vintage              #000000     0.000  dark
+One Half Dark        #282c34     0.171  dark
+Solarized Dark       #002b36     0.136  dark
+Solarized Light      #fdf6e3     0.965  light
+Tango Dark           #000000     0.000  dark
+Tango Light          #ffffff     1.000  light
+Dark+                #1e1e1e     0.118  dark
+CGA                  #000000     0.000  dark
+IBM 5153             #000000     0.000  dark
