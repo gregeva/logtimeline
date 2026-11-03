@@ -4,9 +4,11 @@
 D1's rewrite of ltl's output for a known background, cell by cell, by the
 roles of a palette file design.py writes:
 - the histogram block (from its "Distribution" title to its percentile
-  lines) and the heatmap's columns (right of the timeline's last separator,
-  from the header to the scale footer) keep every code ltl writes: their
-  colours are out of scope;
+  lines) keeps every code ltl writes;
+- in the heatmap's columns (right of the timeline's last separator, from the
+  header to the scale footer), a cell drawn in a step of the heatmap's
+  gradient takes the set's colour for that step (g<name>); every other code
+  there, the highlight's background and the percentile markers, is kept;
 - a fill (b<N>) takes the set's fill; a scheme background (0;44, the pause
   prompt) takes the set's code for that colour;
 - a bar glyph drawn in a fill's colour (the bar's own glyph, a half block
@@ -28,12 +30,19 @@ spec = importlib.util.spec_from_file_location("ro", os.path.join(here, "read-out
 ro = importlib.util.module_from_spec(spec); spec.loader.exec_module(ro)
 
 def load(path, cls):
+    """a palette file's column for this class: role -> value; a heatmap gradient
+    (g<name>) -> {today's code: the set's colour}"""
     col = 3 if cls == "dark" else 6
     pal = {}
     for line in open(path):
         if line.startswith("#"): continue
         f = line.rstrip("\n").split("\t")
-        if len(f) > col and f[col] not in ("-", ""): pal[f[0]] = f[col] if f[col].startswith("#") else int(f[col])
+        if len(f) <= col or f[col] in ("-", ""): continue
+        if f[0].startswith("g"):        # a heatmap gradient: today's codes for this class -> the set's 8 colours
+            today = [int(x) for x in f[1].split("|")[0 if cls == "dark" else 1].split(",")]
+            pal[f[0]] = dict(zip(today, f[col].split(",")))
+        else:
+            pal[f[0]] = f[col] if f[col].startswith("#") else int(f[col])
     return pal
 
 def rgb(n):
@@ -58,8 +67,8 @@ def index(code):
 def num(code, prefix):
     return int(code[5:]) if code.startswith(prefix + ";5;") else None
 
-def masks(text):
-    """the cells whose codes stay as ltl writes them: the histogram block and the heatmap's columns"""
+def regions(text):
+    """the histogram block's rows and the heatmap's cells, as two predicates"""
     lines = [re.sub(r"\x1b\[[0-9;]*m", "", l) for l in text.split("\n")]
     out = set()
     for i, l in enumerate(lines):
@@ -75,7 +84,20 @@ def masks(text):
             out |= {(r, c) for r in range(i, foot + 1) for c in range(sep + 1, len(lines[r]) + 2)}
     rows = {r for r, c in out if c is None}
     cells = {(r, c) for r, c in out if c is not None}
-    return lambda r, c: r in rows or (r, c) in cells
+    return (lambda r, c: r in rows), (lambda r, c: (r, c) in cells)
+
+def masks(text):
+    """the cells whose codes stay as ltl writes them: the histogram block, and the
+    heatmap's columns when the palette carries no heatmap gradients"""
+    hist, heat = regions(text)
+    return lambda r, c: hist(r, c) or heat(r, c)
+
+def heatmap_map(cells, pal):
+    """the gradient the heatmap draws in (the one holding most of its cells' codes):
+    today's code -> the set's colour, or {} when the palette has none"""
+    seen = Counter(num(st["fg"], "38") for g, st in cells if ro.graphic(g))
+    best = max((k for k in pal if k.startswith("g")), key=lambda k: sum(n for c, n in seen.items() if c in pal[k]), default=None)
+    return pal[best] if best else {}
 
 def remap(st, glyph, pal, count):
     st = dict(st)
@@ -109,10 +131,19 @@ def sgr(st):
     return "\x1b[0m" + ("\x1b[" + ";".join(p) + "m" if p else "")
 
 def rewrite(text, pal, count):
-    keep = masks(text)
+    hist, heat = regions(text)
+    cells = ro.parse(text)
+    gmap = heatmap_map([(g, st) for r, c, g, st in cells if heat(r, c)], pal)
     rows = {}
-    for r, c, g, st in ro.parse(text):
-        rows.setdefault(r, []).append((g, st if keep(r, c) else remap(st, g, pal, count)))
+    for r, c, g, st in cells:
+        if hist(r, c): new = st
+        elif heat(r, c):
+            new = dict(st)
+            ink = num(st["fg"], "38")
+            if gmap and ro.graphic(g) and ink in gmap:
+                new["fg"] = code("38", gmap[ink]); count["heatmap cell"] += 1
+        else: new = remap(st, g, pal, count)
+        rows.setdefault(r, []).append((g, new))
     out = []
     for r in range(len(text.split("\n"))):
         line, prev = [], None

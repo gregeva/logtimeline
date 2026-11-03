@@ -217,3 +217,18 @@ RUNS="fills access-heatmap" ./e-measure.sh <work> <out>/t2 "Clear Dark" "Clear L
 `results/e-prototype/t1/` (all eight runs) and `t2/` (the access-log and
 `fills` runs): Clear Dark and Clear Light, one table per window,
 `summary.txt`, `compare.txt` and `tally.txt`.
+
+The heatmap gradients (`palettes/t4.tsv`, validated): `tone.py` also writes
+each column's gradient for dark and light (`g<name>` rows), every step in the
+column's own hue; `e-palette.py` maps a heatmap's cells from today's step to
+the set's. `e-outputs.sh`'s ten `heat-<colour>` runs read a synthetic log
+(`synth-metrics.py`, seeded) of ten metrics named after the column colours,
+each run showing all ten columns, plain and highlighted, beside one heatmap.
+`e-measure.sh`'s `today` condition shows a run as `ltl` writes it today with
+the background known (`-lbg` on light), the baseline for a light set.
+
+```bash
+./tone.py --out palettes/t4.tsv
+./e-outputs.sh <out> palettes/t4.tsv
+CONDITIONS="known today" RUNS="heat-blue heat-red" ./e-measure.sh <work> <out>/t4 "Clear Dark" "Clear Light"
+```

@@ -11,6 +11,8 @@
 #            background above one half), from the background measured in
 #            results/terminal-app/
 #   unknown  the background is not known: the fallback, today's colours
+#   today    the background known, as ltl writes for it today (with -lbg on a
+#            light background): the baseline a set is compared with
 #
 # a 190 by 59 window prints the run's file a page at a time (e-show.sh), is
 # captured after each page and closed. read-output.py reads the pages.
@@ -46,7 +48,11 @@ reads=()
 for p in "${profiles[@]}"; do
     bg=$(background "$p")
     for cond in ${CONDITIONS:-known unknown}; do
-        if [[ $cond == known ]]; then palette=$bg; else palette=basic; fi
+        case $cond in
+            known) palette=$bg ;;
+            today) palette=basic; [[ $bg == light ]] && palette=basic-light ;;
+            *) palette=basic ;;
+        esac
         for r in "${runs[@]}"; do
             tag="$r--${p// /-}--$cond"
             sig="$work/run/$tag-$stamp"
@@ -80,7 +86,7 @@ OSA
             [[ -e $sig.end ]] || { echo "$tag: the window did not finish" >&2; exit 1; }
             osascript -e "tell application \"Terminal\" to close (every window whose id is $wid)" >/dev/null 2>&1 || true
             base=$lo/$r/basic.ans
-            [[ $palette == light ]] && base=$lo/$r/basic-light.ans
+            [[ $palette == light || $palette == basic-light ]] && base=$lo/$r/basic-light.ans
             python3 "$here/read-output.py" "$shots" "$lo/$r/$palette.ans" "$lo/$r/frame.json" "$rows" \
                 "$p" "$cond" "$bg" "$palette" "$base" "$r" > "$shots/read.json"
             python3 "$here/read-output.py" --table "$shots/read.json" > "$results/$tag.txt"

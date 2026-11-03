@@ -17,6 +17,14 @@ as the profile itself moves that hue between its normal and bright colour
         at 4.5:1, otherwise moved as above.
 - e     bold over the default foreground: the profile's bold text colour.
 
+The heatmap gradients (g<name>): each column's 8 steps for dark and for light,
+24-bit, every step in the column's own hue (its plain fill's: today's 256-colour
+gradients wander off it, through pinks for red, cyan for blue, red-orange for
+yellow), each keeping the saturation today's step has (its chroma as a share of
+the most its hue holds at its lightness), the faintest as far from the
+background as today's dark yellow's faintest is from Clear Dark, the densest at
+today's lightness, the steps between evenly spaced in lightness.
+
 The fills keep today's 256-colour codes, sliced from ltl's @column_colors,
 except where a column's highlighted fill stands less far from its plain fill
 than yellow's pair does (OKLab distance): that column's highlight takes the
@@ -115,6 +123,69 @@ for name, plain, high, hist in COLUMNS:
     if okdist(x256(plain), x256(high)) < SEP - 0.005 and okdist(x256(plain), x256(hist)) >= SEP:
         FILLS[f"b{high}"] = (name, hist, plain)
 
+def gradients():
+    """each column's heatmap gradients from ltl: name -> (gradient, gradient_light), 8 codes each"""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "ltl"), encoding="utf-8").read()
+    block = src[src.index("my @column_colors = ("):]
+    block = block[:block.index("\n);")]
+    out = {}
+    for m in re.finditer(r"name => '(\w+)'.*?gradient\s+=> \[([\d, ]+)\],\s+gradient_light => \[([\d, ]+)\]", block, re.S):
+        out[m.group(1)] = tuple([int(x) for x in g.split(",")] for g in (m.group(2), m.group(3)))
+    assert len(out) == 10, out
+    return out
+
+GRADIENTS = gradients()
+# The reference: today's dark yellow gradient (the duration heatmap on a dark
+# background). Its faintest step's distance from Clear Dark (OKLab, which
+# counts hue and chroma as well as lightness: a heatmap cell is seen by its
+# colour) is the floor every gradient's faintest step reaches on its
+# background, and its closest two neighbouring steps set how close any two
+# neighbouring steps may lie.
+def _drawn_bg(profile):
+    return re.search(r"#[0-9a-f]{6}", open(f"results/terminal-app/profile-{profile}.txt").readline()).group(0)
+G_FLOOR = okdist(x256(GRADIENTS["yellow"][0][0]), _drawn_bg("Clear-Dark"))
+G_STEP = min(abs(lch(x256(p))[0] - lch(x256(q))[0]) for p, q in zip(GRADIENTS["yellow"][0], GRADIENTS["yellow"][0][1:]))
+
+def cmax(L, H):
+    """the most chroma sRGB holds at this OKLCH lightness and hue"""
+    lo, hi = 0.0, 0.4
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        if lch(from_lch(L, mid, H))[1] >= mid - 0.002: lo = mid
+        else: hi = mid
+    return lo
+
+YELLOW = lch(x256(next(c[1] for c in COLUMNS if c[0] == "yellow")))
+AMBER = lch(x256(94))      # #875f00, the amber step of today's dark yellow gradient
+
+def warm(hue, L):
+    """a yellow darker than the yellow column's fill turns toward amber (today's 94),
+    reached at lightness 0.65, as today's yellow gradients do with their amber and
+    gold steps: darkened, a lemon yellow turns olive; every other hue is kept"""
+    if not 95 <= hue <= 120 or L >= YELLOW[0]: return hue
+    t = min(1.0, (YELLOW[0] - L) / (YELLOW[0] - 0.65))
+    return hue + (AMBER[2] - hue) * t
+
+def gradient(codes, bg, hue):
+    """today's 8 steps in the column's own hue (its plain fill's), each keeping its
+    saturation (its chroma as a share of the most its hue holds at its lightness):
+    the faintest step moved in lightness until it lies G_FLOOR from bg, the densest
+    at today's lightness unless the two lie closer than 7 * G_STEP, and the steps
+    between evenly spaced in lightness"""
+    steps = [lch(x256(n)) for n in codes]
+    share = [min(1.0, C / cmax(L, H)) if cmax(L, H) > 0 else 0 for L, C, H in steps]
+    def at(i, L):
+        h = warm(hue, L)
+        return from_lch(L, share[i] * cmax(L, h), h)
+    toward = 1 if lum(bg) < 0.18 else -1              # denser is lighter on dark, darker on light
+    L0 = steps[0][0]
+    while okdist(at(0, L0), bg) < G_FLOOR and 0 < L0 < 1:
+        L0 += 0.002 * toward
+    L7 = steps[-1][0]
+    if (L7 - L0) * toward < 7 * G_STEP:
+        L7 = L0 + toward * 7 * G_STEP
+    return [at(i, L0 + (L7 - L0) * i / 7) for i in range(8)]
+
 rows = [l.rstrip("\n").split("\t") for l in open(a.base) if not l.startswith("#")]
 meta = {r[0]: r[1:3] for r in rows}
 sets = {}
@@ -146,6 +217,15 @@ for k, (name, v, plain) in FILLS.items():
     print(f"  {k}: the {name} column's highlighted fill -> {v} {x256(v)} (the histogram's highlight), "
           f"apart from its plain fill {plain} {okdist(x256(plain), x256(v)):.3f} against yellow's {SEP:.3f}")
 
+NEWG = {}
+print(f"heatmap gradients: faintest step {G_FLOOR:.3f} or more from the background (OKLab), neighbouring steps {G_STEP:.3f} apart or more in lightness")
+for name, (gd, gl) in GRADIENTS.items():
+    hue = lch(x256(next(c[1] for c in COLUMNS if c[0] == name)))[2]
+    NEWG[name] = (gradient(gd, sets["dark"][1], hue), gradient(gl, sets["light"][1], hue))
+    for cls, today, new, bg in (("dark", gd, NEWG[name][0], sets["dark"][1]), ("light", gl, NEWG[name][1], sets["light"][1])):
+        print(f"  {name:8} {cls:5} today " + " ".join(f"{okdist(x256(n), bg):5.3f}" for n in today))
+        print(f"  {'':8} {'':5} set   " + " ".join(f"{okdist(h, bg):5.3f}" for h in new) + "   " + " ".join(new))
+
 if a.out:
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         f.write("# D1 candidate sets by tone.py: tone governs; today's colours as Clear Dark and Clear Light draw them, 24-bit,\n")
@@ -159,3 +239,7 @@ if a.out:
             f.write(f"{k}\t{name}\t{use}\t{vd}\t{hexof(vd)}\t{cr(hexof(vd), dbg):.2f}\t{vl}\t{hexof(vl)}\t{cr(hexof(vl), lbg):.2f}\n")
         for k, (name, v, plain) in FILLS.items():
             f.write(f"{k}\t48;5;{k[1:]}\t{name} highlighted fill\t{v}\t{x256(v)}\t{cr(x256(v), dbg):.2f}\t{v}\t{x256(v)}\t{cr(x256(v), lbg):.2f}\n")
+        for name, (gd, gl) in GRADIENTS.items():
+            nd, nl = NEWG[name]
+            f.write(f"g{name}\t{','.join(map(str, gd))}|{','.join(map(str, gl))}\t{name} heatmap gradient (today's dark|light)\t"
+                    f"{','.join(nd)}\t-\t{cr(nd[0], dbg):.2f}\t{','.join(nl)}\t-\t{cr(nl[0], lbg):.2f}\n")

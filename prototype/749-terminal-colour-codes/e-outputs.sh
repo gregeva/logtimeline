@@ -13,6 +13,11 @@
 #   udm             seven user-defined metrics and one matching nothing: every column colour, a notice panel
 #   fills           ten user-defined metrics, which take the ten column colours in order, with every odd
 #                   minute highlighted: each column's plain and highlighted fill side by side
+#   heat-<colour>   a synthetic log (synth-metrics.py) of ten metrics named after the ten column
+#                   colours, which user-defined metrics take in that order, a third of three
+#                   buckets' lines highlighted: all ten columns, each with its plain and highlighted
+#                   fill, beside the heatmap of one: each column colour's heatmap gradient next to
+#                   every column's own colours
 #   help            --help (FORCE_COLOR)
 #   explain         --explain contribution-highlighting (FORCE_COLOR)
 #   error           a usage error (FORCE_COLOR)
@@ -27,7 +32,7 @@
 # blocks and calibration cell read-output.py finds the grid by, loses its
 # final newline, and has any line wider than the window cut into rows as the
 # terminal wraps it (the command-line options line). The rewrites are checked against their base: every
-# character and attribute kept, the histogram and heatmap cells unchanged.
+# character and attribute kept, the histogram cells unchanged, the heatmap's changed only in its gradient.
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 # Python reads and writes UTF-8, as ltl does, also where the locale does not (Windows: cp1252)
@@ -58,6 +63,11 @@ run() {  # run <name> <flags> : ltl's output for that run
                    -udm system_cpu_total::sum -udm tcp_inuse::sum -udm tcp_established::sum -udm java_num_connections::sum \
                    -udm tcp_timewait::sum -udm system_mem_percent::sum -udm java_mem_rss::sum -udm ephemeral_ports_used::sum \
                    -udm tcp_alloc::sum -udm java_fd_count::sum logs/UDM/connection-server-custom-metrics.csv ;;
+        heat-*)
+            local colour=${name#heat-} udm=() c
+            for c in "${heat_order[@]}"; do udm+=(-udm "$c::sum"); done
+            perl ./ltl --disable-progress $flags -bs 30m -n 0 --terminal-width $cols -h HL "${udm[@]}" \
+                -hm "$colour" --hide legend,occurrences "$synth" ;;
         help) FORCE_COLOR=1 perl ./ltl --disable-progress $flags --terminal-width $cols --help ;;
         explain) FORCE_COLOR=1 perl ./ltl --disable-progress $flags --terminal-width $cols --explain contribution-highlighting ;;
         error) FORCE_COLOR=1 perl ./ltl --disable-progress $flags --terminal-width $cols --bogus-option $A 2>&1 || true ;;
@@ -74,7 +84,11 @@ run() {  # run <name> <flags> : ltl's output for that run
             printf '\n\033[0;44m%s\033[0m\n' "$prompt" ;;
     esac
 }
-runs=(access-heatmap access-latency levels udm fills help explain error progress-pause)
+# the order the ten metrics of the synthetic log take the column colours in (blue first: no users column)
+heat_order=(blue magenta red orange pink teal purple yellow green cyan)
+synth=$top/synth-metrics.log
+python3 "$here/synth-metrics.py" "$synth"
+runs=(access-heatmap access-latency levels udm fills $(printf 'heat-%s ' "${heat_order[@]}") help explain error progress-pause)
 
 for r in "${runs[@]}"; do
     b=$top/base/$r
@@ -82,7 +96,7 @@ for r in "${runs[@]}"; do
     if [[ ! -s $b/basic.raw ]]; then
         run "$r" -dbg > "$b/basic.raw" 2>&1
         run "$r" -lbg > "$b/basic-light.raw" 2>&1
-        case $r in access-*|levels|udm|fills) run "$r" "-V -dbg" > "$b/basic.V.txt" 2>&1 ;; esac
+        case $r in access-*|levels|udm|fills|heat-*) run "$r" "-V -dbg" > "$b/basic.V.txt" 2>&1 ;; esac
     fi
 done
 if grep -l ' at .* line [0-9]' "$top"/base/*/basic.V.txt; then echo "runtime warnings in the -V captures" >&2; exit 1; fi
@@ -134,18 +148,19 @@ for name in ("basic", "basic-light", "dark", "light"):
     assert rows in (None, n), f"{out}: the palettes differ in length"
     rows = n
 for name, base in (("dark", "basic"), ("light", "basic-light")):
-    keep = ep.masks(texts[base])
+    hist, heat = ep.regions(texts[base])
     b = {(r, c): (g, st) for r, c, g, st in ro.parse(texts[base])}
     got = ro.parse(texts[name])
     bad = []
     for r, c, g, st in got:
         bg, bst = b.get((r, c), (None, None))
         if bst is None or g != bg or any(st[k] != bst[k] for k in ("bold", "faint", "ul", "rev")): bad.append((r, c, "character or attribute"))
-        elif keep(r, c) and (st["fg"], st["bg"]) != (bst["fg"], bst["bg"]): bad.append((r, c, "histogram or heatmap cell changed"))
+        elif hist(r, c) and (st["fg"], st["bg"]) != (bst["fg"], bst["bg"]): bad.append((r, c, "histogram cell changed"))
+        elif heat(r, c) and (st["bg"] != bst["bg"] or (st["fg"] != bst["fg"] and not ro.graphic(g))): bad.append((r, c, "heatmap cell changed other than its gradient"))
     assert not bad and len(b) == len(got), f"{out} {name}: {len(bad)} cells off, first {bad[:3]}"
 sw = [dict(id="marker-a", kind="marker", row=0, col=0, len=1), dict(id="calib", kind="calib", row=0, col=50, len=1),
       dict(id="marker-b", kind="marker", row=0, col=cols-1, len=1)]
 json.dump(dict(cols=cols, rows=rows, swatches=sw), open(f"{out}/frame.json", "w"), indent=1)
-print(f"{os.path.basename(out)}: {rows} lines; every character and attribute kept, histogram and heatmap untouched")
+print(f"{os.path.basename(out)}: {rows} lines; every character and attribute kept, the histogram untouched, the heatmap changed only in its gradient")
 PY
 done
