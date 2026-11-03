@@ -724,7 +724,41 @@ The stages:
   measured on Campbell and One Half Light (§ 6); the two read together
   (§ 8); D1 locked; the first stage of the D1 prototype on macOS (§ 9).
   Instruments on branch `749-terminal-colour-codes`.
-- Next: § 10, the sets across every surface, stage 1 (the runs) on macOS.
-  The selection goes to the architect only at the end, after Windows.
+- In progress, § 10 on macOS: producing candidate sets, not a selection.
+  Nothing is chosen until Windows has given its inputs and feedback
+  (architect, 2026-11-03).
+  - **Runs:** seven real runs together show every surface in scope. All are
+    at `--terminal-width 190`, and those that read logs use
+    `-st 04:00 -et 13:00 -bs 30m -n 4 -hf`.
+    1. The outage day's web access log with `-du us -hm duration -hg`.
+    2. The same log with `-du us -sm`: the latency column, and the summary
+       without colour.
+    3. The method server logs of the same node and morning
+       (`-et 12:30`): log levels and their highlighted variants.
+    4. The custom-metrics CSV with seven `-udm` metrics and one that matches
+       nothing (`-bs 10`): every user-defined column colour, and a notice
+       panel.
+    5. `--help` under `FORCE_COLOR=1`.
+    6. `--explain contribution-highlighting` under `FORCE_COLOR=1`.
+    7. A usage error.
+
+    The progress lines (`92`) and the pause prompt (`0;44`) cannot come
+    from a run here, so they are printed from `ltl`'s own codes for them.
+  - **Designer:** `design.py` on the issue branch now designs every role.
+    These are text on the background, `ltl`'s fixed text codes, the bar
+    fills (plain and highlighted per column colour), the text over each
+    fill, and bold over the default foreground. The first candidate,
+    `palettes/s2-c1.tsv`, has faults to iterate on. The light yellow
+    highlighted fill drifts to olive-green (64), and the light orange one
+    to red (196). On dark, the purple column and the violet classification
+    state share 141.
+  - **Still to build:** `e-palette.py` must remap by these roles. It must
+    leave the histogram block and the heatmap columns untouched; recolour
+    a bar glyph drawn over its fill (`█`, `▀`, `▄`) with the fill; and give
+    text over a fill the `t` colour of that fill. `e-outputs.sh` must cover
+    the seven runs. `e-show.sh` and `read-output.py` must capture and read
+    output of any length, page by page.
+- After macOS: the same capture and validation on Windows, then the
+  architect's choice.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
