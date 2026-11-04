@@ -17,7 +17,8 @@ fills; the notice surfaces brought into the sets, analysed from the code
 #797c81 on dark and #747474 on light (§ 12.8); acceptance criteria
 written (§ Acceptance criteria); Windows in scope with macOS, `ltl` asking
 the terminal there too (D2); the terminal's name asked only when something
-reads it (D3).**
+reads it (D3); the notice surfaces drawn in the three conditions, their
+light category colours chosen from the gradients (§ 12.9).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -1441,6 +1442,56 @@ blue or a teal shade away from the accepted gray. So you must go with grey:
   the gridlines take the set's grey"), in place of index 8, the terminal's
   own bright black (slate in both Clear profiles).
 
+### 12.9 The notice surfaces in the three conditions (2026-11-04)
+
+**What was drawn.** `notice-design.py` writes the notice roles of both sets
+to `palettes/n1.tsv`, and `show.pl --set` draws them (issue branch,
+999d6333). `notice-sets.sh` runs the browser live in a tmux pane of 120 by
+50 and captures it as seen. It captures four pages: the browser; the
+guidance tab, whose detail holds ltl's duration histogram; that notice's
+options, an ask layered over the dimmed browser; and the panel with an ask
+and its countdown. The pages were shown in Terminal.app, in Clear Dark and
+in Clear Light.
+
+- **Both sets:**
+  - The frame and the secondary text take the set's grey (§ 12.8).
+  - The detail's histogram draws its gridlines in the same grey.
+  - The layer dimmed under the ask keeps today's mechanism: faint over
+    every code on dark, each colour half way to white on light. On light,
+    its uncoloured text takes the set's grey where today it takes 244.
+- **Dark:**
+  - Text and pick: `t4`'s white and bright white (#dee5eb, bold #e5eff5).
+  - Category colours: today's. Two read below 4.5:1 and were moved in
+    lightness only, by `tone.py`'s rule: figure caveat 170 to #de66de (4.16
+    to 4.51:1) and decision taken 33 to #3d97fe (3.78 to 4.51).
+- **Light:** text and pick `38;5;16`, as today. The category colours were
+  drawn in two candidates, beside today's light style and an unknown
+  background (today's dark style):
+  - by tone: today's colour moved in lightness only;
+  - from the gradients: the darkest step of the column's light gradient in
+    `t4`.
+
+**The architect chose the light category colours from the gradients**, the
+third of the four conditions in Clear Light, on every page: "Page 1/4
+option 3/4 selected as best. Page 2/4 option 3/4 selected as best. Page 3/4
+option 3/4 selected as best. Page 4/4 option 3/4 selected as best."
+
+| category | today (`gradient_light` last step) | chosen, contrast on Clear Light |
+|---|---|---|
+| data anomaly | 166, 3.67 | #ba5204, 4.72 |
+| figure caveat | 93 violet, 5.84 | #b300b3 magenta, 5.69 |
+| your options | 30, 4.21 | #008787, 4.21 |
+| decision taken for you | 27, 4.97 | #215dfe, 5.00 |
+| runtime condition | 29, 4.38 | #00875f, 4.38 |
+| guidance | 35, 2.78 | #01af00, 2.84 |
+
+- The light category colour keeps the derivation of `docs/design-language.md`
+  § The category sheet: the darkest step of its column's light gradient,
+  now the gradient of § 12.6.
+- Figure caveat turns from violet to magenta, in its column's hue.
+- Guidance reads 2.84:1 on Clear Light.
+- The light dimmed layer is as drawn on page 3.
+
 ## Acceptance criteria
 
 Derived from § 1, D1 amended and the architect's decisions of § 12.4 to
@@ -1596,18 +1647,19 @@ together they show every surface (§ 10).
       - On light: frame and secondary text #747474, text and the pick
         `38;5;16`, the pick bold.
       - Not known: today's style (AC2).
-      - The category colours and the layer dimmed under a pop-up are the
-        values § 12.7's validation in the notice browser settles. That
-        validation has not run yet. Open there: magenta 170 and blue 33 on
-        dark, which `t4` does not cover; the light category colour, which
-        follows the changed light gradients; and the light dimmed layer,
-        blended from xterm's colours rather than the set's (§ 7).
+      - The light category colours are the darkest step of each column's
+        light gradient in `t4`, chosen by the architect (§ 12.9).
+      - The layer dimmed under a pop-up keeps today's mechanism. On light,
+        its uncoloured text takes #747474 and each colour is blended from
+        the set's own value (§ 12.9).
+      - The dark category colours are those drawn in § 12.9: today's,
+        with figure caveat #de66de and decision taken #3d97fe.
       - Paths: `notice_style` and its consumers, `notice_dim_row` and
         `notice_light_dimmed_sgr`.
       - Validation: `tests/validate-notices.sh`, its light and dark
         scenarios held to these values, and a tmux scenario in an answering
         pane.
-      - Assertable once § 12.7 settles the values.
+      - Assertable.
 - [ ] **AC10: bold over the default foreground takes the set's emphasis
       colour.**
       - Help and explain headings and bold table cells, the week fold, and
@@ -1693,12 +1745,11 @@ learns them as a colour before AC4 to AC11 can be asserted.
   line, the heatmap's and the histogram's gridlines included, takes the
   grey of the header and footer rules (architect, § 12.8).
 - Not yet done: the validated sets (`t4`) have been read only on macOS;
-  Windows read the earlier candidate `s2-c4` (§ 11). The notice surfaces
-  take the sets too, validated in the notice browser prototype (§ 12.7):
-  analysed from the code, not yet designed or captured.
-- Acceptance criteria written (§ Acceptance criteria); AC9's notice
-  category colours and dimmed layer come from § 12.7's validation.
-- Next: the notice surfaces' design and validation (§ 12.7); then the
-  implementation, from § 1, against § Acceptance criteria.
+  Windows read the earlier candidate `s2-c4` (§ 11).
+- The notice surfaces are drawn in the three conditions by `notice-sets.sh`
+  (§ 12.9); their light category colours are chosen from the gradients.
+- Acceptance criteria written (§ Acceptance criteria).
+- Next: the delivery plan, then the implementation, from § 1, against
+  § Acceptance criteria.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
