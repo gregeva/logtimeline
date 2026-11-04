@@ -13,7 +13,8 @@ fill pairs checked on every column (§ 12.4); the heatmap and the
 histogram brought into scope (§ 12.5); the sets and the heatmap gradients
 validated by the architect (§ 12.6); the histogram inherits the columns'
 fills; the notice surfaces brought into the sets, analysed from the code
-(§ 12.7).**
+(§ 12.7), their light secondary grey chosen; the dark set's grey made the
+neutral #797c81 (§ 12.8).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -1376,6 +1377,32 @@ the panel and an ask, drawn with each grey side by side
   of #93969b in the validated set's run of `ltl`; the custom-metrics run is
   the one that draws a notice panel.
 
+### 12.8 The dark set's grey (the architect, 2026-11-04)
+
+Shown: every page of § 12.6's runs where the dark set writes its grey,
+drawn in Clear Dark with bright black (rules, headings, the options line,
+column separators; `s8`, #5c7385) and the notice panel's secondary text
+(faint) as #797c81, switching with yesterday's colours. The architect:
+"what we said yesterday is not acceptable. It leans into a little bit of a
+blue or a teal shade away from the accepted gray. So you must go with grey:
+#797c81".
+
+- **On dark, the grey is #797c81** (3.21:1 on Clear Dark): Clear Dark's
+  faint default text as drawn, neutral, in place of the profile's slate
+  bright black (#5c7385, 2.71). It is the colour of the rules, headings,
+  options line and column separators, the notice frame, and the notice
+  surfaces' secondary text (§ 12.7).
+- **The lines around the heatmap take the same grey as the header and
+  footer lines** (the architect: "in the actual implementation, those lines
+  around the heat map need to be the same colors as the header and footer
+  lines"). In the prototype they kept the terminal's bright black because
+  `e-palette.py` leaves the heatmap's rows as `ltl` writes them. In `ltl`,
+  `print_heatmap_footer_scale` (the scale line under the heatmap) and the
+  percentile markers in `print_heatmap_row` already write
+  `$colors{'bright-black'}`, as the timeline's header and footer rules do.
+  The histogram's gridlines have a source of their own:
+  `$histogram_gridline_color = 8;`, written `38;5;8`.
+
 ## Resuming
 
 - Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
@@ -1392,6 +1419,8 @@ the panel and an ask, drawn with each grey side by side
   them.
 - The histogram takes the columns' fills and needs no work of its own
   (architect, § 12.6).
+- The dark set's grey is #797c81, and every line, the heatmap's included,
+  takes the grey of the header and footer rules (architect, § 12.8).
 - Not yet done: the validated sets (`t4`) have been read only on macOS;
   Windows read the earlier candidate `s2-c4` (§ 11). The notice surfaces
   take the sets too, validated in the notice browser prototype (§ 12.7):
