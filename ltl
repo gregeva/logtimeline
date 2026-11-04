@@ -9910,11 +9910,11 @@ my $explain_heatmap_flags = <<'END';
     ltl -hm count access.log                      # count heatmap (cyan gradient)
     ltl -hm duration -hmw 80 access.log           # wider heatmap (80 cells vs default 52)
     ltl -hm duration -bs 5 access.log             # 5-minute time buckets for finer-grained view
-    ltl -hm duration -lbg access.log              # palette tuned for light terminal backgrounds
-    ltl -hm duration -dbg access.log              # force dark palette regardless of auto-detect
+    ltl -hm duration -lbg access.log              # the light colour set, whatever the terminal reports
+    ltl -hm duration -dbg access.log              # the dark colour set, whatever the terminal reports
 END
 
-my $explain_heatmap_notes = q{The X-axis is logarithmic, so equal visual spacing represents an exponential range of values. A cell at the right of the chart represents values 10x to 100x larger than a cell at the same visual position one decade left. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the 256-color gradient correctly; legacy Windows CMD with `more` shows monochrome cells (the layout and gridline structure remain readable). When the heatmap and histogram are both active (-hm and -hg together), the heatmap renders inline in the bar-graph rows and the histogram renders as a separate panel below.};
+my $explain_heatmap_notes = q{The X-axis is logarithmic, so equal visual spacing represents an exponential range of values. A cell at the right of the chart represents values 10x to 100x larger than a cell at the same visual position one decade left. Color rendering depends on terminal support. When the terminal's background is known (it answers when asked, or -lbg or -dbg says), the gradient is drawn in 24-bit colour, which macOS Terminal, Windows Terminal and modern Linux terminals display; when it is not known, the 256-color gradient is drawn. Legacy Windows CMD with `more` shows monochrome cells (the layout and gridline structure remain readable). When the heatmap and histogram are both active (-hm and -hg together), the heatmap renders inline in the bar-graph rows and the histogram renders as a separate panel below.};
 
 # --- histogram (--explain histogram) ---
 my $explain_histogram_intuition = q{The histogram (-hg) renders a single distribution chart showing how often each value range occurs across the entire log -- not split per time bucket like the heatmap. Where the heatmap surfaces *temporal* shape, the histogram surfaces *aggregate* shape: the full distribution's body, modes, tails, and percentile structure visible at once. Bars rise from the X-axis to indicate frequency at each value range; the percentile tick marks along the bottom show exactly where p50, p95, p99, and p99.9 fall on the distribution.};
@@ -11637,8 +11637,8 @@ sub print_help {
     $out .= help_opt("-hcl, --hide-classification",    "Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs");
     $out .= help_opt("-scl, --show-classification",    "Show the success and failure percentage columns for a format that declares both classifications without being an event ledger");
     $out .= help_opt("-hst, --hide-stats",            "Hide the latency statistics and heatmap columns");
-    $out .= help_opt("-lbg, --light-background",      "Use pale-to-bright color gradients suited for light/white terminal backgrounds");
-    $out .= help_opt("-dbg, --dark-background",       "Force dark-background color gradients (disables auto-detect; wins over -lbg if both given)");
+    $out .= help_opt("-lbg, --light-background",      "Draw all output in the colour set for a light terminal background, whatever the terminal reports");
+    $out .= help_opt("-dbg, --dark-background",       "Draw all output in the colour set for a dark terminal background, whatever the terminal reports (wins over -lbg if both given)");
     $out .= help_opt("-nah, --no-auto-hide",          "Disable automatic column hiding at narrow terminal widths (squeeze all columns instead)");
     $out .= help_opt("-p,   --pause",                 "Wait for a keypress between pages of output");
     $out .= help_opt("-V,   --verbose [<section>...]", "Emit diagnostic sections. Bare -V emits all; -V <name>[,<name>...] or repeated -V selects sections; -V list prints known sections");

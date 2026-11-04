@@ -63,8 +63,8 @@ ltl -hm bytes access.log                      # bytes heatmap (green gradient)
 ltl -hm count access.log                      # count heatmap (cyan gradient)
 ltl -hm duration -hmw 80 access.log           # wider heatmap (80 cells vs default 52)
 ltl -hm duration -bs 5 access.log             # 5-minute time buckets for finer-grained view
-ltl -hm duration -lbg access.log              # palette tuned for light terminal backgrounds
-ltl -hm duration -dbg access.log              # force dark palette regardless of auto-detect
+ltl -hm duration -lbg access.log              # the light colour set, whatever the terminal reports
+ltl -hm duration -dbg access.log              # the dark colour set, whatever the terminal reports
 ```
 
 ---
@@ -72,7 +72,7 @@ ltl -hm duration -dbg access.log              # force dark palette regardless of
 ## Notes
 
 - The X-axis is **logarithmic**, so equal visual spacing represents an exponential range of values. A cell at the right of the chart represents values 10× to 100× larger than a cell at the same visual position one decade left.
-- **Color rendering depends on terminal support.** Modern Unix terminals and Windows Terminal display the 256-color gradient correctly. Legacy Windows CMD with `more` shows monochrome cells; the layout and gridline structure remain readable.
+- **Color rendering depends on terminal support.** When the terminal's background is known (it answers when asked, or `-lbg` or `-dbg` says), the gradient is drawn in 24-bit colour, which macOS Terminal, Windows Terminal and modern Linux terminals display; when it is not known, the 256-color gradient is drawn. Legacy Windows CMD with `more` shows monochrome cells; the layout and gridline structure remain readable.
 - When the heatmap and histogram are both active (`-hm` and `-hg` together), the heatmap renders inline in the bar-graph rows and the histogram renders as a separate panel below.
 
 ---

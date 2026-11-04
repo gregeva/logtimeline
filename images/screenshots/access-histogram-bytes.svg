@@ -19,24 +19,24 @@
 <text x="640.8" y="41.4" fill="#e0e0e0">%</text>
 <text x="14.4" y="56.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">34492</text>
 <text x="57.6" y="56.4" fill="#e0e0e0">┣</text>
-<text x="64.8" y="56.4" fill="#465c6d" textLength="252" lengthAdjust="spacing">───────────────────────────────────</text>
-<text x="331.2" y="56.4" fill="#465c6d" textLength="288" lengthAdjust="spacing">────────────────────────────────────────</text>
+<text x="64.8" y="56.4" fill="#797c81" textLength="252" lengthAdjust="spacing">───────────────────────────────────</text>
+<text x="331.2" y="56.4" fill="#797c81" textLength="288" lengthAdjust="spacing">────────────────────────────────────────</text>
 <text x="619.2" y="56.4" fill="#e0e0e0">┫</text>
 <text x="633.6" y="56.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">100%</text>
 <text x="57.6" y="71.4" fill="#e0e0e0">┃</text>
 <text x="619.2" y="71.4" fill="#e0e0e0">┃</text>
 <text x="14.4" y="86.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">25869</text>
 <text x="57.6" y="86.4" fill="#e0e0e0">┣</text>
-<text x="64.8" y="86.4" fill="#465c6d" textLength="252" lengthAdjust="spacing">───────────────────────────────────</text>
-<text x="331.2" y="86.4" fill="#465c6d" textLength="288" lengthAdjust="spacing">────────────────────────────────────────</text>
+<text x="64.8" y="86.4" fill="#797c81" textLength="252" lengthAdjust="spacing">───────────────────────────────────</text>
+<text x="331.2" y="86.4" fill="#797c81" textLength="288" lengthAdjust="spacing">────────────────────────────────────────</text>
 <text x="619.2" y="86.4" fill="#e0e0e0">┫</text>
 <text x="640.8" y="86.4" fill="#e0e0e0" textLength="21.6" lengthAdjust="spacing">75%</text>
 <text x="57.6" y="101.4" fill="#e0e0e0">┃</text>
 <text x="619.2" y="101.4" fill="#e0e0e0">┃</text>
 <text x="14.4" y="116.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">17246</text>
 <text x="57.6" y="116.4" fill="#e0e0e0">┣</text>
-<text x="64.8" y="116.4" fill="#465c6d" textLength="252" lengthAdjust="spacing">───────────────────────────────────</text>
-<text x="331.2" y="116.4" fill="#465c6d" textLength="288" lengthAdjust="spacing">────────────────────────────────────────</text>
+<text x="64.8" y="116.4" fill="#797c81" textLength="252" lengthAdjust="spacing">───────────────────────────────────</text>
+<text x="331.2" y="116.4" fill="#797c81" textLength="288" lengthAdjust="spacing">────────────────────────────────────────</text>
 <text x="619.2" y="116.4" fill="#e0e0e0">┫</text>
 <text x="640.8" y="116.4" fill="#e0e0e0" textLength="21.6" lengthAdjust="spacing">50%</text>
 <text x="57.6" y="131.4" fill="#e0e0e0">┃</text>
@@ -44,13 +44,13 @@
 <text x="619.2" y="131.4" fill="#e0e0e0">┃</text>
 <text x="21.6" y="146.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">8623</text>
 <text x="57.6" y="146.4" fill="#e0e0e0">┣</text>
-<text x="64.8" y="146.4" fill="#465c6d" textLength="158.4" lengthAdjust="spacing">──────────────────────</text>
+<text x="64.8" y="146.4" fill="#797c81" textLength="158.4" lengthAdjust="spacing">──────────────────────</text>
 <text x="223.2" y="146.4" fill="#00af00">▄</text>
-<text x="230.4" y="146.4" fill="#465c6d" textLength="86.4" lengthAdjust="spacing">────────────</text>
-<text x="331.2" y="146.4" fill="#465c6d" textLength="86.4" lengthAdjust="spacing">────────────</text>
+<text x="230.4" y="146.4" fill="#797c81" textLength="86.4" lengthAdjust="spacing">────────────</text>
+<text x="331.2" y="146.4" fill="#797c81" textLength="86.4" lengthAdjust="spacing">────────────</text>
 <text x="417.6" y="146.4" fill="#00af00">▇</text>
 <text x="432" y="146.4" fill="#00af00">▂</text>
-<text x="439.2" y="146.4" fill="#465c6d" textLength="180" lengthAdjust="spacing">─────────────────────────</text>
+<text x="439.2" y="146.4" fill="#797c81" textLength="180" lengthAdjust="spacing">─────────────────────────</text>
 <text x="619.2" y="146.4" fill="#e0e0e0">┫</text>
 <text x="640.8" y="146.4" fill="#e0e0e0" textLength="21.6" lengthAdjust="spacing">25%</text>
 <text x="57.6" y="161.4" fill="#e0e0e0">┃</text>
