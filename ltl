@@ -2000,7 +2000,8 @@ sub build_highlight_twins {
 #          index (30-37 and 90-97, and 38;5;i below 16); bright black, s8, is
 #          the grey
 #   f<N>   ltl's fixed 256-colour text codes the set moves (38;5;N); grey 244
-#          is the grey
+#          is the grey; on dark, 170 and 33 are the notice categories figure
+#          caveat and decision taken for you, moved toward 4.5:1 (§ 12.9)
 #   e      bold over the default foreground
 #   b<N>   a fill the set moves (48;5;N): blue's highlighted fill
 #   grey   every line and all secondary text (§ 12.8)
@@ -2012,6 +2013,7 @@ my %colour_sets = (
         s9 => '#e87461', s10 => '#79be7e', s11 => '#e5c872', s12 => '#67b5ed', s13 => '#d389e5', s14 => '#84dde0', s15 => '#e5eff5',
         f34 => 34, f160 => '#f53629', f111 => 111, f44 => 44, f178 => 178, f135 => '#b776ff', f208 => 208, f213 => 213,
         f43 => 43, f93 => '#9758fe', f30 => '#32a09f', f35 => 35, f29 => '#31a076', f166 => '#ed7327',
+        f170 => '#de66de', f33 => '#3d97fe',
         e => '#f0f0f0', b21 => 27, grey => '#797c81',
         gyellow  => [ '#785502', '#926701', '#ac7b08', '#c19202', '#ceae05', '#d6cc0e', '#e7e70e', '#ffff00' ],
         ggreen   => [ '#026401', '#047b03', '#059204', '#06aa05', '#06c305', '#05dd04', '#01f701', '#9aff93' ],
@@ -15636,12 +15638,17 @@ sub notice_style {
     my $light   = notice_background() eq 'light';
     my $windows = terminal_windows_console();
     my %column  = map { $_->{name} => $_ } @column_colors;
+    # With a colour set (features/749-terminal-colour-codes.md AC9, § 12.9):
+    # ltl's own codes through the set, secondary text in the set's grey on
+    # either background, and on light each category the darkest step of its
+    # column's light gradient in the set.
+    my $set = $colour_set ? $colour_sets{$colour_set} : undef;
     %notice_style = (
-        frame => $light ? "\e[38;5;244m" : "\e[90m",
-        text  => $light ? "\e[38;5;16m"  : "\e[37m",
-        dim   => $light ? "\e[38;5;244m" : "\e[2m",
+        frame => colour_sgr( $light ? "\e[38;5;244m" : "\e[90m" ),
+        text  => colour_sgr( $light ? "\e[38;5;16m"  : "\e[37m" ),
+        dim   => $set ? "\e[" . colour_set_param( 38, $set->{grey} ) . 'm' : $light ? "\e[38;5;244m" : "\e[2m",
         bold  => "\e[1m",
-        pick  => $light ? "\e[1;38;5;16m" : "\e[1;97m",
+        pick  => colour_sgr( $light ? "\e[1;38;5;16m" : "\e[1;97m" ),
         reset => "\e[0m",
         box   => { %{ $histogram_box_sets{light} }, corner_tl => '╭', corner_tr => '╮', corner_bl => '╰', corner_br => '╯' },
     );
@@ -15649,8 +15656,9 @@ sub notice_style {
         my $col = $column{ $c->{colour} };
         # The column colour without the reset it opens with, so a bold before it holds.
         ( my $column_fg = $col->{fg} ) =~ s{^\e\[0m}{};
-        $notice_style{fg}{ $c->{name} } = $light ? "\e[38;5;$col->{gradient_light}[-1]m"
-                                        : defined $c->{dark} ? "\e[38;5;$c->{dark}m"
+        my $light_step = $set && $set->{"g$c->{colour}"} ? $set->{"g$c->{colour}"}[-1] : $col->{gradient_light}[-1];
+        $notice_style{fg}{ $c->{name} } = $light ? "\e[" . colour_set_param( 38, $light_step ) . 'm'
+                                        : defined $c->{dark} ? colour_sgr("\e[38;5;$c->{dark}m")
                                         : $column_fg;
         $notice_style{glyph}{ $c->{name} } = $windows ? $c->{windows} : $c->{glyph};
     }
@@ -16063,20 +16071,33 @@ sub notice_paint_differences {
 # A row under a pop-up, dimmed with its colours kept (#412 D10). Dark: faint
 # over the row's own colours, bold dropped so it cannot cancel the faint.
 # Light, where faint darkens: every colour half way to white, uncoloured text
-# in the secondary grey.
+# in the secondary grey, the set's grey when the background is known.
 sub notice_dim_row {
     my ( $r, $bg ) = @_;
     if ( $bg ne 'light' ) {
         $r =~ s/\e\[([0-9;]*)m/notice_sgr_without_weight($1) . "\e[2m"/ge;
         return "\e[2m$r\e[0m";
     }
-    $r =~ s/\e\[([0-9;]*)m/notice_light_dimmed_sgr($1)/ge;
-    return "\e[38;5;244m$r\e[0m";
+    my $grey = $colour_set ? colour_set_param( 38, $colour_sets{$colour_set}{grey} ) : '38;5;244';
+    $r =~ s/\e\[([0-9;]*)m/notice_light_dimmed_sgr( $1, $grey )/ge;
+    return "\e[${grey}m$r\e[0m";
 }
 
+# An SGR's parameters without bold and faint: a 256-colour or 24-bit colour
+# is kept whole, its own parameters never read as weights (a 2 selector, a
+# component of 1, 2 or 22).
 sub notice_sgr_without_weight {
-    my @p = grep { $_ ne '1' && $_ ne '2' && $_ ne '22' } split /;/, $_[0], -1;
-    return @p ? "\e[" . join( ';', @p ) . 'm' : '';
+    my @p = split /;/, $_[0], -1;
+    my @out;
+    while (@p) {
+        my $c = shift @p;
+        if ( ( $c eq '38' || $c eq '48' ) && @p && ( $p[0] eq '5' || $p[0] eq '2' ) ) {
+            push @out, $c, splice( @p, 0, $p[0] eq '5' ? 2 : 4 );
+            next;
+        }
+        push @out, $c unless $c eq '1' || $c eq '2' || $c eq '22';
+    }
+    return @out ? "\e[" . join( ';', @out ) . 'm' : '';
 }
 
 # The xterm values of the 256 colours, for blending a colour towards white.
@@ -16098,14 +16119,15 @@ sub notice_rgb_of_index {
 sub notice_half_to_white { return join ';', map { int( $_ + ( 255 - $_ ) / 2 ) } @_ }
 
 sub notice_light_dimmed_sgr {
-    my @p = split /;/, $_[0], -1;
+    my ( $sgr, $grey ) = @_;
+    my @p = split /;/, $sgr, -1;
     @p = (0) unless @p;
     my @out;
     while (@p) {
         my $c = shift @p;
         $c = 0 if $c eq '';
-        if    ( $c == 0 )                         { push @out, 0, '38;5;244' }
-        elsif ( $c == 39 )                        { push @out, '38;5;244' }
+        if    ( $c == 0 )                         { push @out, 0, $grey }
+        elsif ( $c == 39 )                        { push @out, $grey }
         elsif ( $c == 1 || $c == 2 || $c == 22 )  { }
         elsif ( $c >= 30 && $c <= 37 )            { push @out, '38;2;' . notice_half_to_white( notice_rgb_of_index( $c - 30 ) ) }
         elsif ( $c >= 90 && $c <= 97 )            { push @out, '38;2;' . notice_half_to_white( notice_rgb_of_index( $c - 82 ) ) }
