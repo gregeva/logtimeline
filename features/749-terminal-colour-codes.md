@@ -13,8 +13,8 @@ fill pairs checked on every column (§ 12.4); the heatmap and the
 histogram brought into scope (§ 12.5); the sets and the heatmap gradients
 validated by the architect (§ 12.6); the histogram inherits the columns'
 fills; the notice surfaces brought into the sets, analysed from the code
-(§ 12.7), their light secondary grey chosen; the dark set's grey made the
-neutral #797c81 (§ 12.8).**
+(§ 12.7), their light secondary grey chosen; the sets' greys made neutral,
+#797c81 on dark and #747474 on light (§ 12.8).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -1402,6 +1402,12 @@ blue or a teal shade away from the accepted gray. So you must go with grey:
   `$colors{'bright-black'}`, as the timeline's header and footer rules do.
   The histogram's gridlines have a source of their own:
   `$histogram_gridline_color = 8;`, written `38;5;8`.
+- **On light, the grey is #747474** (4.52:1 on Clear Light), in place of
+  Clear Light's slate bright black (#506573, 5.88). Shown the same pages in
+  Clear Light, with the heatmap's scale line and percentile markers in the
+  same grey, the architect: "I choose grey: #747474". It is the light
+  notice surfaces' frame and secondary grey too (§ 12.7), so on each
+  background one neutral grey draws every line and all secondary text.
 
 ## Resuming
 
@@ -1419,8 +1425,9 @@ blue or a teal shade away from the accepted gray. So you must go with grey:
   them.
 - The histogram takes the columns' fills and needs no work of its own
   (architect, § 12.6).
-- The dark set's grey is #797c81, and every line, the heatmap's included,
-  takes the grey of the header and footer rules (architect, § 12.8).
+- The sets' greys are #797c81 on dark and #747474 on light, and every
+  line, the heatmap's included, takes the grey of the header and footer
+  rules (architect, § 12.8).
 - Not yet done: the validated sets (`t4`) have been read only on macOS;
   Windows read the earlier candidate `s2-c4` (§ 11). The notice surfaces
   take the sets too, validated in the notice browser prototype (§ 12.7):
