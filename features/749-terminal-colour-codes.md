@@ -1782,7 +1782,7 @@ together they show every surface (§ 10).
 
 **The background**
 
-- [ ] **AC1: what settles the background, on Windows, macOS and Linux
+- [x] **AC1: what settles the background, on Windows, macOS and Linux
       alike (D2).**
       - `-dbg` selects the dark set and `-lbg` the light set, and `-dbg`
         wins over `-lbg` as today
@@ -1817,7 +1817,7 @@ together they show every surface (§ 10).
         adds to a run in Terminal.app is measured and recorded here;
         Windows' is in `docs/terminal-output.md` (35 to 49 ms).
       - Assertable.
-- [ ] **AC2: background not known, today's colours byte for byte, but for
+- [x] **AC2: background not known, today's colours byte for byte, but for
       the text over a fill (D4).**
       - Every run whose background is not known writes what the base commit
         writes, faint on the notice surfaces included. The one exception is
@@ -1839,7 +1839,7 @@ together they show every surface (§ 10).
         - The suite's harnesses, which run piped with no background option,
           pass unchanged.
       - Assertable.
-- [ ] **AC3: `-V` reports the background and the colours written.**
+- [x] **AC3: `-V` reports the background and the colours written.**
       - It reports what settled the background: `-dbg`, `-lbg`, the
         terminal's answer, or not known.
       - It reports which colours were written: the dark set, the light set,
@@ -1855,7 +1855,7 @@ together they show every surface (§ 10).
 
 **The sets, where the background is known**
 
-- [ ] **AC4: every colour as validated, cell for cell.**
+- [x] **AC4: every colour as validated, cell for cell.**
       - For each § 10 run, `ltl -dbg` and `ltl -lbg` draw what `e-palette.py`
         draws from the base commit's output of the same run with the
         validated sets, for every cell: character, attributes, foreground and
@@ -1872,7 +1872,7 @@ together they show every surface (§ 10).
         validated sets, independent of `ltl`'s own, as
         `tests/validate-heatmap-palette.sh` mirrors the gradients.
       - Assertable.
-- [ ] **AC5: a value over a bar is black or white, whichever reads, in
+- [x] **AC5: a value over a bar is black or white, whichever reads, in
       every condition (D4).**
       - Text over a fill is written `38;5;16` or `38;5;231`, whichever has
         the higher contrast with that fill. That holds with the dark set,
@@ -1894,14 +1894,14 @@ together they show every surface (§ 10).
         better. #683's reproduction (user-defined metrics over the blue and
         dark red fills, `-hl -ho -bs 1d`) is run piped.
       - Assertable.
-- [ ] **AC6: each highlighted fill stands apart from its plain fill.**
+- [x] **AC6: each highlighted fill stands apart from its plain fill.**
       - The blue column's highlighted fill is 27 in the timeline and the run
         summary, in both sets (§ 12.4); not known, it stays 21.
       - The other nine pairs keep today's codes. The column colours stay ten,
         and an eleventh column takes yellow, as today.
       - Validation: the `fills` run's blue cells.
       - Assertable.
-- [ ] **AC7: the heatmap's gradient is the column's own, from its faintest
+- [x] **AC7: the heatmap's gradient is the column's own, from its faintest
       step.**
       - Each column's eight steps are § 12.6's 24-bit steps for the set.
       - A highlighted cell's background stays the column's plain fill.
@@ -1914,7 +1914,7 @@ together they show every surface (§ 10).
         `-lbg`. Every gradient cell's foreground is one of the column's
         eight steps for the set.
       - Assertable.
-- [ ] **AC8: one grey for every line and all secondary text.** The grey is
+- [x] **AC8: one grey for every line and all secondary text.** The grey is
       #797c81 on dark and #747474 on light (§ 12.8).
       - Lines: the timeline's header and footer rules, column headings,
         separators and options line (`print_bar_graph`, `print_run_options`,
@@ -1928,7 +1928,7 @@ together they show every surface (§ 10).
       - Validation: the access-heatmap and udm runs, with `-dbg` and with
         `-lbg`, one cell per path.
       - Assertable.
-- [ ] **AC9: the notice surfaces in the three conditions.**
+- [x] **AC9: the notice surfaces in the three conditions.**
       - On dark: frame and secondary text #797c81, text and the pick from
         `t4` (`s7`, bold `s15`).
       - On light: frame and secondary text #747474, text and the pick
@@ -1952,7 +1952,7 @@ together they show every surface (§ 10).
         scenarios held to these values, and a tmux scenario in an answering
         pane.
       - Assertable.
-- [ ] **AC10: bold over the default foreground takes the set's emphasis
+- [x] **AC10: bold over the default foreground takes the set's emphasis
       colour.**
       - Help and explain headings and bold table cells, the week fold, and
         an error line written once the background is known: bold in `e`
@@ -1963,7 +1963,7 @@ together they show every surface (§ 10).
       - Validation: `FORCE_COLOR=1 ltl --help -dbg`, and the same with
         `-lbg`: heading cells bold in `e`.
       - Assertable.
-- [ ] **AC11: the run summary's contribution bar is drawn for every
+- [x] **AC11: the run summary's contribution bar is drawn for every
       category that draws one today, in both sets.**
       - `summary_bar_color` finds the bar from the last digit of a `3N` or
         `9N` code (§ 7). A category written in 24-bit would draw no bar.
@@ -1974,13 +1974,13 @@ together they show every surface (§ 10).
 
 **Around the code**
 
-- [ ] **AC12: the screenshots show the sets.** Every entry of
+- [x] **AC12: the screenshots show the sets.** Every entry of
       `process/screenshots.yaml` is regenerated (its `-dbg` or `-lbg` stands
       for the terminal, so it draws the set), and
       `tests/validate-screenshot-capture.sh` passes. The renderer already
       draws `38;2` as written (research § 1.6).
       - Assertable.
-- [ ] **AC13: the documents state what `ltl` does.**
+- [x] **AC13: the documents state what `ltl` does.**
       - The `-lbg` and `-dbg` rows of `--help` and `docs/usage.md` name the
         colour set for all output, not the heatmap's gradients.
       - `docs/terminal-output.md` § Colour and emphasis and § The terminals,
@@ -2000,7 +2000,7 @@ together they show every surface (§ 10).
           replies are asked only when something reads the name (D3).
       - `tests/validate-help-content.sh` passes.
       - Assertable.
-- [ ] **AC14: the sets on Windows (D2).** The validated sets have been read
+- [x] **AC14: the sets on Windows (D2).** The validated sets have been read
       only on macOS (§ 11 read `s2-c4`).
       - Native `ltl` with no background option selects the light set in
         Windows Terminal on One Half Light and the dark set on Campbell.
@@ -2012,6 +2012,25 @@ together they show every surface (§ 10).
       - Unassertable by a harness: the harnesses do not run on Windows.
       - Validated by capture: a session on the Windows host, about the size
         of § 11's.
+
+### Where each criterion was validated
+
+| Criterion | Validated by (§ Drops delivered unless stated) |
+|---|---|
+| AC1 | Drop 1: `tests/validate-background.sh`, the options piped and the terminal in tmux panes styled light, dark and unstyled; the query's time in Terminal.app (3 ms). Drop 2: `--explain` in light and dark panes draws in the answered set. Windows: § 14.2 |
+| AC2 | Drop 2: piped runs with no option against the base, identical but for the text over fills (D4) and the version; drop 3 changes nothing piped |
+| AC3 | Drop 1: § 13's section, asserted by `tests/validate-background.sh`; drop 2 adds `colours:` the set |
+| AC4 | Drops 2 and 3: the eighteen § 10 runs with `-dbg` and `-lbg` against the rewriter's output of the base, cell for cell, but timing digits and a pre-existing flicker; `tests/validate-colour-sets.sh` |
+| AC5 | Drop 2: #683's reproduction piped; `tests/validate-colour-sets.sh` (columns, legend, summary); the histogram's highlighted row by D5, `tests/validate-histogram-colours.sh` |
+| AC6 | Drop 2: `tests/validate-colour-sets.sh`, blue's highlighted fill 27 in both sets and 21 when not known |
+| AC7 | Drop 3: every heatmap cell of the eleven heatmap runs against the rewriter's; `gradient_written` in `tests/validate-heatmap-palette.sh`; `tests/validate-colour-sets.sh` heatmap cells; the screenshot check |
+| AC8 | Drops 0 and 2: the rewriter's greys; `tests/validate-colour-sets.sh` (the rule, the heatmap's lines, the histogram's gridlines); the explain histogram's gridlines |
+| AC9 | Drop 4: `tests/validate-notices.sh` `panel-light`, `panel-dark`, `tmux-dimmed-dark`, `tmux-dimmed-light`. Windows: § 14.4 |
+| AC10 | Drop 2: `tests/validate-colour-sets.sh` `help-*`; the week fold; `--explain` in answering panes |
+| AC11 | Drop 2: `tests/validate-summary-contribution-bar.sh`, `tests/validate-colour-sets.sh` summary |
+| AC12 | Drop 5: every entry regenerated and looked at; `tests/validate-screenshot-capture.sh`. Regenerated again at the restored version in the gate |
+| AC13 | Drop 5, with the user documents corrected to say what the options do |
+| AC14 | Drop 6: § 14, validated by the architect on Windows |
 
 The harnesses' decoder (`decode_line` in `tests/lib/rendered-output.pl`)
 reads `38;2` and `48;2` as faint followed by parameters (research § 1.7). It
