@@ -239,3 +239,41 @@ reference the implementation is held to (feature doc AC4).
 ./e-outputs.sh <out> palettes/t4.tsv
 CONDITIONS="known today" RUNS="heat-blue heat-red" ./e-measure.sh <work> <out>/t4 "Clear Dark" "Clear Light"
 ```
+
+## Drop 6: `ltl` itself on Windows (feature doc § 14)
+
+What drops 1 to 5 built, seen on the Windows host: `ltl` asks the terminal
+for its background and draws the set it selects. Every window is opened as
+an analyst opens one, with cmd at the repository's root, and the commands
+are typed at its prompt; keys go to a window only once it is checked to be
+in front (`wt-window.ps1`, shared by the three PowerShell scripts).
+
+1. `wt-bg-check.ps1 -Out <dir>`: the background run of § 14 in three new
+   windows (Windows Terminal on One Half Light and on Campbell, and the
+   classic console host), five times each with no option, and once each
+   with `-lbg` and `-dbg` on Campbell. After each run `wt-console-text.pl`,
+   on the same command line, writes the console's input and output modes
+   and the screen's text, the `-V background` section among it; then a line
+   typed at the prompt shows the console reads lines again, and the window
+   is captured.
+2. `wt-notice-check.ps1 -Out <dir>`: the deferred panel, the modal question,
+   and the notice browser with a notice's options layered over it, in each
+   scheme with no option.
+3. `wt-show-runs.ps1 -Synth <synth-metrics.log>`: what the architect
+   validates. One maximized window per scheme, a tab per run; each tab's
+   font is made smaller, before `ltl` runs, by the steps its output needs to
+   show whole, and `wt-run.sh` then runs it with no option. The runs are
+   `e-runs.sh`'s, the definitions `e-outputs.sh` also sources; the
+   synthetic log is the one `e-outputs.sh` writes. `-SaveTo <dir>` captures
+   each tab once drawn and closes the windows.
+
+```bash
+powershell -File wt-bg-check.ps1 -Out results/windows-terminal/e-ltl/background
+powershell -File wt-notice-check.ps1 -Out results/windows-terminal/e-ltl/notices
+powershell -File wt-show-runs.ps1 -Synth <out>/synth-metrics.log      # -SaveTo results/windows-terminal/e-ltl/validated
+```
+
+`results/windows-terminal/e-ltl/`: `background/` (the console's text and
+modes, and a capture, per run), `notices/`, and `validated/` (the ten
+`heat-<colour>` tabs and `fills` in each scheme, as the architect validated
+them), Windows Terminal 1.24.12741.0 on Windows 11 build 26200.9711.
