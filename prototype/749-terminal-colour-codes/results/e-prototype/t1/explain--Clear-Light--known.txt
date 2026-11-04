@@ -1,0 +1,15 @@
+== explain: Clear Light (light), background known: light palette  (window background #fbfbfb)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        38;2;90;152;96 on 48;5;46        9 #00ff00  #5a9860      2.51   2.51  █████████
+   graphic  36        38;2;79;173;176                156 #4fadb0  #fbfbfb      2.56   2.56  ────────────────────────────
+   graphic  32        38;2;90;152;96                  40 #5a9860  #fbfbfb      3.33   3.33  ████████████████████████████
+   graphic  90        38;2;80;101;115                191 #506573  #fbfbfb      5.88   5.88  ────────────────────────────
+   text     36        1;38;2;79;173;176               75 #4fadb0  #fbfbfb      2.56   2.56  TOPHIGHLIGHTEDMESSAGES(lines
+   text     33        38;2;168;144;70                 18 #a89046  #fbfbfb      3.01   3.01  4xx:144xx:414xx:12
+   text     32        38;2;90;152;96                  24 #5a9860  #fbfbfb      3.33   3.33  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     38;5;34   38;2;2;146;2                     5 #029202  #fbfbfb      3.97   3.97  •••••
+   text     91        38;2;192;81;64                   9 #c05140  #fbfbfb      4.52   4.49  0.20.70.2
+   text     90        38;2;80;101;115                 82 #506573  #fbfbfb      5.88   5.37  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                           1892 #3a4851  #fbfbfb      9.12   8.68  Ananalysistechnique:aninvest
+   text     def       1;38;2;49;60;68                 24 #313c44  #fbfbfb     10.91  10.91  CONTRIBUTIONHIGHLIGHTING
+   text     32        38;5;16 on 48;5;46              10 #000000  #00ff00     15.30  15.24  7811.9k622

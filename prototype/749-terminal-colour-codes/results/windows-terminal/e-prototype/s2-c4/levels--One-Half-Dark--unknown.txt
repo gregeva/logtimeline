@@ -1,0 +1,29 @@
+== levels: One Half Dark (dark), background unknown: basic palette  (window background #282c34)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  31        31 on 48;5;196                  72 #e06c75  #ff0000      1.25   1.25  ■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+   graphic  90        90                             774 #5a6374  #282c34      2.31   2.31  ────────────────────────────
+   graphic  96        96                             188 #56b6c2  #282c34      5.91   5.91  ────────────────────────────
+   graphic  32        32                               8 #98c379  #282c34      6.94   6.94  ■■■■■■■■
+   graphic  93        93                             188 #e5c07b  #282c34      8.10   8.10  ────────────────────────────
+   graphic  def       def                            164 #dcdfe4  #282c34     10.48  10.48  ────────────────────────────
+   text     31        31 on 48;5;196                  28 #e06c75  #ff0000      1.25   1.25  5341069107114647219889305645
+   text     38;5;0    38;5;0 on 48;5;20               14 #282c34  #0000d7      1.32   1.32  22432422232222
+   text     32        32 on 48;5;46                    3 #98c379  #00ff00      1.47   1.47  √√√
+   text     38;5;0    38;5;0 on 48;5;21                2 #282c34  #0000ff      1.63   1.63  53
+   text     90        90                             208 #5a6374  #282c34      2.31   2.31  ,::ltl::'logtimeline[0.20.0-
+   text     38;5;160  38;5;160                        23 #d70000  #282c34      2.59   2.59  ••FAILURECLASSIFIED5960
+   text     38;5;0    38;5;0 on 48;5;30                6 #282c34  #008787      3.21   3.21  195432
+   text     38;5;0    38;5;0 on 48;5;196              19 #282c34  #ff0000      3.50   3.50  ERROR-HL5930(82.9%)
+   text     91        91                              50 #e06c75  #282c34      4.38   4.38  0.21.10.30.20.30.32.40.52.10
+   text     31        31                              17 #e06c75  #282c34      4.38   4.38  FATAL-HL30(0.42%)
+   text     38;5;0    38;5;0 on 48;5;34                4 #282c34  #00af00      4.75   4.75  INFO
+   text     36        36                               6 #56b6c2  #282c34      5.91   5.91  305092
+   text     96        96                              92 #56b6c2  #282c34      5.91   5.91  TOPOVERALLMESSAGES(retainedf
+   text     38;5;111  38;5;111                         4 #87afff  #282c34      6.40   6.40  1111
+   text     38;5;178  38;5;178                        23 #d7af00  #282c34      6.68   6.68  UNCLASSIFIED1190(16.6%)
+   text     32        32                             123 #98c379  #282c34      6.94   6.94  INFO:39INFO:36INFO:80INFO:37
+   text     33        33                             112 #e5c07b  #282c34      8.10   8.10  WARN:14WARN:12WARN:12WARN:14
+   text     93        93                              78 #e5c07b  #282c34      8.10   8.10  TOPHIGHLIGHTEDMESSAGES(lines
+   text     38;5;0    38;5;0 on 48;5;184               1 #282c34  #d7d700      9.07   9.07  W
+   text     def       def                            873 #dcdfe4  #282c34     10.48  10.48  2026-08-2104:001.92026-08-21
+   text     37        37                             443 #dcdfe4  #282c34     10.48  10.48  Thesefile(s)wereprocessedwit

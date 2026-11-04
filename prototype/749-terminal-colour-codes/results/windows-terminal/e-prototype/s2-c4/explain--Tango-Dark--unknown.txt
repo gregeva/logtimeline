@@ -1,0 +1,15 @@
+== explain: Tango Dark (dark), background unknown: basic palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        32 on 48;5;46                    9 #4e9a06  #4e9a06      1.00   1.00  █████████
+   graphic  90        90                             191 #555753  #000000      2.87   2.87  ────────────────────────────
+   graphic  32        32                              40 #4e9a06  #000000      5.95   5.95  ████████████████████████████
+   graphic  36        36                             156 #06989a  #000000      5.97   5.97  ────────────────────────────
+   text     32        32 on 48;5;46                   10 #4e9a06  #00ff00      2.57   2.57  7811.9k622
+   text     90        90                              82 #555753  #000000      2.87   2.87  ,::ltl::'logtimeline[0.20.0-
+   text     91        91                               9 #ef2929  #000000      5.02   5.02  0.20.70.2
+   text     32        32                              24 #4e9a06  #000000      5.95   5.95  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     38;5;34   38;5;34                          5 #00af00  #000000      7.13   7.13  •••••
+   text     33        33                              18 #c4a000  #000000      8.38   8.38  4xx:144xx:414xx:12
+   text     36        1;36                            75 #34e2e2  #000000     13.12  13.12  TOPHIGHLIGHTEDMESSAGES(lines
+   text     def       def                           1892 #d3d7cf  #000000     14.39  14.39  Ananalysistechnique:aninvest
+   text     def       1;def                           24 #eeeeec  #000000     18.08  18.08  CONTRIBUTIONHIGHLIGHTING

@@ -1,0 +1,4 @@
+== progress-pause: Man Page (light), background unknown: basic palette  (window background #fef49c)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     92        92                              93 #13dc0b  #fef49c      1.65   1.64  Processingcompleted.Calculat
+   text     def       def on 44                       35 #000000  #0000b3      1.65   1.64  Pressanykeytocontinue(orQtoq

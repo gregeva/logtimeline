@@ -8,11 +8,12 @@
 # escape sequence grepped from the line.
 #
 # What it holds today, from features/653-histogram-highlight-row-light-background.md
-# § Contracts and § Acceptance criteria:
-#   - the highlighted percentile row's text is black (256-colour index 0) under
-#     -lbg, under -dbg and with neither option (C1, AC1);
-#   - that text is the same black the timeline's highlighted fill of the same
-#     metric carries in the same run (C1, AC2);
+# § Contracts and § Acceptance criteria, with the text as
+# features/749-terminal-colour-codes.md D4 and D5 set it:
+#   - the highlighted percentile row's text is black or white, whichever reads
+#     on its band, under -lbg, under -dbg and with neither option (AC1);
+#   - that text is the text the timeline's highlighted fill of the same
+#     metric carries in the same run (AC2);
 #   - with two metrics, each highlighted row sits on a band of its own metric's
 #     highlight colour, carries the black text, and lists the same percentiles
 #     in the same order as the population row above it (C1, C2, AC3);
@@ -81,6 +82,7 @@ TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
 pass=0; fail=0; failures=(); current_scenario=""
 
 CONTRACT_653="features/653-histogram-highlight-row-light-background.md"
+CONTRACT_749="features/749-terminal-colour-codes.md D4, D5 (black or white over every fill, whichever reads; the validated sets supersede #653's index 0)"
 
 assert_command() {
     local command label asserts produced_by contract
@@ -330,19 +332,20 @@ report_for() {
     sed 's/^/        . /' "$capture.report"
 }
 
-# Text of the highlighted percentile row is index-0 black for one background
-# option (AC1).
+# Text of the highlighted percentile row is black or white, whichever reads on
+# its band, for one background option (#749 D4, D5). The duration band is 226,
+# on which black reads.
 legend_text_black() {
     local bg_label="$1"; shift
     local cap="$TMP_DIR/legend-$current_scenario.out"
     capture_run "$cap" -hg duration "$@" || return 0
     report_for "$cap" || return 0
     assert_command \
-        label "the highlighted duration percentile row has black text (256:0) on every non-blank cell, $bg_label" \
-        command "grep -qE '^band metric=duration fill=256:[0-9]+ text=256:0 cells=[1-9][0-9]* labels=P' '$cap.report'" \
-        asserts "the highlighted percentile row prints its text in index-0 black whatever the background option, because its band is a bright colour on every background and white text on it cannot be read" \
-        produced_by "render_histogram_legend() in ltl (the highlighted row's text colour)" \
-        contract "$CONTRACT_653 C1, AC1, D2"
+        label "the highlighted duration percentile row has black text (256:16) on its 226 band, $bg_label" \
+        command "grep -qE '^band metric=duration fill=256:226 text=256:16 cells=[1-9][0-9]* labels=P' '$cap.report'" \
+        asserts "the highlighted percentile row prints its text black or white, whichever reads on its band, whatever the background option: black on the duration band" \
+        produced_by "render_histogram_legend() in ltl (the highlighted row's text colour, colour_fill_text_sgr())" \
+        contract "$CONTRACT_749; $CONTRACT_653 AC1"
 }
 
 if scenario_wanted legend-text-light; then
@@ -378,7 +381,7 @@ elif report_for "$cap" "$cap.stderr"; then
         command "b=\$(sed -nE 's/^band metric=duration fill=([^ ]+) text=([^ ]+) .*/\\1 \\2/p' '$cap.report'); t=\$(sed -nE 's/^timeline metric=duration fill=([^ ]+) text=([^ ]+) cells=([1-9][0-9]*)\$/\\1 \\2/p' '$cap.report'); echo \"band: \$b\"; echo \"timeline: \$t\"; [[ -n \$b && -n \$t && \$b == \"\$t\" && \$t != *,* ]]" \
         asserts "the highlighted percentile row reads like every highlighted fill: its band is the duration column's highlighted fill colour and its text is the one colour the timeline prints on that fill, in the same run" \
         produced_by "render_histogram_legend() in ltl (band and text); print_bar_graph() in ltl (the timeline's highlighted fill, from the highlighted_bg entry of @column_colors)" \
-        contract "$CONTRACT_653 C1, C2, AC2, D2; features/histogram-charts.md Decisions Log, Highlight colors match bar graph highlight_bg"
+        contract "$CONTRACT_653 C2, AC2; $CONTRACT_749; features/histogram-charts.md Decisions Log, Highlight colors match bar graph highlight_bg"
 fi
 fi
 
@@ -389,11 +392,11 @@ if capture_run "$cap" -hg duration,bytes -lbg && report_for "$cap"; then
     for spec in duration:226 bytes:46; do
         m="${spec%%:*}"; c="${spec##*:}"
         assert_command \
-            label "the highlighted $m row is a band of 256:$c with black text (256:0)" \
-            command "grep -qE '^band metric=$m fill=256:$c text=256:0 cells=[1-9][0-9]* labels=P' '$cap.report'" \
-            asserts "each metric's highlighted percentile row sits on a band of that metric's own highlight colour (duration 226, bytes 46, as the timeline's highlighted fills) and carries index-0 black text" \
+            label "the highlighted $m row is a band of 256:$c with black text (256:16)" \
+            command "grep -qE '^band metric=$m fill=256:$c text=256:16 cells=[1-9][0-9]* labels=P' '$cap.report'" \
+            asserts "each metric's highlighted percentile row sits on a band of that metric's own highlight colour (duration 226, bytes 46, as the timeline's highlighted fills) and carries the text that reads on it, black on both" \
             produced_by "render_histogram_legend() in ltl (band from %histogram_highlight_colors, text colour)" \
-            contract "$CONTRACT_653 C1, C2, AC3; features/histogram-charts.md Decisions Log, Highlight colors match bar graph highlight_bg"
+            contract "$CONTRACT_653 C2, AC3; $CONTRACT_749; features/histogram-charts.md Decisions Log, Highlight colors match bar graph highlight_bg"
         assert_command \
             label "the highlighted $m row lists the same percentiles, in the same order, as the $m population row" \
             command "b=\$(sed -nE 's/^band metric=$m .* labels=([^ ]+)\$/\\1/p' '$cap.report'); p=\$(sed -nE 's/^population metric=$m .* labels=([^ ]+)\$/\\1/p' '$cap.report'); echo \"band: \$b\"; echo \"population: \$p\"; [[ -n \$b && \$b != none && \$b == \"\$p\" ]]" \

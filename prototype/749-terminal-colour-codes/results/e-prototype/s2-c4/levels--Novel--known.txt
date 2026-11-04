@@ -1,0 +1,29 @@
+== levels: Novel (light), background known: light palette  (window background #dfdbc3)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  31        38;5;160 on 48;5;196            72 #ff0000  #d70000      1.35   1.35  ████████████████████████████
+   graphic  32        38;5;28                          8 #008700  #dfdbc3      3.37   3.37  ████████
+   graphic  93        38;5;94                        188 #875f00  #dfdbc3      4.11   4.11  ────────────────────────────
+   graphic  90        38;5;241                       774 #626262  #dfdbc3      4.37   4.37  ────────────────────────────
+   graphic  96        38;5;23                        188 #005f5f  #dfdbc3      5.37   5.37  ────────────────────────────
+   graphic  def       def                            164 #4d2f2d  #dfdbc3      8.56   8.56  ────────────────────────────
+   text     32        38;5;28                        123 #008700  #dfdbc3      3.37   3.37  INFO:39INFO:36INFO:80INFO:37
+   text     91        38;5;160                        50 #d70000  #dfdbc3      3.87   3.87  0.21.10.30.20.30.32.40.52.10
+   text     38;5;160  38;5;160                        23 #d70000  #dfdbc3      3.87   3.87  ••FAILURECLASSIFIED5960
+   text     31        38;5;160                        17 #d70000  #dfdbc3      3.87   3.77  FATAL-HL30(0.42%)
+   text     33        38;5;94                        112 #875f00  #dfdbc3      4.11   4.11  WARN:14WARN:12WARN:12WARN:14
+   text     93        38;5;94                         78 #875f00  #dfdbc3      4.11   4.07  TOPHIGHLIGHTEDMESSAGES(lines
+   text     38;5;178  38;5;94                         23 #875f00  #dfdbc3      4.11   4.07  UNCLASSIFIED1190(16.6%)
+   text     90        38;5;241                       208 #626262  #dfdbc3      4.37   3.94  ,::ltl::'logtimeline[0.20.0-
+   text     38;5;111  38;5;25                          4 #005faf  #dfdbc3      4.62   4.62  1111
+   text     32        38;5;231 on 48;5;28              3 #ffffff  #008700      4.70   4.70  √√√
+   text     31        38;5;16 on 48;5;196             28 #000000  #ff0000      5.25   5.19  5341069107114647219889305645
+   text     38;5;0    38;5;16 on 48;5;196             19 #000000  #ff0000      5.25   4.99  ERROR-HL5930(82.9%)
+   text     36        38;5;23                          6 #005f5f  #dfdbc3      5.37   5.21  305092
+   text     96        38;5;23                         92 #005f5f  #dfdbc3      5.37   5.21  TOPOVERALLMESSAGES(retainedf
+   text     38;5;0    38;5;231 on 48;5;58              1 #ffffff  #5f5f00      6.72   6.72  W
+   text     37        38;5;238                       443 #444444  #dfdbc3      6.98   5.89  Thesefile(s)wereprocessedwit
+   text     38;5;0    38;5;231 on 48;5;23              6 #ffffff  #005f5f      7.49   7.49  195432
+   text     38;5;0    38;5;231 on 48;5;22              4 #ffffff  #005f00      7.96   7.96  INFO
+   text     def       def                            876 #4d2f2d  #dfdbc3      8.56   7.74  2026-08-2104:001.92026-08-21
+   text     38;5;0    38;5;231 on 48;5;21              2 #ffffff  #0000ff      8.59   8.59  53
+   text     38;5;0    38;5;231 on 48;5;19             14 #ffffff  #0000af     12.97  12.97  22432422232222

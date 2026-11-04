@@ -1,0 +1,6 @@
+== error: Novel (light), background known: light palette  (window background #dfdbc3)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;241                       188 #626262  #dfdbc3      4.37   4.37  ────────────────────────────
+   text     90        38;5;241                        76 #626262  #dfdbc3      4.37   3.83  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #4d2f2d  #dfdbc3      8.56   5.78  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;16                       35 #000000  #dfdbc3     15.06  15.06  Error:unknownoption'--bogus-

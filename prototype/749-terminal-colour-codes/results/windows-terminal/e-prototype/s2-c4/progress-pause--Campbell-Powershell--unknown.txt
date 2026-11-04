@@ -1,0 +1,4 @@
+== progress-pause: Campbell Powershell (dark), background unknown: basic palette  (window background #012456)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     def       def on 44                       35 #cccccc  #0037da      5.11   5.11  Pressanykeytocontinue(orQtoq
+   text     92        92                              93 #16c60c  #012456      6.57   6.57  Processingcompleted.Calculat

@@ -1,0 +1,4 @@
+== progress-pause: Ocean (dark), background unknown: basic palette  (window background #2b66c9)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     92        92                              93 #54ff40  #2b66c9      4.10   4.10  Processingcompleted.Calculat
+   text     def       def on 44                       35 #ffffff  #0000b3     12.72  12.72  Pressanykeytocontinue(orQtoq

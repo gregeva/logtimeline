@@ -1,0 +1,47 @@
+# D1 candidate sets by tone.py: tone governs; today's colours as Clear Dark and Clear Light draw them, 24-bit,
+# moved in lightness only toward 4.5:1, by no more than the profile's own step from that colour to its bright twin
+# fills as today but a highlight too near its plain fill, which takes the histogram's; the text over a fill black or white, whichever reads better
+# source	name	use	dark	dark_rgb	dark_min	light	light_rgb	light_min
+s1	red	5xx, ERROR, FATAL, P999	#d57464	#d57464	4.16	#b45648	#b45648	4.65
+s2	green	bytes, 2xx, file marks	#6caa71	#6caa71	4.88	#5a9860	#5a9860	3.33
+s3	yellow	4xx, WARN, P95	#c4ac62	#c4ac62	6.03	#a89046	#a89046	3.01
+s4	blue	users column, file index, pause prompt fill	#719bb9	#719bb9	4.53	#4a799c	#4a799c	4.50
+s5	magenta	3xx	#bf7dcf	#bf7dcf	4.51	#a057b1	#a057b1	4.52
+s6	cyan	count column, P50	#7ccbcd	#7ccbcd	7.21	#4fadb0	#4fadb0	2.56
+s7	white	file details, notice text	#dee5eb	#dee5eb	10.56	#3a4851	#3a4851	9.12
+s8	bright black	rules, headings, options line, notice frame	#5c7385	#5c7385	2.71	#506573	#506573	5.88
+s9	bright red	per-minute failure rates	#e87461	#e87461	4.54	#c05140	#c05140	4.52
+s10	bright green	progress lines	#79be7e	#79be7e	6.06	#67ab6d	#67ab6d	2.66
+s11	bright yellow	duration values, P99, table titles	#e5c872	#e5c872	8.21	#c8ab55	#c8ab55	2.16
+s12	bright blue		#67b5ed	#67b5ed	6.02	#2986c4	#2986c4	3.83
+s13	bright magenta		#d389e5	#d389e5	5.42	#ac65be	#ac65be	3.79
+s14	bright cyan	message-table titles	#84dde0	#84dde0	8.57	#5cc8cc	#5cc8cc	1.92
+s15	bright white	notice pick	#e5eff5	#e5eff5	11.51	#313c44	#313c44	10.91
+f34	38;5;34	success %, success state (as s2)	34	#00af00	4.56	#029202	#029202	3.97
+f160	38;5;160	failure %, failure state (as s1)	#f53629	#f53629	3.48	160	#d70000	5.22
+f111	38;5;111	users count, format number (as s4)	111	#87afff	6.14	#6f96e4	#6f96e4	2.83
+f44	38;5;44	notice category cyan (as s6)	44	#00d7d7	7.48	#03bbbb	#03bbbb	2.30
+f178	38;5;178	classification state (amber)	178	#d7af00	6.41	#b99709	#b99709	2.71
+f135	38;5;135	classification state (violet)	#b776ff	#b776ff	4.51	#9b48e8	#9b48e8	4.52
+f208	38;5;208	orange column values	208	#ff8700	5.57	#db7302	#db7302	3.14
+f213	38;5;213	pink column values	213	#ff87ff	6.50	#e36de4	#e36de4	2.68
+f43	38;5;43	teal column values	43	#00d7af	7.25	#05ba97	#05ba97	2.39
+f93	38;5;93	purple column values	#9758fe	#9758fe	3.29	93	#8700ff	5.84
+f244	38;5;244	notice frame and dimmed text on light (as s8)	#969696	#969696	4.54	#747474	#747474	4.52
+f30	38;5;30	notice category cyan on light (as s6)	#32a09f	#32a09f	4.26	#078181	#078181	4.54
+f35	38;5;35	notice category green on light (as s2)	35	#00af5f	4.67	#07934f	#07934f	3.83
+f29	38;5;29	notice category teal on light	#31a076	#31a076	4.11	#02845d	#02845d	4.55
+f166	38;5;166	notice category orange on light	#ed7327	#ed7327	4.53	#c05400	#c05400	4.50
+e	bold	bold over the default foreground	#f0f0f0	#f0f0f0	11.78	#313c44	#313c44	10.91
+b21	48;5;21	blue highlighted fill	27	#005fff	2.61	27	#005fff	4.97
+grey	the set's grey	every line and secondary text, in place of s8 and f244 (§ 12.8)	#797c81	#797c81	3.21	#747474	#747474	4.52
+gyellow	58,94,136,142,178,184,220,226|230,229,228,227,220,214,208,202	yellow heatmap gradient (today's dark|light)	#785502,#926701,#ac7b08,#c19202,#ceae05,#d6cc0e,#e7e70e,#ffff00	-	1.98	#edee21,#e1e10e,#d7d501,#d5c506,#d0b609,#cba701,#c49909,#bd8b06	-	1.20
+ggreen	22,28,34,40,46,82,118,154|194,157,120,84,48,42,36,35	green heatmap gradient (today's dark|light)	#026401,#047b03,#059204,#06aa05,#06c305,#05dd04,#01f701,#9aff93	-	1.81	#8cfe84,#1eff1a,#05f204,#03e402,#0bd609,#07c906,#06bc05,#01af00	-	1.22
+gcyan	23,30,37,44,51,80,86,123|195,159,123,87,51,44,37,30	cyan heatmap gradient (today's dark|light)	#037171,#098585,#009a9a,#02afaf,#0fc5c4,#5cd6d5,#16f1f1,#8afffe	-	2.30	#11e4e4,#05d7d7,#0ec9c9,#0dbbbb,#0daeae,#0ca1a1,#0b9494,#008787	-	1.53
+gblue	17,18,19,20,21,27,33,39|189,153,117,81,45,39,33,27	blue heatmap gradient (today's dark|light)	#0003bc,#0029cc,#0032ee,#0d49fe,#2964fe,#437bfe,#5c8ffe,#76a1fe	-	1.11	#a0bffe,#8eb3fe,#7ca6ff,#6b99fe,#588cfe,#467dfe,#346efe,#215dfe	-	1.78
+gmagenta	53,89,125,127,163,165,201,207|225,219,213,207,201,165,129,93	magenta heatmap gradient (today's dark|light)	#7b027b,#8f048f,#a500a5,#ba04ba,#d005d0,#e706e7,#fe08fe,#ff61fc	-	1.37	#ffa7fb,#ff89fb,#ff65fc,#ff2afe,#ee07ee,#da05da,#c700c7,#b300b3	-	1.67
+gred	52,88,124,160,196,197,203,209|224,218,212,206,200,196,160,124	red heatmap gradient (today's dark|light)	#8e0302,#a60201,#be0503,#d70503,#f10302,#ff382a,#ff6554,#ff8574	-	1.38	#fda799,#ff8c7c,#ff6e5d,#ff4838,#f90101,#df0603,#c70100,#af0000	-	1.82
+gorange	94,130,166,172,208,209,214,215|223,217,216,215,214,208,172,166	orange heatmap gradient (today's dark|light)	#a44804,#b75105,#cb5a04,#df6301,#f36d04,#ff7d2f,#fe9660,#ffac82	-	2.24	#feab81,#fe9964,#fe8642,#fc7103,#ec6900,#db6100,#cb5900,#ba5204	-	1.79
+gpink	132,133,169,170,206,207,213,219|225,219,218,217,213,212,206,169	pink heatmap gradient (today's dark|light)	#ac5f90,#c162a0,#da61b2,#e371bc,#ff6ccf,#ff88d5,#fea0db,#feb6e2	-	3.06	#ffa2dc,#ff8cd6,#fe75d0,#fe57ca,#ff24c6,#f106ba,#e002ac,#b24e90	-	1.77
+gteal	23,29,30,36,37,43,44,50|158,122,86,50,44,43,37,29	teal heatmap gradient (today's dark|light)	#06704f,#00845d,#01986b,#00ac7a,#03c189,#08d699,#08eca9,#46ffbc	-	2.20	#2ffeb9,#12edab,#03dc9d,#0eca91,#09b984,#0aa877,#08976b,#00875f	-	1.27
+gpurple	54,55,56,92,93,129,134,171|189,183,177,171,135,134,93,55	purple heatmap gradient (today's dark|light)	#5801a2,#6602bb,#7500d6,#8502f0,#912aff,#9a4fff,#9c7bda,#ae80ff	-	1.24	#c9b2fd,#bb99fe,#ad7ffe,#a061fe,#943bfe,#7a49c4,#7201d0,#5f00af	-	1.80

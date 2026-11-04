@@ -1,0 +1,15 @@
+== explain: Campbell Powershell (dark), background unknown: basic palette  (window background #012456)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        32 on 48;5;46                    9 #13a10e  #13a10e      1.00   1.00  █████████
+   graphic  90        90                             191 #767676  #012456      3.33   3.33  ────────────────────────────
+   graphic  32        32                              40 #13a10e  #012456      4.42   4.42  ████████████████████████████
+   graphic  36        36                             156 #3a96dd  #012456      4.75   4.75  ────────────────────────────
+   text     32        32 on 48;5;46                   10 #13a10e  #00ff00      2.50   2.50  7811.9k622
+   text     90        90                              82 #767676  #012456      3.33   3.33  ,::ltl::'logtimeline[0.20.0-
+   text     91        91                               9 #e74856  #012456      3.93   3.93  0.20.70.2
+   text     32        32                              24 #13a10e  #012456      4.42   4.42  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     38;5;34   38;5;34                          5 #00af00  #012456      5.14   5.14  •••••
+   text     33        33                              18 #c19c00  #012456      5.78   5.78  4xx:144xx:414xx:12
+   text     36        1;36                            75 #61d6d6  #012456      8.72   8.72  TOPHIGHLIGHTEDMESSAGES(lines
+   text     def       def                           1892 #cccccc  #012456      9.42   9.42  Ananalysistechnique:aninvest
+   text     def       1;def                           24 #f2f2f2  #012456     13.51  13.51  CONTRIBUTIONHIGHLIGHTING

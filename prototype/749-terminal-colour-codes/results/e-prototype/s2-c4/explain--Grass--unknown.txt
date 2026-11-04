@@ -1,0 +1,15 @@
+== explain: Grass (dark), background unknown: basic palette  (window background #13773d)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             191 #393939  #13773d      2.05   2.05  ────────────────────────────
+   graphic  32        32 on 48;5;46                    9 #00ff00  #00a600      2.37   2.37  █████████
+   graphic  32        32                              40 #65e550  #13773d      3.45   3.45  ████████████████████████████
+   graphic  36        36                             156 #63e0ed  #13773d      3.59   3.59  ────────────────────────────
+   text     38;5;34   38;5;34                          5 #00af00  #13773d      1.91   1.91  •••••
+   text     90        90                              82 #393939  #13773d      2.05   2.00  ,::ltl::'logtimeline[0.20.0-
+   text     91        91                               9 #ff754a  #13773d      2.11   2.02  0.20.70.2
+   text     32        32 on 48;5;46                   10 #00a600  #00ff00      2.37   2.29  7811.9k622
+   text     def       1;def                           24 #ffb03b  #13773d      3.09   3.09  CONTRIBUTIONHIGHLIGHTING
+   text     32        32                              24 #65e550  #13773d      3.45   3.45  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     33        33                              18 #d5d24c  #13773d      3.52   3.52  4xx:144xx:414xx:12
+   text     36        1;36                            75 #63e0ed  #13773d      3.59   3.59  TOPHIGHLIGHTEDMESSAGES(lines
+   text     def       def                           1892 #fff0a5  #13773d      4.89   4.89  Ananalysistechnique:aninvest

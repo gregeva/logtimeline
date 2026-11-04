@@ -1,0 +1,6 @@
+== error: Clear Light (light), background known: light palette  (window background #fbfbfb)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;241                       188 #626262  #fbfbfb      5.89   5.89  ────────────────────────────
+   text     90        38;5;241                        76 #626262  #fbfbfb      5.89   5.15  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #3a4851  #fbfbfb      9.12   5.34  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;16                       35 #000000  #fbfbfb     20.29  20.29  Error:unknownoption'--bogus-

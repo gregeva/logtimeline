@@ -1,0 +1,6 @@
+== error: Solarized Dark (dark), background known: dark palette  (window background #002b36)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #9e9e9e  #002b36      5.60   5.60  ────────────────────────────
+   text     def       def                            216 #839496  #002b36      4.75   4.75  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     90        38;5;247                        76 #9e9e9e  #002b36      5.60   5.60  ,::ltl::'logtimeline[0.20.0-
+   text     def       1;38;5;231                      35 #ffffff  #002b36     15.01  15.01  Error:unknownoption'--bogus-

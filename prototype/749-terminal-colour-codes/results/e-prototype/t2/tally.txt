@@ -1,0 +1,4 @@
+Groups below the floor, background unknown (today's colours) > known (the set), over 2 runs: access-heatmap, fills
+profile              class window    text on the background (4.5)        text over a fill (4.5)          bars and lines (3.0)  text below 3
+Clear Dark           dark  #292f3b               11/28  >   6/28               24/30  >   0/30                4/10  >   4/10     6 > 2  
+Clear Light          light #fbfbfb               20/28  >  13/28               23/30  >   0/30                5/10  >   4/10    15 > 9  

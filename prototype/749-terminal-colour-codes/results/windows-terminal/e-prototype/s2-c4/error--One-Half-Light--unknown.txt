@@ -1,0 +1,6 @@
+== error: One Half Light (light), background unknown: basic palette  (window background #fafafa)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #4f525d  #fafafa      7.46   7.46  ────────────────────────────
+   text     def       1;def                           35 #4f525d  #fafafa      7.46   7.46  Error:unknownoption'--bogus-
+   text     90        90                              76 #4f525d  #fafafa      7.46   7.46  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #383a42  #fafafa     10.86  10.86  Usage:ltl[-bs<N>][-n<N>][-i<

@@ -298,7 +298,7 @@ my %dark_256 = (
 );
 
 sub style_for {
-    my ( $name, $bg ) = @_;
+    my ( $name, $bg, %o ) = @_;
     $bg //= terminal()->{background};
     my $c = ltl_constants();
     my %fg;
@@ -317,6 +317,20 @@ sub style_for {
     # What the analyst picks (a choice, a key) stands out from the text.
     my $pick  = $bg eq 'light' ? "\e[1;38;5;16m"  : "\e[1;97m";
     my $dim   = $bg eq 'light' ? "\e[38;5;244m"   : "\e[2m";
+    # A secondary colour given (#rrggbb or a 256-colour index) replaces it on
+    # either background: the comparison of feature doc 749 § 12.7.
+    $dim = secondary_sgr( $o{secondary} ) if defined $o{secondary};
+    # A notice palette given (feature doc 749 § 12.7, notice-design.py) writes
+    # the colour set for this background; its light category colours from the
+    # column named by categories => 'tone' (light) or 'gradient' (light_gradient).
+    if ( defined $o{set} ) {
+        my %set = notice_set( $o{set}, $bg, $o{categories} // 'tone' );
+        ( $frame, $dim ) = map { secondary_sgr( $set{$_} ) } qw(frame dim);
+        $text = secondary_sgr( $set{text} );
+        $pick = "\e[1m" . secondary_sgr( $set{pick} );
+        $fg{$_} = secondary_sgr( $set{"cat:$_"} ) for grep { defined $set{"cat:$_"} } keys %fg;
+        $NoticeSurfaces::light_dim_grey = substr( secondary_sgr( $set{dimtext} ), 2, -1 ) if $bg eq 'light';
+    }
     if ( $name eq 'ltl' ) {
         return {
             name  => 'ltl',
@@ -349,6 +363,28 @@ sub style_for {
         dim   => $dim,
         reset => "\e[0m",
     };
+}
+
+# The roles of a notice palette for one background: key => value.
+sub notice_set {
+    my ( $file, $bg, $categories ) = @_;
+    my $col = $bg eq 'light' ? ( $categories eq 'gradient' ? 3 : 2 ) : 1;
+    open my $fh, '<:encoding(UTF-8)', $file or die "$file: $!\n";
+    my %set;
+    while (<$fh>) {
+        next if /^#/;
+        chomp;
+        my @f = split /\t/;
+        $set{ $f[0] } = $f[$col] if @f > $col && $f[$col] ne '-';
+    }
+    return %set;
+}
+
+sub secondary_sgr {
+    my ($c) = @_;
+    return "\e[38;5;${c}m" if $c =~ /^\d+$/;
+    $c =~ /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i or die "secondary: #rrggbb or 0-255, not $c\n";
+    return "\e[38;2;" . join( ';', map { hex } $1, $2, $3 ) . 'm';
 }
 
 # --- text --------------------------------------------------------------------

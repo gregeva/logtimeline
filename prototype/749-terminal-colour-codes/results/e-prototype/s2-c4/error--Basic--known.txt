@@ -1,0 +1,6 @@
+== error: Basic (dark), background known: dark palette  (window background #1e1e1e)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #828282  #1e1e1e      4.34   4.34  ────────────────────────────
+   text     90        38;5;247                        76 #9e9e9e  #1e1e1e      6.22   6.00  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #ffffff  #1e1e1e     16.67  16.67  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;231                      35 #ffffff  #1e1e1e     16.67  16.67  Error:unknownoption'--bogus-

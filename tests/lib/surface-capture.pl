@@ -18,6 +18,16 @@
 #   surface-capture.pl plain    CAPTURE --boxes N
 #       a redirected run: no escape sequence but colour codes, N boxes drawn
 #       once, and the run went on past them to its summary
+#   surface-capture.pl dimmed   WITH --bg dark|light
+#       the rows above and below the pop-up in WITH (a pane captured with its
+#       attributes) are the run's rows dimmed with their colours kept: on dark
+#       every character faint, none bold, no background, and some colour
+#       24-bit (a colour set's colour kept whole, never read as a weight or a
+#       background); on light none faint or bold, no background, every
+#       character's colour 24-bit (blended half way to white, uncoloured text
+#       in the grey, a space included) (features/749-terminal-colour-codes.md
+#       AC9). Each row is read after the codes of the rows above it: a pane
+#       captured with its attributes carries them from line to line
 #
 # Prints what it compared; exit 0 when the assertion holds, 1 with each miss.
 # The predicates were shown to tell a known-good build from the defect each is
@@ -32,9 +42,9 @@ use Getopt::Long;
 require( File::Spec->rel2abs( dirname(__FILE__) . '/rendered-output.pl' ) );
 
 binmode STDOUT, ':encoding(UTF-8)';
-my $mode = shift @ARGV // die "usage: surface-capture.pl panes|unmoved|no-trace|plain ...\n";
+my $mode = shift @ARGV // die "usage: surface-capture.pl panes|unmoved|no-trace|plain|dimmed ...\n";
 my %opt;
-GetOptions( \%opt, 'side=i', 'rows', 'upto=i', 'boxes=i' ) or exit 2;
+GetOptions( \%opt, 'side=i', 'rows', 'upto=i', 'boxes=i', 'bg=s' ) or exit 2;
 
 sub read_rows {
     my ($file) = @_;
@@ -110,6 +120,43 @@ elsif ( $mode eq 'unmoved' ) {
     }
     miss('nothing compared') unless $compared;
     print "compared $compared rows outside the pop-up (rows ", $top + 1, '-', $bot + 1, ")\n";
+}
+elsif ( $mode eq 'dimmed' ) {
+    my $bg = $opt{bg} // die "--bg dark|light required\n";
+    my ($with) = @ARGV;
+    my @rows = read_rows($with);
+    my ($top) = grep { text_of( $rows[$_] ) =~ /╭/ } 0 .. $#rows;
+    my ($bot) = grep { text_of( $rows[$_] ) =~ /╰/ } 0 .. $#rows;
+    defined $top && defined $bot or do { miss("no pop-up in $with"); print "FAIL\n"; exit 1 };
+    my ( $cells, $rgb, %fg ) = ( 0, 0 );
+    # A pane captured with its attributes states a change once and carries it
+    # to the next line, so each row is decoded after the codes of every row
+    # before it.
+    my @carried = ('');
+    $carried[ $_ + 1 ] = $carried[$_] . join( '', $rows[$_] =~ /(\e\[[0-9;]*m)/g ) for 0 .. $#rows - 1;
+    for my $i ( grep { $_ < $top || $_ > $bot } 0 .. $#rows ) {
+        for my $c ( @{ decode_line( $carried[$i] . $rows[$i] ) } ) {
+            # On light every coloured cell, a space included, is 24-bit: the
+            # uncoloured text the row starts in takes the set's grey.
+            miss( sprintf 'row %d: a space in %s, not a 24-bit colour', $i + 1, $c->{fg} )
+                if $bg eq 'light' && $c->{ch} eq ' ' && $c->{fg} ne 'default' && $c->{fg} !~ /^rgb:/;
+            next if $c->{ch} eq ' ';
+            $cells++;
+            $fg{ $c->{fg} }++;
+            $rgb++ if $c->{fg} =~ /^rgb:/;
+            my $at = sprintf 'row %d %s', $i + 1, $c->{ch};
+            miss("$at: a background ($c->{bg}) under the pop-up") if $c->{bg} ne 'default';
+            miss("$at: bold under the pop-up") if $c->{bold};
+            if ( $bg eq 'dark' ) { miss("$at: not faint under the pop-up") unless $c->{dim} }
+            else {
+                miss("$at: faint on light") if $c->{dim};
+                miss("$at: in $c->{fg}, not a 24-bit colour") unless $c->{fg} =~ /^rgb:/;
+            }
+        }
+    }
+    miss('no dimmed row outside the pop-up') unless $cells;
+    miss('no 24-bit colour kept under the pop-up') unless $rgb;
+    printf "%d cells outside the pop-up, %d in 24-bit colours, %d colours\n", $cells, $rgb, scalar keys %fg;
 }
 elsif ( $mode eq 'no-trace' ) {
     my ( $before, $after ) = @ARGV;

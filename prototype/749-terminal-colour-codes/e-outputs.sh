@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# e-outputs.sh <out-dir> <palette.tsv>
+#
+# Writes what a 190-column terminal shows of the runs that together show
+# every surface in scope (features/749-terminal-colour-codes.md § 10), in
+# the three palettes of D1. The runs read the corpus under logs/ (the
+# outage day's web access log and method server logs of one node, and a CSV
+# of custom system metrics):
+#
+#   access-heatmap  the access log, failures highlighted, duration heatmap and both histograms
+#   access-latency  the same, without the heatmap (the latency column) and with -sm
+#   levels          the method server logs of the same node and morning: log levels
+#   udm             seven user-defined metrics and one matching nothing: every column colour, a notice panel
+#   fills           ten user-defined metrics, which take the ten column colours in order, with every odd
+#                   minute highlighted: each column's plain and highlighted fill side by side
+#   heat-<colour>   a synthetic log (synth-metrics.py) of ten metrics named after the ten column
+#                   colours, which user-defined metrics take in that order, a third of three
+#                   buckets' lines highlighted: all ten columns, each with its plain and highlighted
+#                   fill, beside the heatmap of one: each column colour's heatmap gradient next to
+#                   every column's own colours
+#   help            --help (FORCE_COLOR)
+#   explain         --explain contribution-highlighting (FORCE_COLOR)
+#   error           a usage error (FORCE_COLOR)
+#   progress-pause  the progress lines and the pause prompt, printed from ltl's own codes for them
+#
+# ltl runs once per run into <out-dir>/base/<run>/ (basic.raw as it writes
+# for a dark background, basic-light.raw with -lbg; the runs that read logs
+# also captured with bare -V). Each palette then gets
+# <out-dir>/<palette>/<run>/ with basic.ans (the fallback), dark.ans and
+# light.ans (through e-palette.py), basic-light.ans (the light set's base)
+# and frame.json. Each file gets a first line of its own carrying the marker
+# blocks and calibration cell read-output.py finds the grid by, loses its
+# final newline, and has any line wider than the window cut into rows as the
+# terminal wraps it (the command-line options line). The rewrites are checked against their base: every
+# character and attribute kept, the histogram cells unchanged but for bright black taking the set's grey,
+# the heatmap's changed only in its gradient and in bright black taking the grey.
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+# Python reads and writes UTF-8, as ltl does, also where the locale does not (Windows: cp1252)
+export PYTHONUTF8=1
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/../.." && pwd)
+top=$(mkdir -p "$1" && cd "$1" && pwd)
+palette=$(cd "$(dirname "$2")" && pwd)/$(basename "$2")
+cd "$root"
+source "$here/e-runs.sh"
+synth=$top/synth-metrics.log
+python3 "$here/synth-metrics.py" "$synth"
+runs=("${all_runs[@]}")
+
+for r in "${runs[@]}"; do
+    b=$top/base/$r
+    mkdir -p "$b"
+    if [[ ! -s $b/basic.raw ]]; then
+        run "$r" -dbg > "$b/basic.raw" 2>&1
+        run "$r" -lbg > "$b/basic-light.raw" 2>&1
+        case $r in access-*|levels|udm|fills|heat-*) run "$r" "-V -dbg" > "$b/basic.V.txt" 2>&1 ;; esac
+    fi
+done
+if grep -l ' at .* line [0-9]' "$top"/base/*/basic.V.txt; then echo "runtime warnings in the -V captures" >&2; exit 1; fi
+
+name=$(basename "${palette%.tsv}")
+for r in "${runs[@]}"; do
+    out=$top/$name/$r
+    mkdir -p "$out"
+    cp "$top/base/$r/basic.raw" "$top/base/$r/basic-light.raw" "$out/"
+    python3 "$here/e-palette.py" "$palette" dark < "$out/basic.raw" > "$out/dark.raw" 2>"$out/dark.counts"
+    python3 "$here/e-palette.py" "$palette" light < "$out/basic-light.raw" > "$out/light.raw" 2>"$out/light.counts"
+    HERE=$here python3 - "$out" "$cols" "$palette" <<'PY'
+import importlib.util, json, os, sys
+out, cols, palette = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+def module(name, file):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(os.environ["HERE"], file))
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+ro, ep = module("ro", "read-output.py"), module("ep", "e-palette.py")
+M, C = "\x1b[38;2;254;0;129m█\x1b[0m", "\x1b[48;2;129;0;254m \x1b[0m"
+marker = M + " " * 49 + C + " " * (cols - 52) + M + "\x1b[0m"
+def wrap(text):
+    """a line wider than the window, cut into rows as the terminal wraps it,
+    each carrying the codes in force, so every line of the file is one row"""
+    cells = ro.parse(text)
+    width = {}
+    for r, c, g, st in cells: width[r] = max(width.get(r, 0), c + 1)
+    if all(w <= cols for w in width.values()): return text
+    start, n = {}, 0
+    for r in range(len(text.split("\n"))):
+        start[r] = n; n += max(1, -(-width.get(r, 0) // cols))
+    rows = {}
+    for r, c, g, st in cells: rows.setdefault(start[r] + c // cols, []).append((g, st))
+    out = []
+    for r in range(n):
+        line, prev = [], None
+        for g, st in rows.get(r, []):
+            key = tuple(sorted(st.items()))
+            if key != prev: line.append(ep.sgr(st)); prev = key
+            line.append(g)
+        if prev is not None: line.append("\x1b[0m")
+        out.append("".join(line))
+    return "\n".join(out)
+texts, rows = {}, None
+for name in ("basic", "basic-light", "dark", "light"):
+    t = open(f"{out}/{name}.raw", encoding="utf-8").read()
+    texts[name] = marker + "\n" + wrap(t[:-1] if t.endswith("\n") else t)
+    open(f"{out}/{name}.ans", "w", encoding="utf-8").write(texts[name])
+    n = len(texts[name].split("\n"))
+    assert rows in (None, n), f"{out}: the palettes differ in length"
+    rows = n
+for name, base in (("dark", "basic"), ("light", "basic-light")):
+    hist, heat = ep.regions(texts[base])
+    pal = ep.load(palette, name)
+    def greyed(st, bst):  # bright black taking the set's grey, or text over a fill taking black or white
+        if st["bg"] != bst["bg"]: return False
+        if "grey" in pal and ep.bright_black(bst["fg"]) and st["fg"] == ep.code("38", pal["grey"]): return True
+        return ep.num(bst["bg"], "48") is not None and st["fg"] in (ep.code("38", 16), ep.code("38", 231))
+    b = {(r, c): (g, st) for r, c, g, st in ro.parse(texts[base])}
+    got = ro.parse(texts[name])
+    bad = []
+    for r, c, g, st in got:
+        bg, bst = b.get((r, c), (None, None))
+        if bst is None or g != bg or any(st[k] != bst[k] for k in ("bold", "faint", "ul", "rev")): bad.append((r, c, "character or attribute"))
+        elif hist(r, c) and (st["fg"], st["bg"]) != (bst["fg"], bst["bg"]) and not greyed(st, bst): bad.append((r, c, "histogram cell changed"))
+        elif heat(r, c) and (st["bg"] != bst["bg"] or (st["fg"] != bst["fg"] and not ro.graphic(g) and not greyed(st, bst))): bad.append((r, c, "heatmap cell changed other than its gradient"))
+    assert not bad and len(b) == len(got), f"{out} {name}: {len(bad)} cells off, first {bad[:3]}"
+sw = [dict(id="marker-a", kind="marker", row=0, col=0, len=1), dict(id="calib", kind="calib", row=0, col=50, len=1),
+      dict(id="marker-b", kind="marker", row=0, col=cols-1, len=1)]
+json.dump(dict(cols=cols, rows=rows, swatches=sw), open(f"{out}/frame.json", "w"), indent=1)
+print(f"{os.path.basename(out)}: {rows} lines; every character and attribute kept, the histogram changed only in its grey, the heatmap only in its gradient and grey")
+PY
+done

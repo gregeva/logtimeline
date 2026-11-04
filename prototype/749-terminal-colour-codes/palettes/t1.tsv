@@ -1,0 +1,35 @@
+# D1 candidate sets by tone.py: tone governs; today's colours as Clear Dark and Clear Light draw them, 24-bit,
+# moved in lightness only toward 4.5:1, by no more than the profile's own step from that colour to its bright twin
+# fills as today; the text over a fill black or white, whichever reads better
+# source	name	use	dark	dark_rgb	dark_min	light	light_rgb	light_min
+s1	red	5xx, ERROR, FATAL, P999	#d57464	#d57464	4.16	#b45648	#b45648	4.65
+s2	green	bytes, 2xx, file marks	#6caa71	#6caa71	4.88	#5a9860	#5a9860	3.33
+s3	yellow	4xx, WARN, P95	#c4ac62	#c4ac62	6.03	#a89046	#a89046	3.01
+s4	blue	users column, file index, pause prompt fill	#719bb9	#719bb9	4.53	#4a799c	#4a799c	4.50
+s5	magenta	3xx	#bf7dcf	#bf7dcf	4.51	#a057b1	#a057b1	4.52
+s6	cyan	count column, P50	#7ccbcd	#7ccbcd	7.21	#4fadb0	#4fadb0	2.56
+s7	white	file details, notice text	#dee5eb	#dee5eb	10.56	#3a4851	#3a4851	9.12
+s8	bright black	rules, headings, options line, notice frame	#5c7385	#5c7385	2.71	#506573	#506573	5.88
+s9	bright red	per-minute failure rates	#e87461	#e87461	4.54	#c05140	#c05140	4.52
+s10	bright green	progress lines	#79be7e	#79be7e	6.06	#67ab6d	#67ab6d	2.66
+s11	bright yellow	duration values, P99, table titles	#e5c872	#e5c872	8.21	#c8ab55	#c8ab55	2.16
+s12	bright blue		#67b5ed	#67b5ed	6.02	#2986c4	#2986c4	3.83
+s13	bright magenta		#d389e5	#d389e5	5.42	#ac65be	#ac65be	3.79
+s14	bright cyan	message-table titles	#84dde0	#84dde0	8.57	#5cc8cc	#5cc8cc	1.92
+s15	bright white	notice pick	#e5eff5	#e5eff5	11.51	#313c44	#313c44	10.91
+f34	38;5;34	success %, success state (as s2)	34	#00af00	4.56	#029202	#029202	3.97
+f160	38;5;160	failure %, failure state (as s1)	#f53629	#f53629	3.48	160	#d70000	5.22
+f111	38;5;111	users count, format number (as s4)	111	#87afff	6.14	#6f96e4	#6f96e4	2.83
+f44	38;5;44	notice category cyan (as s6)	44	#00d7d7	7.48	#03bbbb	#03bbbb	2.30
+f178	38;5;178	classification state (amber)	178	#d7af00	6.41	#b99709	#b99709	2.71
+f135	38;5;135	classification state (violet)	#b776ff	#b776ff	4.51	#9b48e8	#9b48e8	4.52
+f208	38;5;208	orange column values	208	#ff8700	5.57	#db7302	#db7302	3.14
+f213	38;5;213	pink column values	213	#ff87ff	6.50	#e36de4	#e36de4	2.68
+f43	38;5;43	teal column values	43	#00d7af	7.25	#05ba97	#05ba97	2.39
+f93	38;5;93	purple column values	#9758fe	#9758fe	3.29	93	#8700ff	5.84
+f244	38;5;244	notice frame and dimmed text on light (as s8)	#969696	#969696	4.54	#747474	#747474	4.52
+f30	38;5;30	notice category cyan on light (as s6)	#32a09f	#32a09f	4.26	#078181	#078181	4.54
+f35	38;5;35	notice category green on light (as s2)	35	#00af5f	4.67	#07934f	#07934f	3.83
+f29	38;5;29	notice category teal on light	#31a076	#31a076	4.11	#02845d	#02845d	4.55
+f166	38;5;166	notice category orange on light	#ed7327	#ed7327	4.53	#c05400	#c05400	4.50
+e	bold	bold over the default foreground	#f0f0f0	#f0f0f0	11.78	#313c44	#313c44	10.91

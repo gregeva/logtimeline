@@ -1,0 +1,6 @@
+== help: Clear Light (light), background unknown: basic palette  (window background #fbfbfb)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #506573  #fbfbfb      5.88   5.88  ────────────────────────────
+   text     90        90                              76 #506573  #fbfbfb      5.88   5.19  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #3a4851  #fbfbfb      9.12   8.68  LogTimeLine--acommand-linelo
+   text     def       1;def                           35 #313c44  #fbfbfb     10.91  10.91  USAGEOPTIONSENVIRONMENTINFOE

@@ -1,0 +1,4 @@
+== progress-pause: Pro (dark), background unknown: basic palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     def       def on 44                       35 #f4f4f4  #0000b3     11.57  11.57  Pressanykeytocontinue(orQtoq
+   text     92        92                              93 #2ee721  #000000     12.57  12.57  Processingcompleted.Calculat

@@ -28,7 +28,8 @@
 #   centred_report($slice)            -> 'centred' or the imbalance
 #
 # Attribute vocabulary: 'default', "ansi:<code>" (30-37/90-97 fg, 40-47/100-107
-# bg), "256:<n>" for 38;5;n / 48;5;n, and 'reverse' for SGR 7. Bold (SGR 1) and
+# bg), "256:<n>" for 38;5;n / 48;5;n, "rgb:#rrggbb" (lower-case hex) for
+# 38;2;r;g;b / 48;2;r;g;b, and 'reverse' for SGR 7. Bold (SGR 1) and
 # faint (SGR 2) are flags of their own, 1 or 0, both cleared by SGR 22 and 0.
 #
 # TRAPS, each of which produced a wrong answer while this was written:
@@ -39,6 +40,9 @@
 #     parameters with a regex that matches a trailing ";0" treats every bar
 #     fill's black text as a reset and measures a full-width bar as zero.
 #     Parameters are read as whole values, longest first.
+#   - 38;2;r;g;b is one colour, not 38 followed by faint (2) and three
+#     parameters: read loosely, a component of 1, 2, 22 or 4x sets bold,
+#     faint or a background. Its five parameters are consumed together.
 #   - Isolate the row before decoding. The file-details pane is printed on the
 #     same physical line as the summary table; decoding the whole line pulls its
 #     colours into the row's attribute set and reports phantom violations.
@@ -71,6 +75,18 @@ sub decode_line {
                     my $v = $params[$i+2] // '';
                     $p eq '38' ? ( $fg = "256:$v" ) : ( $bg = "256:$v" );
                     $i += 3;
+                    next;
+                }
+                # A 24-bit colour: 38;2;r;g;b or 48;2;r;g;b, five parameters.
+                # One whose components are not all 0 to 255 changes nothing,
+                # as a terminal ignores it, but its parameters are consumed.
+                if ( ($p eq '38' || $p eq '48') && ( $params[$i+1] // '' ) eq '2' ) {
+                    my @c = map { $params[$_] // '' } $i + 2 .. $i + 4;
+                    if ( 3 == grep { /^\d{1,3}$/ && $_ <= 255 } @c ) {
+                        my $v = sprintf 'rgb:#%02x%02x%02x', @c;
+                        $p eq '38' ? ( $fg = $v ) : ( $bg = $v );
+                    }
+                    $i += 5;
                     next;
                 }
                 if    ( $p eq '0' || $p eq '' ) { ( $fg, $bg, $bold, $dim ) = ( 'default', 'default', 0, 0 ) }

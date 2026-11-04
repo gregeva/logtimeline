@@ -1,0 +1,4 @@
+== progress-pause: Clear Light (light), background known: light palette  (window background #fbfbfb)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     def       def on 48;2;74;121;156          35 #3a4851  #4a799c      2.02   1.99  Pressanykeytocontinue(orQtoq
+   text     92        38;2;103;171;109                93 #67ab6d  #fbfbfb      2.66   2.66  Processingcompleted.Calculat

@@ -1,0 +1,4 @@
+== progress-pause: Pro (dark), background known: dark palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     92        38;5;71                         93 #5faf5f  #000000      7.78   7.78  Processingcompleted.Calculat
+   text     def       38;5;16 on 48;5;74              35 #000000  #5fafd7      8.60   8.60  Pressanykeytocontinue(orQtoq

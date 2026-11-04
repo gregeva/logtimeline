@@ -1,0 +1,4 @@
+== progress-pause: Dimidium (dark), background unknown: basic palette  (window background #141414)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     def       def on 44                       35 #bab7b6  #0575d8      2.32   2.32  Pressanykeytocontinue(orQtoq
+   text     92        92                              93 #37e57b  #141414     11.10  11.10  Processingcompleted.Calculat

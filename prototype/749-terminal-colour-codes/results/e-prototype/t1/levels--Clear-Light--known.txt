@@ -1,0 +1,29 @@
+== levels: Clear Light (light), background known: light palette  (window background #fbfbfb)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  31        38;2;180;86;72 on 48;5;196      72 #ff0000  #b45648      1.20   1.20  ████████████████████████████
+   graphic  96        38;2;92;200;204                188 #5cc8cc  #fbfbfb      1.92   1.92  ────────────────────────────
+   graphic  93        38;2;200;171;85                188 #c8ab55  #fbfbfb      2.16   2.16  ────────────────────────────
+   graphic  32        38;2;90;152;96                   8 #5a9860  #fbfbfb      3.33   3.33  ████████
+   graphic  90        38;2;80;101;115                774 #506573  #fbfbfb      5.88   5.88  ────────────────────────────
+   graphic  def       def                            164 #3a4851  #fbfbfb      9.12   9.12  ────────────────────────────
+   text     96        38;2;92;200;204                 92 #5cc8cc  #fbfbfb      1.92   1.92  TOPOVERALLMESSAGES(retainedf
+   text     93        38;2;200;171;85                 78 #c8ab55  #fbfbfb      2.16   2.16  TOPHIGHLIGHTEDMESSAGES(lines
+   text     36        38;2;79;173;176                  6 #4fadb0  #fbfbfb      2.56   2.56  305092
+   text     38;5;178  38;2;185;151;9                  23 #b99709  #fbfbfb      2.71   2.71  UNCLASSIFIED1190(16.6%)
+   text     38;5;111  38;2;111;150;228                 4 #6f96e4  #fbfbfb      2.83   2.83  1111
+   text     33        38;2;168;144;70                112 #a89046  #fbfbfb      3.01   3.01  WARN:14WARN:12WARN:12WARN:14
+   text     32        38;2;90;152;96                 123 #5a9860  #fbfbfb      3.33   3.33  INFO:39INFO:36INFO:80INFO:37
+   text     91        38;2;192;81;64                  50 #c05140  #fbfbfb      4.52   4.52  0.21.10.30.20.30.32.40.52.10
+   text     31        38;2;180;86;72                  17 #b45648  #fbfbfb      4.65   4.30  FATAL-HL30(0.42%)
+   text     38;5;0    38;5;16 on 48;5;30               6 #000000  #008787      4.82   4.82  195432
+   text     38;5;160  38;5;160                        23 #d70000  #fbfbfb      5.22   5.22  ••FAILURECLASSIFIED5960
+   text     31        38;5;16 on 48;5;196             28 #000000  #ff0000      5.25   5.25  5341069107114647219889305645
+   text     38;5;0    38;5;16 on 48;5;196             19 #000000  #ff0000      5.25   5.06  ERROR-HL5930(82.9%)
+   text     90        38;2;80;101;115                208 #506573  #fbfbfb      5.88   5.37  ,::ltl::'logtimeline[0.20.0-
+   text     38;5;0    38;5;16 on 48;5;34               4 #000000  #00af00      7.13   7.13  INFO
+   text     38;5;0    38;5;231 on 48;5;21              2 #ffffff  #0000ff      8.59   8.59  53
+   text     def       def                            876 #3a4851  #fbfbfb      9.12   8.68  2026-08-2104:001.92026-08-21
+   text     37        38;2;58;72;81                  443 #3a4851  #fbfbfb      9.12   8.28  Thesefile(s)wereprocessedwit
+   text     38;5;0    38;5;231 on 48;5;20             14 #ffffff  #0000d7     10.60  10.60  22432422232222
+   text     38;5;0    38;5;16 on 48;5;184              1 #000000  #d7d700     13.61  13.61  W
+   text     32        38;5;16 on 48;5;46               3 #000000  #00ff00     15.30  15.30  √√√

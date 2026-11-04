@@ -1,0 +1,15 @@
+== explain: Ocean (dark), background unknown: basic palette  (window background #2b66c9)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             191 #35445d  #2b66c9      1.80   1.80  ────────────────────────────
+   graphic  32        32 on 48;5;46                    9 #00ff00  #00a600      2.37   2.37  █████████
+   graphic  36        36                             156 #58c9e6  #2b66c9      2.84   2.84  ────────────────────────────
+   graphic  32        32                              40 #65e550  #2b66c9      3.35   3.35  ████████████████████████████
+   text     38;5;34   38;5;34                          5 #00af00  #2b66c9      1.85   1.85  •••••
+   text     91        91                               9 #ff754a  #2b66c9      2.05   2.05  0.20.70.2
+   text     90        90                              82 #393939  #2b66c9      2.12   2.01  ,::ltl::'logtimeline[0.20.0-
+   text     32        32 on 48;5;46                   10 #00a600  #00ff00      2.37   2.37  7811.9k622
+   text     32        32                              24 #65e550  #2b66c9      3.35   3.35  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     33        33                              18 #d5d24c  #2b66c9      3.42   3.42  4xx:144xx:414xx:12
+   text     36        1;36                            75 #63e0ed  #2b66c9      3.49   3.49  TOPHIGHLIGHTEDMESSAGES(lines
+   text     def       def                           1892 #ffffff  #2b66c9      5.46   5.46  Ananalysistechnique:aninvest
+   text     def       1;def                           24 #ffffff  #2b66c9      5.46   5.46  CONTRIBUTIONHIGHLIGHTING

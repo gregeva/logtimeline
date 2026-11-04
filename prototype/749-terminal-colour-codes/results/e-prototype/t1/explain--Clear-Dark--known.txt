@@ -1,0 +1,15 @@
+== explain: Clear Dark (dark), background known: dark palette  (window background #292f3b)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        38;2;108;170;113 on 48;5;46      9 #00ff00  #6caa71      2.01   2.01  █████████
+   graphic  90        38;2;92;115;133                191 #5c7385  #292f3b      2.71   2.71  ────────────────────────────
+   graphic  32        38;2;108;170;113                40 #6caa71  #292f3b      4.88   4.88  ████████████████████████████
+   graphic  36        38;2;124;203;205               156 #7ccbcd  #292f3b      7.21   7.21  ────────────────────────────
+   text     90        38;2;92;115;133                 82 #5c7385  #292f3b      2.71   2.68  ,::ltl::'logtimeline[0.20.0-
+   text     91        38;2;232;116;97                  9 #e87461  #292f3b      4.54   4.52  0.20.70.2
+   text     38;5;34   38;5;34                          5 #00af00  #292f3b      4.56   4.56  •••••
+   text     32        38;2;108;170;113                24 #6caa71  #292f3b      4.88   4.88  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     33        38;2;196;172;98                 18 #c4ac62  #292f3b      6.03   6.03  4xx:144xx:414xx:12
+   text     36        1;38;2;124;203;205              75 #7ccbcd  #292f3b      7.21   7.21  TOPHIGHLIGHTEDMESSAGES(lines
+   text     def       def                           1892 #e6e6e6  #292f3b     10.76  10.76  Ananalysistechnique:aninvest
+   text     def       1;38;2;240;240;240              24 #f0f0f0  #292f3b     11.78  11.78  CONTRIBUTIONHIGHLIGHTING
+   text     32        38;5;16 on 48;5;46              10 #000000  #00ff00     15.30  15.24  7811.9k622

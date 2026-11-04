@@ -254,8 +254,8 @@ if scenario_wanted "$current_scenario"; then
         assert_command \
             command     "perl '$CELLS' colours '$TMP_DIR/k$bg.svg' '$TMP_DIR/colours-$bg.ltl' $first $last $cf $cs 0,0,0,0" \
             reads       "$TMP_DIR/colours-$bg.ltl" \
-            label       "$bg: every colour ltl names is drawn in one colour, 256-colour indices at their xterm values" \
-            asserts     'Each foreground and background colour ltl printed maps to exactly one colour in the image, through the tool colour table; indices 16 to 255 at the standard xterm values; the default background is the image background' \
+            label       "$bg: every colour ltl names is drawn in one colour, 256-colour indices at their xterm values, 24-bit colours as written" \
+            asserts     'Each foreground and background colour ltl printed maps to exactly one colour in the image, through the tool colour table; indices 16 to 255 at the standard xterm values; a 24-bit colour at the value written; the default background is the image background' \
             produced_by 'palette_for() and build_grid() in process/capture-screenshots.pl' \
             contract    "$CONTRACT criterion 2, D7"
     done
@@ -292,13 +292,13 @@ if scenario_wanted "$current_scenario"; then
     ( cd "$REPO_DIR" && "$LTL" -ni -V heatmap-palette $args ) > "$TMP_DIR/heat.palette" 2> "$TMP_DIR/heat.palette.stderr" || true
     check_warnings "$TMP_DIR/heat.palette"
     active=$(sed -n 's/^gradient_active: //p' "$TMP_DIR/heat.palette")
-    gradient=$(sed -n "s/^gradient_$active: //p" "$TMP_DIR/heat.palette")
+    gradient=$(sed -n 's/^gradient_written: //p' "$TMP_DIR/heat.palette")
     read -r first last cf cs <<< "$(traced_crop "$out" 'sections=timeline')" || true
     assert_command \
         command     "[[ -n '$gradient' ]] && perl '$CELLS' heatmap '$TMP_DIR/h-timeline.svg' '$TMP_DIR/heat.ltl' $first $last $cf $cs 0,0,0,0 '$TMP_DIR/heat.ltl.stderr' '$gradient'" \
         reads       "$TMP_DIR/heat.ltl" \
-        label       "heatmap cells use only the $active gradient ($gradient) and every one is in the image" \
-        asserts     'Every heatmap cell ltl printed, located by the layout engine column offsets, carries a colour of the gradient -V heatmap-palette reports, and the image carries each of them' \
+        label       "heatmap cells use only the $active gradient written ($gradient) and every one is in the image" \
+        asserts     'Every heatmap cell ltl printed, located by the layout engine column offsets, carries one of the steps -V heatmap-palette reports written (gradient_written: 256-colour indices, or the sets 24-bit steps once the background is known), and the image carries each of them' \
         produced_by 'print_heatmap_row() in ltl; render_svg() in process/capture-screenshots.pl' \
         contract    "$CONTRACT criterion 2; features/heatmap.md"
 fi
@@ -677,33 +677,6 @@ fi
 # process/capture-screenshots.pl): what ltl's default colour is drawn as.
 DARK_TEXT='#e0e0e0'
 
-# ---------------------------------------------------------------------------
-current_scenario="faint"
-if scenario_wanted "$current_scenario"; then
-    echo "=== $current_scenario: faint text is drawn halfway to the background ==="
-    # A -udm that matches nothing raises a deferred notice, so the notices
-    # panel prints, its heading's description in faint text.
-    out="$TMP_DIR/faint"
-    run_tool "$out" --name f --pad 0 --out-dir "$TMP_DIR" --trace --crop 'sections=notices' -- -ni -bs 1440 -oe -n 1 -udm 'nosuchkey::max' "$FIXTURE" || true
-    check_warnings "$out"
-    capture_ltl "$out" "$TMP_DIR/faint.ltl"
-    read -r first last cf cs <<< "$(traced_crop "$out" 'sections=notices')" || true
-    assert_command \
-        command     "perl '$CELLS' faint '$TMP_DIR/f-notices.svg' '$TMP_DIR/faint.ltl' ${first:-0} ${last:-0} ${cf:-0} ${cs:-0} 0,0,0,0 '$DARK_TEXT'" \
-        reads       "$TMP_DIR/faint.ltl" \
-        label       'the panel heading description: faint cells drawn halfway between their colour and the background' \
-        asserts     'Text ltl prints faint (SGR 2) is drawn halfway between the colour it names and the background, as Terminal.app draws it, never at full strength' \
-        produced_by 'build_grid() and faint_of() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT D27"
-    assert_command \
-        command     "perl '$CELLS' colours '$TMP_DIR/f-notices.svg' '$TMP_DIR/faint.ltl' ${first:-0} ${last:-0} ${cf:-0} ${cs:-0} 0,0,0,0" \
-        reads       "$TMP_DIR/faint.ltl" \
-        label       'every colour of the panel, faint and full, drawn consistently' \
-        asserts     'Each colour ltl names, faint or not, is drawn in one colour throughout the image' \
-        produced_by 'build_grid() in process/capture-screenshots.pl' \
-        contract    "$CONTRACT criterion 2, D27"
-fi
-
 # A pane of our own, as the tool makes it: ltl in tmux, the steps, the pane
 # captured with its colours. The harness's independent view of what the tool's
 # pane image must show.
@@ -722,6 +695,33 @@ own_pane() {
     "${server[@]}" capture-pane -e -p -t own > "$out" || true
     "${server[@]}" kill-server 2>/dev/null || true
 }
+
+# ---------------------------------------------------------------------------
+current_scenario="faint"
+if scenario_wanted "$current_scenario"; then
+    echo "=== $current_scenario: faint text is drawn halfway to the background ==="
+    if ! command -v tmux > /dev/null 2>&1; then
+        echo "  SKIP  $current_scenario :: tmux is not available on this host"
+    else
+        # With the background known, ltl draws faint only in the layer dimmed
+        # under a pop-up on dark (features/749-terminal-colour-codes.md AC9):
+        # a modal question over the run's first rows, captured from a pane. A
+        # key the question does not use stops its countdown, so the frame
+        # holds still.
+        steps='sleep:2 z sleep:0.5'
+        shape=( -ni -bs 1440 -oe -n 1 --notice-fixture ask-modal "$FIXTURE" )
+        out="$TMP_DIR/faint"
+        run_tool "$out" --name f --pad 0 --out-dir "$TMP_DIR" --trace --pane "$steps" -- "${shape[@]}" || true
+        check_warnings "$out"
+        own_pane "$TMP_DIR/faint.own" "$steps" "${shape[@]}"
+        assert_command \
+            command     "perl '$CELLS' faint '$TMP_DIR/f.svg' '$TMP_DIR/faint.own' 1 53 0 211 0,0,0,0 '$DARK_TEXT'" \
+            label       'the run dimmed under the modal: faint cells drawn halfway between their colour and the background' \
+            asserts     'Text ltl prints faint (SGR 2) is drawn halfway between the colour it names and the background, as Terminal.app draws it, never at full strength' \
+            produced_by 'build_grid() and faint_of() in process/capture-screenshots.pl' \
+            contract    "$CONTRACT D27"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 current_scenario="pane"
@@ -752,12 +752,6 @@ if scenario_wanted "$current_scenario"; then
             asserts     'The image of a pane capture holds, cell for cell, what the pane shows after the steps: the question drawn as a pop-up, the run under it' \
             produced_by 'run_pane() and build_grid() in process/capture-screenshots.pl' \
             contract    "$CONTRACT D27; features/412-notice-surfaces.md D18"
-        assert_command \
-            command     "perl '$CELLS' faint '$TMP_DIR/p.svg' '$TMP_DIR/pane.own' 1 53 0 211 0,0,0,0 '$DARK_TEXT'" \
-            label       'the run under the question: faint, halfway to the background' \
-            asserts     'The dimmed run under a pop-up is drawn faint, halfway between its colour and the background' \
-            produced_by 'build_grid() and faint_of() in process/capture-screenshots.pl' \
-            contract    "$CONTRACT D27"
         assert_command \
             command     "grep -q 'check for sensitive content before committing: a pane shows whatever the run printed' '$out' && pngs_match_svgs '$TMP_DIR'" \
             label       'the pane image flagged for a check, with its PNG' \

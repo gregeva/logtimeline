@@ -1,0 +1,4 @@
+== progress-pause: CGA (dark), background unknown: basic palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     def       def on 44                       35 #aaaaaa  #0000aa      5.72   5.72  Pressanykeytocontinue(orQtoq
+   text     92        92                              93 #55ff55  #000000     15.82  15.82  Processingcompleted.Calculat

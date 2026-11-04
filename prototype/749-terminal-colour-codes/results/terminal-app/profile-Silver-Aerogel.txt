@@ -1,0 +1,69 @@
+== Silver-Aerogel.png  (background beside group A: #a8a8a8)
+A  bold on basic codes and the default foreground (other = 1;code)
+      code    plain    other    colour | ink plain other ratio | contrast plain other
+        39 #000000 #ffffff  DIFF 442 |  186  251  1.35 |  8.83  2.38
+        30 #202020 #202020      same |  182  247  1.36 |  6.85  6.85
+        31 #8c0000 #8c0000      same |  183  248  1.36 |  4.18  4.18
+        32 #007400 #007400      same |  186  259  1.39 |  2.52  2.52
+        33 #e4e15b #e4e15b      same |  156  214  1.37 |  1.72  1.72
+        34 #1808b9 #1808b9      same |  180  246  1.37 |  4.98  4.98
+        35 #960098 #960098      same |  161  229  1.42 |  3.21  3.21
+        36 #73effc #73effc      same |  159  216  1.36 |  1.75  1.75
+        37 #eaeaea #eaeaea      same |  156  214  1.37 |  1.98  1.98
+        90 #4e4e4e #4e4e4e      same |  157  215  1.37 |  3.50  3.50
+        91 #bb0000 #bb0000      same |  183  248  1.36 |  2.84  2.84
+        92 #60ff4b #60ff4b      same |  170  238  1.40 |  1.80  1.80
+        93 #fdfb30 #fdfb30      same |  190  260  1.37 |  2.15  2.15
+        94 #0000f6 #0000f6      same |  183  248  1.36 |  3.79  3.79
+        95 #b500b8 #b500b8      same |  168  238  1.42 |  2.42  2.42
+        96 #53ffff #53ffff      same |  177  241  1.36 |  1.94  1.94
+        97 #f7f7f7 #f7f7f7      same |  173  240  1.39 |  2.22  2.22
+B  palette index beside basic code (block colours)
+     38;5;0 #000000   30 #202020  DIFF 55  contrast  8.83 /  6.85
+     38;5;1 #990000   31 #8c0000  DIFF 13  contrast  3.75 /  4.18
+     38;5;2 #00a600   32 #007400  DIFF 50  contrast  1.37 /  2.52
+     38;5;3 #999900   33 #e4e15b  DIFF 138  contrast  1.28 /  1.72
+     38;5;4 #0000b3   34 #1808b9  DIFF 26  contrast  5.35 /  4.98
+     38;5;5 #b300b3   35 #960098  DIFF 40  contrast  2.48 /  3.21
+     38;5;6 #00a6b3   36 #73effc  DIFF 155  contrast  1.24 /  1.75
+     38;5;7 #bfbfbf   37 #eaeaea  DIFF 74  contrast  1.29 /  1.98
+     38;5;8 #666666   90 #4e4e4e  DIFF 42  contrast  2.41 /  3.50
+     38;5;9 #e50000   91 #bb0000  DIFF 42  contrast  2.04 /  2.84
+    38;5;10 #00d900   92 #60ff4b  DIFF 128  contrast  1.24 /  1.80
+    38;5;11 #e5e500   93 #fdfb30  DIFF 58  contrast  1.76 /  2.15
+    38;5;12 #0000ff   94 #0000f6  DIFF 9  contrast  3.61 /  3.79
+    38;5;13 #e500e5   95 #b500b8  DIFF 66  contrast  1.62 /  2.42
+    38;5;14 #00e5e5   96 #53ffff  DIFF 91  contrast  1.51 /  1.94
+    38;5;15 #e5e5e5   97 #f7f7f7  DIFF 31  contrast  1.89 /  2.22
+    38;5;16 #000000   30 #202020  DIFF 55  contrast  8.83 /  6.85
+   38;5;244 #808080   90 #4e4e4e  DIFF 87  contrast  1.66 /  3.50
+   38;5;231 #ffffff   97 #f7f7f7  DIFF 14  contrast  2.38 /  2.22
+   38;5;232 #080808   30 #202020  DIFF 42  contrast  8.42 /  6.85
+C  bold over index 16-255 (other = 1;38;5;N)
+      code    plain    other    colour | ink plain other ratio | contrast plain other
+        16 #000000 #000000      same |  186  261  1.40 |  8.83  8.83
+       184 #d7d700 #d7d700      same |  188  256  1.36 |  1.54  1.54
+        34 #00af00 #00af00      same |  186  259  1.39 |  1.24  1.24
+       160 #d70000 #d70000      same |  186  259  1.39 |  2.27  2.27
+       226 #ffff00 #ffff00      same |  196  267  1.36 |  2.21  2.21
+       208 #ff8700 #ff8700      same |  183  249  1.36 |  1.01  1.01
+       244 #808080 #808080      same |  104  138  1.33 |  1.66  1.66
+       111 #87afff #87afff      same |  141  174  1.23 |  1.09  1.09
+D  faint (other = 2;code)
+      code    plain    other    colour | ink plain other ratio | contrast plain other
+        39 #000000 #747474  DIFF 201 |  186  121  0.65 |  8.83  1.97
+        37 #eaeaea #b2b2b2   DIFF 97 |  156    0  0.00 |  1.98  1.12
+        33 #e4e15b #b0af89   DIFF 86 |  156    0  0.00 |  1.72  1.06
+        30 #202020 #7c7c7c  DIFF 159 |  182  113  0.62 |  6.85  1.76
+      i184 #d7d700 #acac77  DIFF 134 |  188   31  0.16 |  1.54  1.01
+       i16 #000000 #747474  DIFF 201 |  186  121  0.65 |  8.83  1.97
+E  24-bit beside the 256-colour index of the same RGB
+     38;2;215;215;0 #d7d700   38;5;184 #d7d700  same
+       38;2;215;0;0 #d70000   38;5;160 #d70000  same
+   38;2;128;128;128 #808080   38;5;244 #808080  same
+       38;2;0;175;0 #00af00    38;5;34 #00af00  same
+F  text over a fill: extreme ink pixel and its contrast with the fill
+    38;5;0 #000000 on #d7d700 13.61 |       30 #000000 on #d7d700 13.61 |  38;5;16 #000000 on #d7d700 13.61
+    38;5;0 #000000 on #00af00  7.13 |       30 #000000 on #00af00  7.13 |  38;5;16 #000000 on #00af00  7.13
+    38;5;0 #000000 on #0000d7  1.98 |       30 #000000 on #0000d7  1.98 |  38;5;16 #000000 on #0000d7  1.98
+

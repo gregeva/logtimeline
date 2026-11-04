@@ -1,0 +1,6 @@
+== error: Solarized Light (light), background unknown: basic palette  (window background #fdf6e3)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #073642  #fdf6e3     12.05  12.05  ────────────────────────────
+   text     def       def                            216 #657b83  #fdf6e3      4.13   4.13  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;def                           35 #657b83  #fdf6e3      4.13   4.13  Error:unknownoption'--bogus-
+   text     90        90                              76 #073642  #fdf6e3     12.05  12.05  ,::ltl::'logtimeline[0.20.0-

@@ -1,0 +1,31 @@
+== udm: One Half Light (light), background unknown: basic palette  (window background #fafafa)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  38;5;44   38;5;44                        340 #00d7d7  #fafafa      1.72   1.72  ╭───────────────────────────
+   graphic  96        96                             188 #56b5c1  #fafafa      2.29   2.29  ────────────────────────────
+   graphic  34        34                             417 #0184bc  #fafafa      4.00   4.00  ■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+   graphic  90        90                             773 #4f525d  #fafafa      7.46   7.46  ────────────────────────────
+   graphic  def       def                            164 #383a42  #fafafa     10.86  10.86  ────────────────────────────
+   text     37        37                             242 #fafafa  #fafafa      1.00   1.00  nometricsproducedfrommatchin
+   text     37        1;37                            50 #ffffff  #fafafa      1.04   1.04  -udm'no_such_column::max'-ud
+   text     38;5;0    38;5;0 on 48;5;20               74 #383a42  #0000d7      1.07   1.07  518.3228.7629.4429.2529.5929
+   text     38;5;0    38;5;0 on 48;5;55               75 #383a42  #5f00af      1.14   1.14  6070860708607086070860708607
+   text     38;5;0    38;5;0 on 48;5;124              62 #383a42  #af0000      1.52   1.52  1557078368283682836818368083
+   text     38;5;44   1;38;5;44                       12 #00d7d7  #fafafa      1.72   1.72  ⛭YOUROPTIONS
+   text     38;5;44   38;5;44                          2 #00d7d7  #fafafa      1.72   1.72  ——
+   text     38;5;0    38;5;0 on 48;5;127              62 #383a42  #af00af      1.86   1.86  1370135566655667556655566455
+   text     38;5;213  38;5;213                        42 #ff87ff  #fafafa      1.98   1.98  4402183181170186315164207175
+   text     38;5;178  38;5;178                        21 #d7af00  #fafafa      2.01   2.01  UNCLASSIFIED118(100%)
+   text     38;5;111  38;5;111                         2 #87afff  #fafafa      2.09   2.09  11
+   text     96        96                              92 #56b5c1  #fafafa      2.29   2.29  TOPOVERALLMESSAGES(retainedf
+   text     38;5;208  38;5;208                        18 #ff8700  #fafafa      2.31   2.31  0000020000.0100000
+   text     38;5;0    38;5;0 on 48;5;29               74 #383a42  #00875f      2.50   2.50  61.5965.5372.172.5872.9575.8
+   text     38;5;0    38;5;0 on 48;5;166               6 #383a42  #d75f00      2.98   2.98  0.090.
+   text     32        32                               1 #50a14f  #fafafa      3.07   3.07  √
+   text     91        91                              15 #df6c75  #fafafa      3.08   3.08  000000000000000
+   text     38;5;0    38;5;0 on 48;5;169              11 #383a42  #d75faf      3.32   3.32  55957365668
+   text     31        31                              12 #e45649  #fafafa      3.51   3.51  523765792631
+   text     34        34                             101 #0184bc  #fafafa      4.00   4.00  DATA:4.21DATA:9DATA:8DATA:8D
+   text     38;5;160  38;5;160                        18 #d70000  #fafafa      5.17   5.17  FAILURECLASSIFIED0
+   text     35        35                              12 #a626a4  #fafafa      5.86   5.86  003708961629
+   text     90        90                             444 #4f525d  #fafafa      7.46   7.46  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            645 #1c1d21  #fafafa     16.13  10.86  (2)commandusagewarnings·read

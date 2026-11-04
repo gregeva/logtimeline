@@ -1,0 +1,4 @@
+== progress-pause: Novel (light), background unknown: basic palette  (window background #dfdbc3)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     def       def on 44                       35 #4d2f2d  #0000b3      1.07   1.05  Pressanykeytocontinue(orQtoq
+   text     92        92                              93 #00c900  #dfdbc3      1.61   1.61  Processingcompleted.Calculat

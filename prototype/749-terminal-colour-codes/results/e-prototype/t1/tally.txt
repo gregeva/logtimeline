@@ -1,0 +1,4 @@
+Groups below the floor, background unknown (today's colours) > known (the set), over 8 runs: access-heatmap, access-latency, error, explain, help, levels, progress-pause, udm
+profile              class window    text on the background (4.5)        text over a fill (4.5)          bars and lines (3.0)  text below 3
+Clear Dark           dark  #292f3b               24/70  >  15/70               29/32  >   1/32               11/29  >  11/29    14 > 7  
+Clear Light          light #fbfbfb               46/70  >  31/72               29/32  >   1/32               17/29  >  12/29    37 > 19 

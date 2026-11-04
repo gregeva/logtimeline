@@ -1,0 +1,6 @@
+== error: Tango Light (light), background known: light palette  (window background #ffffff)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;241                       188 #626262  #ffffff      6.10   6.10  ────────────────────────────
+   text     90        38;5;241                        76 #626262  #ffffff      6.10   6.10  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #555753  #ffffff      7.31   7.31  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;16                       35 #000000  #ffffff     21.00  21.00  Error:unknownoption'--bogus-

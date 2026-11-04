@@ -1,0 +1,4 @@
+== progress-pause: Solarized Dark (dark), background unknown: basic palette  (window background #002b36)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     def       def on 44                       35 #839496  #268bd2      1.16   1.16  Pressanykeytocontinue(orQtoq
+   text     92        92                              93 #586e75  #002b36      2.79   2.79  Processingcompleted.Calculat

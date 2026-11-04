@@ -182,7 +182,7 @@ ltl -g 80 -xu -x fileName access.log
 
 ### Display & Output
 
-These options control what is shown and how. After the timeline bar graph, logtimeline prints the table ranking the top contributing messages — `-n` controls how many entries appear. The run summary — category totals, line counts, timing, memory and the files that were read — comes after all the analysis content, at the end of the output, and `-osum` suppresses it. `-hi` hides whole sections of the output, the timeline and the messages table included; a hidden section is still computed, so `-o` writes its CSV all the same. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. A time bucket in which no line carried a metric leaves that metric's total empty, on the timeline and in the CSV and YAML files, while a bucket whose lines carried it with the value zero shows the zero. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The dark background mode (`-dbg`) forces the dark gradients and overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
+These options control what is shown and how. After the timeline bar graph, logtimeline prints the table ranking the top contributing messages — `-n` controls how many entries appear. The run summary — category totals, line counts, timing, memory and the files that were read — comes after all the analysis content, at the end of the output, and `-osum` suppresses it. `-hi` hides whole sections of the output, the timeline and the messages table included; a hidden section is still computed, so `-o` writes its CSV all the same. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. A time bucket in which no line carried a metric leaves that metric's total empty, on the timeline and in the CSV and YAML files, while a bucket whose lines carried it with the value zero shows the zero. The light background mode (`-lbg`) uses colours suited to a light terminal background, and the dark background mode (`-dbg`) colours suited to a dark one; `-dbg` overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
 
 Alongside the messages ranking, logtimeline prints a **Category** table totalling every log level or event class it found — `INFO`, `ERROR`, the GC pause kinds, the HTTP status families, and so on. Where a category name is not self-explanatory the table names it descriptively: HTTP status families read as `2xx Success`, `3xx Redirection`, `4xx Client error`, `5xx Server error` and `1xx Informational`. When a highlight is active a category that has highlighted lines gets a second row of its own, ending in `, highlighted`, directly above the row for the rest of that category. Every other category keeps its own name unchanged. The short name is what the per-bucket legend beside the timeline shows, and it is also what names the columns in the CSV (`-o`), so both stay compact and stable for tooling.
 
@@ -214,8 +214,8 @@ Each category row shows its share of the lines included beside its total — `2 
 | `-hcl, --hide-classification` | Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs |
 | `-scl, --show-classification` | Show the success and failure percentage columns for a format that declares both classifications without being an event ledger |
 | `-hst, --hide-stats` | Hide the latency statistics and heatmap columns |
-| `-lbg, --light-background` | Use pale-to-bright color gradients suited for light/white terminal backgrounds |
-| `-dbg, --dark-background` | Force dark-background color gradients; overrides `-lbg` and disables auto-detect |
+| `-lbg, --light-background` | Use colours suited to a light terminal background |
+| `-dbg, --dark-background` | Use colours suited to a dark terminal background; overrides `-lbg` |
 | `-nah, --no-auto-hide` | Disable automatic column hiding at narrow terminal widths (squeeze all columns instead) |
 | `-p, --pause` | Wait for a keypress between pages of output |
 | `-V, --verbose [<section>...]` | Emit diagnostic sections. Bare `-V` emits all; `-V <name>[,<name>...]` or repeated `-V` selects sections; `-V list` prints known sections. See "Verbose output (`-V`)" section below |
@@ -227,9 +227,9 @@ ltl -n 50 access.log
 ltl -o access.log
 # Hide the run summary at the end of the output
 ltl -osum access.log
-# Use color gradients suited for light terminal backgrounds
+# Colours suited to a light terminal background
 ltl -lbg access.log
-# Force dark-background gradients (overrides auto-detect and -lbg)
+# Colours suited to a dark terminal background (overrides -lbg)
 ltl -dbg access.log
 ```
 

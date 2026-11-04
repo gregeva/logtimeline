@@ -1,0 +1,15 @@
+== explain: Man Page (light), background known: light palette  (window background #fef49c)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        38;5;28 on 48;5;28               9 #008700  #008700      1.00   1.00  █████████
+   graphic  90        38;5;241                       191 #898670  #fef49c      3.26   3.26  ────────────────────────────
+   graphic  36        38;5;23                        156 #40846e  #fef49c      3.93   3.93  ────────────────────────────
+   graphic  32        38;5;28                         40 #008700  #fef49c      4.17   4.17  ████████████████████████████
+   text     32        38;5;28                         24 #008700  #fef49c      4.17   4.17  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     38;5;34   38;5;28                          5 #008700  #fef49c      4.17   4.17  •••••
+   text     32        38;5;231 on 48;5;28             10 #ffffff  #008700      4.70   4.70  7811.9k622
+   text     91        38;5;160                         9 #d70000  #fef49c      4.79   4.79  0.20.70.2
+   text     33        38;5;94                         18 #875f00  #fef49c      5.08   5.03  4xx:144xx:414xx:12
+   text     90        38;5;241                        82 #626262  #fef49c      5.41   4.48  ,::ltl::'logtimeline[0.20.0-
+   text     36        1;38;5;23                       75 #005f5f  #fef49c      6.65   6.65  TOPHIGHLIGHTEDMESSAGES(lines
+   text     def       def                           1892 #000000  #fef49c     18.63  17.25  Ananalysistechnique:aninvest
+   text     def       1;38;5;16                       24 #000000  #fef49c     18.63  18.63  CONTRIBUTIONHIGHLIGHTING

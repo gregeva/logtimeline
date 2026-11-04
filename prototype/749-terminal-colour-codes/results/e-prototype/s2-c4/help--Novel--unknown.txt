@@ -1,0 +1,6 @@
+== help: Novel (light), background unknown: basic palette  (window background #dfdbc3)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #717171  #dfdbc3      3.50   3.50  ────────────────────────────
+   text     90        90                              76 #717171  #dfdbc3      3.50   3.30  ,::ltl::'logtimeline[0.20.0-
+   text     def       1;def                           35 #933a21  #dfdbc3      5.25   5.25  USAGEOPTIONSENVIRONMENTINFOE
+   text     def       def                          22037 #4d2f2d  #dfdbc3      8.56   8.31  LogTimeLine--acommand-linelo

@@ -342,6 +342,7 @@ panels() { report "$1" | awk -F'\t' '$1 == "P" && $3 == "first" { n++ } END { pr
 C_PANEL="$DOC § D3, D5 and D6; acceptance criteria, panel"
 C_SHEET="docs/design-language.md § The category sheet; $DOC § D2; acceptance criteria, panel"
 C_LIGHT="docs/design-language.md § Light background; $DOC § D10; acceptance criteria, panel"
+C_SETS="features/749-terminal-colour-codes.md AC9, § 12.9 (the notice surfaces in the colour sets)"
 
 scenario_panel_placement() {
     current_scenario="panel-placement"
@@ -449,19 +450,36 @@ scenario_panel_wrap() {
         'A continuation row starts under the text after the bullet, with no hanging indent beyond it' 'notice_rows() in ltl' "$C_PANEL"
 }
 
+# The light set (-lbg) and the dark set (-dbg), from the values the architect
+# validated (features/749-terminal-colour-codes.md § 12.9, AC9), copied here.
 scenario_panel_light() {
     current_scenario="panel-light"
     echo "[$current_scenario]"
     run_ok light "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 -lbg --notice-fixture panel-categories "$DURATION_FIXTURE"
-    check "frame and title grey 244, never faint" "$(panel light 1 frame_fg)|$(panel light 1 title_fg)|$(panel light 1 title_dim)" "256:244|256:244|no" \
-        'On a light background the frame and the title are 256-colour grey 244, not faint' 'notice_style() in ltl' "$C_LIGHT"
-    check "secondary text grey 244, never faint" "$(row_attr light 1 '⚠' reads_fg)|$(row_attr light 1 '⚠' reads_dim)|$(row_attr light 1 '— a figure caveat' evidence_fg)|$(row_attr light 1 '— a figure caveat' evidence_dim)" "256:244|no|256:244|no" \
-        'How to read a category and the evidence are grey 244 on a light background' 'notice_style() in ltl' "$C_LIGHT"
+    check "frame and title in the set's grey, never faint" "$(panel light 1 frame_fg)|$(panel light 1 title_fg)|$(panel light 1 title_dim)" "rgb:#747474|rgb:#747474|no" \
+        'On a light background the frame and the title are the light set grey #747474, not faint' 'notice_style() in ltl' "$C_LIGHT; $C_SETS"
+    check "secondary text in the set's grey, never faint" "$(row_attr light 1 '⚠' reads_fg)|$(row_attr light 1 '⚠' reads_dim)|$(row_attr light 1 '— a figure caveat' evidence_fg)|$(row_attr light 1 '— a figure caveat' evidence_dim)" "rgb:#747474|no|rgb:#747474|no" \
+        'How to read a category and the evidence are the light set grey #747474' 'notice_style() in ltl' "$C_LIGHT; $C_SETS"
     check "text black 16" "$(row_attr light 1 '— a second data anomaly' text_fg)" "256:16" \
-        'Text is 256-colour black on a light background' 'notice_style() in ltl' "$C_LIGHT"
-    check "categories at their darkest light step" "$(for p in '⚠' '≈' '⚙' '↻' '⏱' '➤'; do row_attr light 1 "$p" glyph_fg; done | paste -sd, -)" \
-        "256:166,256:93,256:30,256:27,256:29,256:35" \
-        'Each category takes the darkest step of its light gradient' 'notice_style() in ltl' "$C_LIGHT"
+        'Text is 256-colour black on a light background' 'notice_style() in ltl' "$C_LIGHT; $C_SETS"
+    check "categories at the darkest step of their light gradient in the set" "$(for p in '⚠' '≈' '⚙' '↻' '⏱' '➤'; do row_attr light 1 "$p" glyph_fg; done | paste -sd, -)" \
+        "rgb:#ba5204,rgb:#b300b3,rgb:#008787,rgb:#215dfe,rgb:#00875f,rgb:#01af00" \
+        'Each category takes the darkest step of its column light gradient in the light set' 'notice_style() in ltl' "$C_SETS"
+}
+
+scenario_panel_dark() {
+    current_scenario="panel-dark"
+    echo "[$current_scenario]"
+    run_ok dark "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 -dbg --notice-fixture panel-categories "$DURATION_FIXTURE"
+    check "frame and title in the set's grey, never faint" "$(panel dark 1 frame_fg)|$(panel dark 1 title_fg)|$(panel dark 1 title_dim)" "rgb:#797c81|rgb:#797c81|no" \
+        'On a dark background with the set, the frame and the title are the dark set grey #797c81, not faint' 'notice_style() in ltl' "$C_SETS"
+    check "secondary text in the set's grey, never faint" "$(row_attr dark 1 '⚠' reads_fg)|$(row_attr dark 1 '⚠' reads_dim)|$(row_attr dark 1 '— a figure caveat' evidence_fg)|$(row_attr dark 1 '— a figure caveat' evidence_dim)" "rgb:#797c81|no|rgb:#797c81|no" \
+        'How to read a category and the evidence are the dark set grey #797c81' 'notice_style() in ltl' "$C_SETS"
+    check "text in the set's white" "$(row_attr dark 1 '— a second data anomaly' text_fg)" "rgb:#dee5eb" \
+        'Text is the dark set white #dee5eb' 'notice_style() in ltl' "$C_SETS"
+    check "categories as validated on dark" "$(for p in '⚠' '≈' '⚙' '↻' '⏱' '➤'; do row_attr dark 1 "$p" glyph_fg; done | paste -sd, -)" \
+        "256:208,rgb:#de66de,256:44,rgb:#3d97fe,256:43,256:40" \
+        'Each category keeps its dark colour, figure caveat #de66de and decision taken #3d97fe' 'notice_style() in ltl' "$C_SETS"
 }
 
 scenario_panel_windows_glyphs() {
@@ -674,15 +692,22 @@ tmux_ready() {
 # for send-keys, or state:LABEL (the pane's "alternate_on cursor_flag" at
 # that moment, to NAME.LABEL.state). Afterwards the
 # whole pane history, wrapped rows joined, is NAME.final.txt, and the pane's
-# terminal state NAME.state ("alternate_on cursor_flag").
+# terminal state NAME.state ("alternate_on cursor_flag"). With TMUX_STYLE set
+# (a window style, such as bg=#fbfbfb), the pane takes it before ltl starts,
+# so ltl's background query is answered with that colour.
 tmux_run() {
     local name="$1" steps="$2"; shift 2
-    local sess="ltl-notices-$$-$RANDOM" step args
+    local sess="ltl-notices-$$-$RANDOM" step args gate=''
     printf -v args '%q ' "$(command -v perl)" "$LTL" --disable-progress "$@"
+    [[ -n "${TMUX_STYLE:-}" ]] && gate="tmux wait-for go-$sess; "
     # bash, not the default shell: it goes on after a child that handled an
     # interrupt itself, so the pane outlives the Ctrl-C a scenario sends.
     tmux new-session -d -s "$sess" -x "$TMUX_W" -y "$TMUX_H" -c "$TMP_DIR" \
-        bash --noprofile --norc -c "$args; echo EXIT=\$?; sleep 60"
+        bash --noprofile --norc -c "$gate$args; echo EXIT=\$?; sleep 60"
+    if [[ -n "${TMUX_STYLE:-}" ]]; then
+        tmux set-option -w -t "$sess" window-style "$TMUX_STYLE"
+        tmux wait-for -S "go-$sess"
+    fi
     for step in $steps; do
         case "$step" in
             sleep:*) sleep "${step#sleep:}" ;;
@@ -742,6 +767,30 @@ scenario_tmux_modal_keys() {
         'Leaving, the alternate screen is closed, the cursor shown, and no box row is left' 'notice_close_drawer() and notice_restore_terminal() in ltl' "$C_ASK"
     else skipped "the screen is given back"; fi
 }
+
+# The layer dimmed under a pop-up when the background is known (AC9 of
+# features/749-terminal-colour-codes.md): the pane styled dark or light, so
+# ltl's query is answered and the colour set drawn. A notice's options open as
+# an ask layered over the browser, which is dimmed under it with the set's
+# colours, as the browser scenario reaches it.
+scenario_tmux_dimmed() {
+    local bg="$1" style="$2"
+    current_scenario="tmux-dimmed-$bg"
+    echo "[$current_scenario]"
+    tmux_ready || return 0
+    # 34 rows, as the browser scenario: the panel of thirty notices does not
+    # fit, so the browser opens.
+    local h=$TMUX_H
+    TMUX_H=34
+    TMUX_STYLE="$style" tmux_run "dim$bg" "sleep:3 Down sleep:0.4 7 sleep:0.4 Up sleep:0.3 Up sleep:0.4 Enter sleep:0.8 cap:layered Escape sleep:0.5 q sleep:1.5" \
+        -bs 1440 -oe -n 1 --notice-fixture browser-many "$DURATION_FIXTURE"
+    TMUX_H=$h
+    predicate "the browser dimmed under the layered ask with its colours kept ($bg)" \
+        "On dark the rows under the pop-up are faint over their own colours, each kept whole, a 24-bit colour never read as a weight or a background; on light each colour is blended half way to white and uncoloured text takes the set's grey" \
+        dimmed "$TMP_DIR/dim$bg.layered.ansi" --bg "$bg"
+}
+scenario_tmux_dimmed_dark()  { scenario_tmux_dimmed dark 'bg=#292f3b'; }
+scenario_tmux_dimmed_light() { scenario_tmux_dimmed light 'bg=#fbfbfb'; }
 
 scenario_tmux_countdown() {
     current_scenario="tmux-countdown"
@@ -970,6 +1019,7 @@ scenario_register registered \
                   panel-edge \
                   panel-wrap \
                   panel-light \
+                  panel-dark \
                   panel-windows-glyphs \
                   panel-immediate \
                   migration-categories \
@@ -978,6 +1028,8 @@ scenario_register registered \
                   stderr-sites \
                   ask-unattended \
                   tmux-modal-keys \
+                  tmux-dimmed-dark \
+                  tmux-dimmed-light \
                   tmux-countdown \
                   tmux-quit \
                   tmux-options \

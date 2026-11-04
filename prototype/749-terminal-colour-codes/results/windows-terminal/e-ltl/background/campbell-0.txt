@@ -1,0 +1,8 @@
+input_mode: 0x01f7
+output_mode: 0x0007
+buffer: 120 by 50, cursor row 4
+
+C:\Users\geva\Documents\GitHub\logtimeline>perl "C:\Users\geva\Documents\GitHub\logtimeline\prototype\749-terminal-colou
+r-codes\wt-console-text.pl" "C:\Users\geva\Documents\GitHub\logtimeline\prototype\749-terminal-colour-codes\results\wind
+ows-terminal\e-ltl\background\campbell-0.txt"
+

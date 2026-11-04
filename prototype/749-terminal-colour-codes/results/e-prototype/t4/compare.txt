@@ -1,0 +1,371 @@
+Text by the code today's ltl writes there: contrast with the background unknown (fallback), then known (the set); WCAG 2, 4.5:1 for text
+background: Clear Dark dark, Clear Light light
+
+Scheme colours on the window's background (what the sets replace)
+run        today              sample                  Clear Dark Clear Light
+heat-blue  31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-blue  32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-blue  35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-blue  36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-blue  37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-blue  90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-blue  93                 lililMilillil            -  > 8.21   -  > 2.16
+heat-cyan  31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-cyan  32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-cyan  35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-cyan  36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-cyan  37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-cyan  90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-cyan  93                 lililMilillil            -  > 8.21   -  > 2.16
+heat-green 31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-green 32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-green 35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-green 36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-green 37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-green 90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-green 93                 lililMilillil            -  > 8.21   -  > 2.16
+heat-magen 31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-magen 32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-magen 35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-magen 36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-magen 37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-magen 90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-magen 93                 lililMilillil            -  > 8.21   -  > 2.16
+heat-orang 31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-orang 32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-orang 35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-orang 36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-orang 37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-orang 90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-orang 93                 lililMilillil            -  > 8.21   -  > 2.16
+heat-pink  31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-pink  32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-pink  35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-pink  36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-pink  37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-pink  90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-pink  93                 lililMilillil            -  > 8.21   -  > 2.16
+heat-purpl 31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-purpl 32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-purpl 35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-purpl 36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-purpl 37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-purpl 90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-purpl 93                 lililMilillil            -  > 8.21   -  > 2.16
+heat-red   31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-red   32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-red   35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-red   36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-red   37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-red   90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-red   93                 lililMilillil            -  > 8.21   -  > 2.16
+heat-teal  31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-teal  32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-teal  35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-teal  36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-teal  37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-teal  90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-teal  93                 lililMilillil            -  > 8.21   -  > 2.16
+heat-yello 31                 6kk2k9k3k5kkkk           -  > 4.16   -  > 4.65
+heat-yello 32                 MMM-HL507(9.25%)         -  > 4.88   -  > 3.33
+heat-yello 35                 kkkkkk2kk                -  > 4.51   -  > 4.52
+heat-yello 36                 MMMMMM                   -  > 7.21   -  > 2.56
+heat-yello 37                 Thesefile(s)wereproces   -  >10.56   -  > 9.12
+heat-yello 90                 ,::ltl::'logtimeline[0   -  > 2.71   -  > 5.88
+heat-yello 93                 lililMilillil            -  > 8.21   -  > 2.16
+
+ltl's own 256-colour codes on the window's background (not replaced)
+run        today              sample                  Clear Dark Clear Light
+heat-blue  38;5;111           11                       -  > 6.14   -  > 2.83
+heat-blue  38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-blue  38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-blue  38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-blue  38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-blue  38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-blue  38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-blue  def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+heat-cyan  38;5;111           11                       -  > 6.14   -  > 2.83
+heat-cyan  38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-cyan  38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-cyan  38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-cyan  38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-cyan  38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-cyan  38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-cyan  def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+heat-green 38;5;111           11                       -  > 6.14   -  > 2.83
+heat-green 38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-green 38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-green 38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-green 38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-green 38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-green 38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-green def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+heat-magen 38;5;111           11                       -  > 6.14   -  > 2.83
+heat-magen 38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-magen 38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-magen 38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-magen 38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-magen 38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-magen 38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-magen def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+heat-orang 38;5;111           11                       -  > 6.14   -  > 2.83
+heat-orang 38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-orang 38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-orang 38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-orang 38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-orang 38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-orang 38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-orang def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+heat-pink  38;5;111           11                       -  > 6.14   -  > 2.83
+heat-pink  38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-pink  38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-pink  38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-pink  38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-pink  38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-pink  38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-pink  def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+heat-purpl 38;5;111           11                       -  > 6.14   -  > 2.83
+heat-purpl 38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-purpl 38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-purpl 38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-purpl 38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-purpl 38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-purpl 38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-purpl def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+heat-red   38;5;111           11                       -  > 6.14   -  > 2.83
+heat-red   38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-red   38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-red   38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-red   38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-red   38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-red   38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-red   def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+heat-teal  38;5;111           11                       -  > 6.14   -  > 2.83
+heat-teal  38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-teal  38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-teal  38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-teal  38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-teal  38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-teal  38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-teal  def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+heat-yello 38;5;111           11                       -  > 6.14   -  > 2.83
+heat-yello 38;5;160           FAILURECLASSIFIED0       -  > 3.48   -  > 5.22
+heat-yello 38;5;178           UNCLASSIFIED5482(100%)   -  > 6.41   -  > 2.71
+heat-yello 38;5;208           kkkk5k1kkkk              -  > 5.57   -  > 3.14
+heat-yello 38;5;213           kkkkklk                  -  > 6.50   -  > 2.68
+heat-yello 38;5;43            ililililMilililil        -  > 7.25   -  > 2.39
+heat-yello 38;5;93            lllilll                  -  > 3.29   -  > 5.84
+heat-yello def                2026-08-2104:002026-08   -  >10.76   -  > 9.12
+
+Text on a fill
+run        today              sample                  Clear Dark Clear Light
+heat-blue  32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-blue  38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-blue  38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-blue  38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-blue  38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-blue  38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-blue  38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-blue  38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-blue  38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-blue  38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-blue  38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-blue  38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-blue  38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-blue  38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-blue  38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-blue  38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-blue  38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-blue  38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-blue  38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-blue  38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-blue  38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04
+heat-cyan  32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-cyan  38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-cyan  38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-cyan  38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-cyan  38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-cyan  38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-cyan  38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-cyan  38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-cyan  38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-cyan  38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-cyan  38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-cyan  38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-cyan  38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-cyan  38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-cyan  38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-cyan  38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-cyan  38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-cyan  38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-cyan  38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-cyan  38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-cyan  38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04
+heat-green 32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-green 38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-green 38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-green 38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-green 38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-green 38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-green 38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-green 38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-green 38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-green 38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-green 38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-green 38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-green 38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-green 38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-green 38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-green 38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-green 38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-green 38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-green 38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-green 38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-green 38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04
+heat-magen 32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-magen 38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-magen 38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-magen 38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-magen 38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-magen 38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-magen 38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-magen 38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-magen 38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-magen 38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-magen 38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-magen 38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-magen 38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-magen 38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-magen 38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-magen 38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-magen 38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-magen 38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-magen 38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-magen 38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-magen 38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04
+heat-orang 32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-orang 38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-orang 38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-orang 38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-orang 38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-orang 38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-orang 38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-orang 38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-orang 38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-orang 38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-orang 38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-orang 38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-orang 38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-orang 38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-orang 38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-orang 38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-orang 38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-orang 38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-orang 38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-orang 38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-orang 38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04
+heat-pink  32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-pink  38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-pink  38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-pink  38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-pink  38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-pink  38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-pink  38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-pink  38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-pink  38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-pink  38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-pink  38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-pink  38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-pink  38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-pink  38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-pink  38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-pink  38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-pink  38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-pink  38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-pink  38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-pink  38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-pink  38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04
+heat-purpl 32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-purpl 38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-purpl 38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-purpl 38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-purpl 38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-purpl 38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-purpl 38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-purpl 38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-purpl 38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-purpl 38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-purpl 38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-purpl 38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-purpl 38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-purpl 38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-purpl 38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-purpl 38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-purpl 38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-purpl 38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-purpl 38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-purpl 38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-purpl 38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04
+heat-red   32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-red   38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-red   38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-red   38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-red   38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-red   38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-red   38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-red   38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-red   38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-red   38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-red   38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-red   38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-red   38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-red   38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-red   38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-red   38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-red   38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-red   38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-red   38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-red   38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-red   38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04
+heat-teal  32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-teal  38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-teal  38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-teal  38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-teal  38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-teal  38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-teal  38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-teal  38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-teal  38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-teal  38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-teal  38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-teal  38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-teal  38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-teal  38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-teal  38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-teal  38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-teal  38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-teal  38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-teal  38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-teal  38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-teal  38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04
+heat-yello 32 on 48;5;46      √                        -  >15.30   -  >15.30
+heat-yello 38;5;0 on 48;5;124 296.322.7401.8k291.272   -  > 7.44   -  > 7.44
+heat-yello 38;5;0 on 48;5;127 171.8183.4201.615760.1   -  > 6.10   -  > 6.10
+heat-yello 38;5;0 on 48;5;166 515.4642.3k621.4561.41   -  > 5.53   -  > 5.53
+heat-yello 38;5;0 on 48;5;169 927k967k1.1Mil999.969.   -  > 6.15   -  > 6.15
+heat-yello 38;5;0 on 48;5;184 5Mi5.8M6Mil6Mil.3M4.9.   -  >13.61   -  >13.61
+heat-yello 38;5;0 on 48;5;20  99563117.46thousand109   -  >10.60   -  >10.60
+heat-yello 38;5;0 on 48;5;201 111                      -  > 6.70   -  > 6.70
+heat-yello 38;5;0 on 48;5;208 54                       -  > 8.72   -  > 8.72
+heat-yello 38;5;0 on 48;5;21  93347825387503           -  >  -     -  >  -  
+heat-yello 38;5;0 on 48;5;213 899                      -  >10.16   -  >10.16
+heat-yello 38;5;0 on 48;5;226 55                       -  >19.56   -  >19.56
+heat-yello 38;5;0 on 48;5;27  93347825387503           -  > 5.15   -  > 5.15
+heat-yello 38;5;0 on 48;5;29  1.7M1.8M1.8M1.8M.51.6M   -  > 4.63   -  > 4.63
+heat-yello 38;5;0 on 48;5;30  16.219.1M18.8M16.76.46   -  > 4.82   -  > 4.82
+heat-yello 38;5;0 on 48;5;34  9.7M10.112.1M10.4.5MMM   -  > 7.13   -  > 7.13
+heat-yello 38;5;0 on 48;5;36  111                      -  > 7.48   -  > 7.48
+heat-yello 38;5;0 on 48;5;43  11                       -  >11.34   -  >11.34
+heat-yello 38;5;0 on 48;5;46  999INFO                  -  >15.30   -  >15.30
+heat-yello 38;5;0 on 48;5;55  3.1Mi3.4Mi3.5Mil3.1MiM   -  > 9.97   -  > 9.97
+heat-yello 38;5;0 on 48;5;93  32                       -  > 6.04   -  > 6.04

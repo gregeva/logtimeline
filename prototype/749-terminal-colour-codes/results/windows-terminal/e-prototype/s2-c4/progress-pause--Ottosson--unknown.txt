@@ -1,0 +1,4 @@
+== progress-pause: Ottosson (dark), background unknown: basic palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   text     def       def on 44                       35 #bebebe  #204dbe      3.94   3.94  Pressanykeytocontinue(orQtoq
+   text     92        92                              93 #58ea51  #000000     13.30  13.30  Processingcompleted.Calculat

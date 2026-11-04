@@ -1,0 +1,6 @@
+== error: Homebrew (dark), background unknown: basic palette  (window background #131313)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #828282  #131313      4.83   4.83  ────────────────────────────
+   text     90        90                              76 #828282  #131313      4.83   4.83  ,::ltl::'logtimeline[0.20.0-
+   text     def       1;def                           35 #00f900  #131313     12.87  12.87  Error:unknownoption'--bogus-
+   text     def       def                            216 #28fe14  #131313     13.52  13.52  Usage:ltl[-bs<N>][-n<N>][-i<

@@ -1,0 +1,6 @@
+== help: Campbell (dark), background unknown: basic palette  (window background #0c0c0c)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        90                             188 #767676  #0c0c0c      4.31   4.31  ────────────────────────────
+   text     90        90                              76 #767676  #0c0c0c      4.31   4.31  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #cccccc  #0c0c0c     12.18  12.18  LogTimeLine--acommand-linelo
+   text     def       1;def                           35 #f2f2f2  #0c0c0c     17.47  17.47  USAGEOPTIONSENVIRONMENTINFOE

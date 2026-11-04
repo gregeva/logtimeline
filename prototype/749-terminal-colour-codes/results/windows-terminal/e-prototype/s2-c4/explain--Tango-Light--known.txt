@@ -1,0 +1,15 @@
+== explain: Tango Light (light), background known: light palette  (window background #ffffff)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        38;5;28 on 48;5;28               9 #008700  #008700      1.00   1.00  █████████
+   graphic  32        38;5;28                         40 #008700  #ffffff      4.70   4.70  ████████████████████████████
+   graphic  90        38;5;241                       191 #626262  #ffffff      6.10   6.10  ────────────────────────────
+   graphic  36        38;5;23                        156 #005f5f  #ffffff      7.49   7.49  ────────────────────────────
+   text     32        38;5;231 on 48;5;28             10 #ffffff  #008700      4.70   4.70  7811.9k622
+   text     32        38;5;28                         24 #008700  #ffffff      4.70   4.70  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     38;5;34   38;5;28                          5 #008700  #ffffff      4.70   4.70  •••••
+   text     91        38;5;160                         9 #d70000  #ffffff      5.40   5.40  0.20.70.2
+   text     33        38;5;94                         18 #875f00  #ffffff      5.73   5.73  4xx:144xx:414xx:12
+   text     90        38;5;241                        82 #626262  #ffffff      6.10   6.10  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                           1892 #555753  #ffffff      7.31   7.31  Ananalysistechnique:aninvest
+   text     36        1;38;5;23                       75 #005f5f  #ffffff      7.49   7.49  TOPHIGHLIGHTEDMESSAGES(lines
+   text     def       1;38;5;16                       24 #000000  #ffffff     21.00  21.00  CONTRIBUTIONHIGHLIGHTING

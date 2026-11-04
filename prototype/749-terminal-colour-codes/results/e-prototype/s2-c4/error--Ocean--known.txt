@@ -1,0 +1,6 @@
+== error: Ocean (dark), background known: dark palette  (window background #2b66c9)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;247                       188 #8592a7  #2b66c9      1.73   1.73  ────────────────────────────
+   text     90        38;5;247                        76 #9e9e9e  #2b66c9      2.04   1.99  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                            216 #ffffff  #2b66c9      5.46   5.46  Usage:ltl[-bs<N>][-n<N>][-i<
+   text     def       1;38;5;231                      35 #ffffff  #2b66c9      5.46   5.46  Error:unknownoption'--bogus-

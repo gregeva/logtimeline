@@ -1,0 +1,6 @@
+== help: One Half Light (light), background known: light palette  (window background #fafafa)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  90        38;5;241                       188 #626262  #fafafa      5.84   5.84  ────────────────────────────
+   text     90        38;5;241                        76 #626262  #fafafa      5.84   5.84  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                          22037 #383a42  #fafafa     10.86  10.86  LogTimeLine--acommand-linelo
+   text     def       1;38;5;16                       35 #000000  #fafafa     20.12  20.12  USAGEOPTIONSENVIRONMENTINFOE

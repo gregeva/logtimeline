@@ -1,0 +1,15 @@
+== explain: CGA (dark), background known: dark palette  (window background #000000)
+   kind     today     code                         cells drawn    on       contrast    low  sample
+   graphic  32        38;5;71 on 48;5;46               9 #5faf5f  #5faf5f      1.00   1.00  █████████
+   graphic  32        38;5;71                         40 #5faf5f  #000000      7.78   7.78  ████████████████████████████
+   graphic  90        38;5;247                       191 #9e9e9e  #000000      7.84   7.84  ────────────────────────────
+   graphic  36        38;5;80                        156 #5fd7d7  #000000     12.19  12.19  ────────────────────────────
+   text     91        38;5;203                         9 #ff5f5f  #000000      7.05   7.05  0.20.70.2
+   text     38;5;34   38;5;34                          5 #00af00  #000000      7.13   7.13  •••••
+   text     32        38;5;71                         24 #5faf5f  #000000      7.78   7.78  2xx:4.2k2xx:9.1k2xx:7.4k
+   text     90        38;5;247                        82 #9e9e9e  #000000      7.84   7.84  ,::ltl::'logtimeline[0.20.0-
+   text     def       def                           1892 #aaaaaa  #000000      9.04   9.04  Ananalysistechnique:aninvest
+   text     33        38;5;178                        18 #d7af00  #000000     10.02  10.02  4xx:144xx:414xx:12
+   text     36        1;38;5;80                       75 #5fd7d7  #000000     12.19  12.19  TOPHIGHLIGHTEDMESSAGES(lines
+   text     32        38;5;16 on 48;5;46              10 #000000  #00ff00     15.30  15.30  7811.9k622
+   text     def       1;38;5;231                      24 #ffffff  #000000     21.00  21.00  CONTRIBUTIONHIGHLIGHTING
