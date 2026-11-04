@@ -2021,6 +2021,41 @@ closes #683 as resolved by this issue (D4).
     column's eight steps (fails on drops 1 and 2, whose cells are 256-colour
     indices); `validate-screenshot-capture.sh` reads the steps written (202
     cells, each drawn as written).
+- **Drop 4** (c071058d, 2026-11-04): the notice surfaces, AC9.
+  - `notice_style()` draws from the set once the background is known: its
+    own codes through `colour_sgr()` (dark: frame #797c81, text #dee5eb, the
+    pick bold #e5eff5; light: frame #747474, text and the pick 16), the
+    secondary text in the set's grey on either background (dark #797c81 in
+    place of faint), each light category the darkest step of its column's
+    light gradient in the set (#ba5204, #b300b3, #008787, #215dfe, #00875f,
+    #01af00), and on dark today's category codes with figure caveat and
+    decision taken moved (`f170` #de66de, `f33` #3d97fe in the dark set).
+    Not known: today's style.
+  - The dimmed layer: on light the uncoloured text takes the set's grey;
+    on dark `notice_sgr_without_weight()` keeps a 256-colour or 24-bit
+    colour whole (the finding of § 12.9), in every condition.
+  - Validated: `tests/validate-notices.sh`: `panel-light` held to the light
+    set, a new `panel-dark` (`-dbg`) to the dark set, and two new tmux
+    scenarios in answering panes (`tmux-dimmed-dark`, `tmux-dimmed-light`):
+    a notice's options layered over the browser, the browser dimmed under
+    them. On dark every cell outside the pop-up is faint with no background,
+    and the set's 24-bit colours are kept (172 of 437 cells); the same
+    scenario fails on an `ltl` with the old weight stripping (no 24-bit
+    colour left). On light every cell's colour is 24-bit, spaces included;
+    it fails on drop 3's `ltl` (112 cells in index 244 per row).
+  - The checker reads a pane captured with its attributes row after row with
+    the codes of the rows above: `tmux capture-pane -e` states an attribute
+    once and carries it to the next line.
+  - `validate-screenshot-capture.sh`: under the sets `ltl` draws faint only
+    in the layer dimmed under a pop-up on dark, so its faint check (D27 of
+    `features/598-screenshot-capture.md`, faint drawn halfway to the
+    background) reads a pane of a modal over the dimmed run (264 faint
+    cells), where it read the notice panel's secondary text, now the set's
+    grey. The question pane loses its faint check: its secondary text is
+    the set's grey too.
+  - AC4's comparison rerun: nothing differs but timing digits and the
+    pre-existing flicker, the notice surfaces still left out (they are
+    drawn by `ltl`, not the rewriter, and held to the set by the harness).
 
 ## Resuming
 
@@ -2049,7 +2084,7 @@ closes #683 as resolved by this issue (D4).
 - Acceptance criteria written (§ Acceptance criteria).
 - Acceptance criteria and delivery plan agreed by the architect
   (2026-11-04). The implementation runs drop by drop on
-  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0 to 3 delivered
-  (§ Drops delivered); next, drop 4, the notice surfaces.
+  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0 to 4 delivered
+  (§ Drops delivered); next, drop 5, the documents and the screenshots.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
