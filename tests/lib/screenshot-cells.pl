@@ -118,7 +118,7 @@ if ( $mode eq 'chars' ) {
 
 if ( $mode eq 'colours' ) {
     # Each colour ltl names maps to one colour in the image; the 256-colour cube
-    # and greys (16-255) to the standard xterm values.
+    # and greys (16-255) to the standard xterm values, a 24-bit colour to itself.
     my @level = ( 0, 95, 135, 175, 215, 255 );
     my sub xterm {
         my $n = shift;
@@ -142,10 +142,13 @@ if ( $mode eq 'colours' ) {
         if ( $key =~ /256:(\d+)$/ && $1 >= 16 && $hex[0] ne xterm($1) ) {
             push @problems, "$key is drawn as $hex[0], not the xterm value " . xterm($1);
         }
+        if ( $key =~ /rgb:(#[0-9a-f]{6})$/ && $hex[0] ne $1 ) {
+            push @problems, "$key is drawn as $hex[0], not the colour written";
+        }
     }
     push @problems, "the default background is drawn as " . join( ' ', sort keys %{ $seen{'background default'} } ) . ", not the image's background $base_bg"
         if $seen{'background default'} && join( '', keys %{ $seen{'background default'} } ) ne $base_bg;
-    report( sprintf '%d cells, %d distinct colours: each drawn consistently, 256-colour indices at their xterm values', $cells, scalar keys %seen );
+    report( sprintf '%d cells, %d distinct colours: each drawn consistently, 256-colour indices at their xterm values, 24-bit colours as written', $cells, scalar keys %seen );
 }
 
 if ( $mode eq 'faint' ) {

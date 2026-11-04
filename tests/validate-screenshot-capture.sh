@@ -254,8 +254,8 @@ if scenario_wanted "$current_scenario"; then
         assert_command \
             command     "perl '$CELLS' colours '$TMP_DIR/k$bg.svg' '$TMP_DIR/colours-$bg.ltl' $first $last $cf $cs 0,0,0,0" \
             reads       "$TMP_DIR/colours-$bg.ltl" \
-            label       "$bg: every colour ltl names is drawn in one colour, 256-colour indices at their xterm values" \
-            asserts     'Each foreground and background colour ltl printed maps to exactly one colour in the image, through the tool colour table; indices 16 to 255 at the standard xterm values; the default background is the image background' \
+            label       "$bg: every colour ltl names is drawn in one colour, 256-colour indices at their xterm values, 24-bit colours as written" \
+            asserts     'Each foreground and background colour ltl printed maps to exactly one colour in the image, through the tool colour table; indices 16 to 255 at the standard xterm values; a 24-bit colour at the value written; the default background is the image background' \
             produced_by 'palette_for() and build_grid() in process/capture-screenshots.pl' \
             contract    "$CONTRACT criterion 2, D7"
     done

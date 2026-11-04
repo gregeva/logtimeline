@@ -4,11 +4,13 @@
 D1's rewrite of ltl's output for a known background, cell by cell, by the
 roles of a palette file design.py writes:
 - the histogram block (from its "Distribution" title to its percentile
-  lines) keeps every code ltl writes;
+  lines) keeps every code ltl writes, but for bright black (its gridlines),
+  which takes the set's grey;
 - in the heatmap's columns (right of the timeline's last separator, from the
   header to the scale footer), a cell drawn in a step of the heatmap's
-  gradient takes the set's colour for that step (g<name>); every other code
-  there, the highlight's background and the percentile markers, is kept;
+  gradient takes the set's colour for that step (g<name>), and one in bright
+  black (the scale line, the percentile markers) the set's grey; every other
+  code there, the highlight's background among them, is kept;
 - a fill (b<N>) takes the set's fill; a scheme background (0;44, the pause
   prompt) takes the set's code for that colour;
 - a bar glyph drawn in a fill's colour (the bar's own glyph, a half block
@@ -18,6 +20,8 @@ roles of a palette file design.py writes:
 - a scheme colour on the window's background takes the set's code (s<i>);
 - one of ltl's fixed text codes the palette remaps takes its code (f<N>);
 - bold over the default foreground takes the emphasis colour (e).
+The set's grey (grey, feature doc § 12.8) stands in for s8 and f244 when the
+palette carries it: one grey for every line and all secondary text.
 A palette value is a 256-colour index or a 24-bit #rrggbb.
 Every character and attribute is kept. The output is written cell by cell
 with its own codes, which draws the same; the non-standard 109 is not
@@ -38,11 +42,12 @@ def load(path, cls):
         if line.startswith("#"): continue
         f = line.rstrip("\n").split("\t")
         if len(f) <= col or f[col] in ("-", ""): continue
-        if f[0].startswith("g"):        # a heatmap gradient: today's codes for this class -> the set's 8 colours
+        if f[0].startswith("g") and "|" in f[1]:   # a heatmap gradient: today's codes for this class -> the set's 8 colours
             today = [int(x) for x in f[1].split("|")[0 if cls == "dark" else 1].split(",")]
             pal[f[0]] = dict(zip(today, f[col].split(",")))
         else:
             pal[f[0]] = f[col] if f[col].startswith("#") else int(f[col])
+    if "grey" in pal: pal["s8"] = pal["f244"] = pal["grey"]
     return pal
 
 def rgb(n):
@@ -64,6 +69,9 @@ def index(code):
     if len(p) == 1:
         v = int(p[0]); return v - 30 if v < 38 else v - 40 if v < 48 else v - 90 + 8 if v < 98 else v - 100 + 8
     return int(p[2])
+def bright_black(code):
+    """bright black as ltl writes it: 90 (its colour table) or 38;5;8 (the histogram's gridlines)"""
+    return ro.scheme(code) and index(code) == 8
 def num(code, prefix):
     return int(code[5:]) if code.startswith(prefix + ";5;") else None
 
@@ -96,7 +104,7 @@ def heatmap_map(cells, pal):
     """the gradient the heatmap draws in (the one holding most of its cells' codes):
     today's code -> the set's colour, or {} when the palette has none"""
     seen = Counter(num(st["fg"], "38") for g, st in cells if ro.graphic(g))
-    best = max((k for k in pal if k.startswith("g")), key=lambda k: sum(n for c, n in seen.items() if c in pal[k]), default=None)
+    best = max((k for k in pal if isinstance(pal[k], dict)), key=lambda k: sum(n for c, n in seen.items() if c in pal[k]), default=None)
     return pal[best] if best else {}
 
 def remap(st, glyph, pal, count):
@@ -136,12 +144,17 @@ def rewrite(text, pal, count):
     gmap = heatmap_map([(g, st) for r, c, g, st in cells if heat(r, c)], pal)
     rows = {}
     for r, c, g, st in cells:
-        if hist(r, c): new = st
+        if hist(r, c):
+            new = st
+            if "grey" in pal and bright_black(st["fg"]):
+                new = dict(st, fg=code("38", pal["grey"])); count["histogram grey"] += 1
         elif heat(r, c):
             new = dict(st)
             ink = num(st["fg"], "38")
             if gmap and ro.graphic(g) and ink in gmap:
                 new["fg"] = code("38", gmap[ink]); count["heatmap cell"] += 1
+            elif "grey" in pal and bright_black(st["fg"]):
+                new["fg"] = code("38", pal["grey"]); count["heatmap grey"] += 1
         else: new = remap(st, g, pal, count)
         rows.setdefault(r, []).append((g, new))
     out = []

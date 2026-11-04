@@ -16,6 +16,10 @@ as the profile itself moves that hue between its normal and bright colour
 - f<N>  ltl's fixed 256-colour text codes: kept as they are when they read
         at 4.5:1, otherwise moved as above.
 - e     bold over the default foreground: the profile's bold text colour.
+- grey  the set's grey, the architect's (feature doc § 12.8): #797c81 on
+        dark, #747474 on light. e-palette.py writes it in place of s8 and
+        f244, and for the heatmap's scale line and percentile markers and the
+        histogram's gridlines: one grey for every line and all secondary text.
 
 The heatmap gradients (g<name>): each column's 8 steps for dark and for light,
 24-bit, every step in the column's own hue (its plain fill's: today's 256-colour
@@ -206,6 +210,7 @@ for cls, profile in (("dark", "Clear-Dark"), ("light", "Clear-Light")):
     sets[cls] = (out, bg)
 
 def hexof(v): return v if isinstance(v, str) else x256(v)
+GREY = ("#797c81", "#747474")  # the set's grey on dark and on light, chosen by the architect (feature doc § 12.8)
 print("role, today on the profile -> the set, contrast today -> set, lightness moved")
 for cls, (out, bg) in sets.items():
     print(f"== {cls} (background {bg})")
@@ -239,6 +244,8 @@ if a.out:
             f.write(f"{k}\t{name}\t{use}\t{vd}\t{hexof(vd)}\t{cr(hexof(vd), dbg):.2f}\t{vl}\t{hexof(vl)}\t{cr(hexof(vl), lbg):.2f}\n")
         for k, (name, v, plain) in FILLS.items():
             f.write(f"{k}\t48;5;{k[1:]}\t{name} highlighted fill\t{v}\t{x256(v)}\t{cr(x256(v), dbg):.2f}\t{v}\t{x256(v)}\t{cr(x256(v), lbg):.2f}\n")
+        f.write(f"grey\tthe set's grey\tevery line and secondary text, in place of s8 and f244 (§ 12.8)\t"
+                f"{GREY[0]}\t{GREY[0]}\t{cr(GREY[0], dbg):.2f}\t{GREY[1]}\t{GREY[1]}\t{cr(GREY[1], lbg):.2f}\n")
         for name, (gd, gl) in GRADIENTS.items():
             nd, nl = NEWG[name]
             f.write(f"g{name}\t{','.join(map(str, gd))}|{','.join(map(str, gl))}\t{name} heatmap gradient (today's dark|light)\t"

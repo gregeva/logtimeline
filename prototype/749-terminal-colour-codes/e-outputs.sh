@@ -32,7 +32,8 @@
 # blocks and calibration cell read-output.py finds the grid by, loses its
 # final newline, and has any line wider than the window cut into rows as the
 # terminal wraps it (the command-line options line). The rewrites are checked against their base: every
-# character and attribute kept, the histogram cells unchanged, the heatmap's changed only in its gradient.
+# character and attribute kept, the histogram cells unchanged but for bright black taking the set's grey,
+# the heatmap's changed only in its gradient and in bright black taking the grey.
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 # Python reads and writes UTF-8, as ltl does, also where the locale does not (Windows: cp1252)
@@ -108,9 +109,9 @@ for r in "${runs[@]}"; do
     cp "$top/base/$r/basic.raw" "$top/base/$r/basic-light.raw" "$out/"
     python3 "$here/e-palette.py" "$palette" dark < "$out/basic.raw" > "$out/dark.raw" 2>"$out/dark.counts"
     python3 "$here/e-palette.py" "$palette" light < "$out/basic-light.raw" > "$out/light.raw" 2>"$out/light.counts"
-    HERE=$here python3 - "$out" "$cols" <<'PY'
+    HERE=$here python3 - "$out" "$cols" "$palette" <<'PY'
 import importlib.util, json, os, sys
-out, cols = sys.argv[1], int(sys.argv[2])
+out, cols, palette = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 def module(name, file):
     spec = importlib.util.spec_from_file_location(name, os.path.join(os.environ["HERE"], file))
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
@@ -149,18 +150,21 @@ for name in ("basic", "basic-light", "dark", "light"):
     rows = n
 for name, base in (("dark", "basic"), ("light", "basic-light")):
     hist, heat = ep.regions(texts[base])
+    pal = ep.load(palette, name)
+    def greyed(st, bst):  # bright black taking the set's grey
+        return "grey" in pal and ep.bright_black(bst["fg"]) and st["fg"] == ep.code("38", pal["grey"]) and st["bg"] == bst["bg"]
     b = {(r, c): (g, st) for r, c, g, st in ro.parse(texts[base])}
     got = ro.parse(texts[name])
     bad = []
     for r, c, g, st in got:
         bg, bst = b.get((r, c), (None, None))
         if bst is None or g != bg or any(st[k] != bst[k] for k in ("bold", "faint", "ul", "rev")): bad.append((r, c, "character or attribute"))
-        elif hist(r, c) and (st["fg"], st["bg"]) != (bst["fg"], bst["bg"]): bad.append((r, c, "histogram cell changed"))
-        elif heat(r, c) and (st["bg"] != bst["bg"] or (st["fg"] != bst["fg"] and not ro.graphic(g))): bad.append((r, c, "heatmap cell changed other than its gradient"))
+        elif hist(r, c) and (st["fg"], st["bg"]) != (bst["fg"], bst["bg"]) and not greyed(st, bst): bad.append((r, c, "histogram cell changed"))
+        elif heat(r, c) and (st["bg"] != bst["bg"] or (st["fg"] != bst["fg"] and not ro.graphic(g) and not greyed(st, bst))): bad.append((r, c, "heatmap cell changed other than its gradient"))
     assert not bad and len(b) == len(got), f"{out} {name}: {len(bad)} cells off, first {bad[:3]}"
 sw = [dict(id="marker-a", kind="marker", row=0, col=0, len=1), dict(id="calib", kind="calib", row=0, col=50, len=1),
       dict(id="marker-b", kind="marker", row=0, col=cols-1, len=1)]
 json.dump(dict(cols=cols, rows=rows, swatches=sw), open(f"{out}/frame.json", "w"), indent=1)
-print(f"{os.path.basename(out)}: {rows} lines; every character and attribute kept, the histogram untouched, the heatmap changed only in its gradient")
+print(f"{os.path.basename(out)}: {rows} lines; every character and attribute kept, the histogram changed only in its grey, the heatmap only in its gradient and grey")
 PY
 done

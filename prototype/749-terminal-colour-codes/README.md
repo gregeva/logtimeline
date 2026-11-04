@@ -227,6 +227,13 @@ each run showing all ten columns, plain and highlighted, beside one heatmap.
 `e-measure.sh`'s `today` condition shows a run as `ltl` writes it today with
 the background known (`-lbg` on light), the baseline for a light set.
 
+The sets' grey (feature doc § 12.8): `tone.py` writes a `grey` row, #797c81
+on dark and #747474 on light, chosen by the architect. `e-palette.py` writes
+it in place of `s8` and `f244`, and for the bright black the heatmap's scale
+line and percentile markers and the histogram's gridlines are drawn in, so one
+grey draws every line and all secondary text. `t4.tsv` with this row is the
+reference the implementation is held to (feature doc AC4).
+
 ```bash
 ./tone.py --out palettes/t4.tsv
 ./e-outputs.sh <out> palettes/t4.tsv
