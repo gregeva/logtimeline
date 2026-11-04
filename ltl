@@ -242,6 +242,9 @@ my %verbose_section_registry = (
     'read-path' => {
         description => 'The path each file was read by: the generated body above the size threshold, the standard path at or below it and under -D, with the threshold in effect, why a generated body could not be prepared, and what each gate marker resolved to (Issue #721).',
     },
+    'background' => {
+        description => 'The background the output is drawn for: what settled it (-dbg, -lbg, the terminal\'s answer, or not known), the colours written, and each query sent to the terminal with whether it was answered and how long it took (Issue #749).',
+    },
     'heatmap-palette' => {
         description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
     },
@@ -1429,7 +1432,7 @@ use constant TIMESTAMP_DATE_CACHE_MAX => 100;
 my $light_background_given = 0;             # -lbg given
 my $dark_background_given = 0;              # -dbg given; wins over -lbg
 my $light_background = 0;                   # draw for a light background
-my $light_background_source = 'default';    # what settled it: '-dbg' | '-lbg' | 'auto-detect' | 'default'
+my $light_background_source = 'default';    # what settled it: '-dbg' | '-lbg' | 'auto-detect' (the terminal's answer) | 'default' (not known)
 
 # Heatmap data structures
 my $heatmap_enabled = 0;                    # Flag: heatmap mode active
@@ -12363,13 +12366,6 @@ sub convert_duration_to_ms {
     return $step->{per_ms} ? $value / $step->{per_ms} : $value * $step->{ms};
 }
 
-# 1 when the terminal's background is light, from its answer to the
-# background colour query (detect_terminal()); 0 with no answer, with no
-# terminal and on Windows, where -lbg is given explicitly.
-sub detect_light_terminal_background {
-    return detect_terminal()->{background} eq 'light' ? 1 : 0;
-}
-
 # The process's resident memory, in bytes. $site names the caller for the
 # -V memory-usage reading counts, kept only while that section is armed.
 sub get_memory_usage {
@@ -15343,73 +15339,135 @@ sub emit_notices_verbose {
     return;
 }
 
-# The terminal that draws the output, found once, on first use: its name and
-# its background (docs/terminal-output.md § The terminals). The
-# environment names the terminal on the machine ltl runs on; over SSH only the
-# terminal's own answers reach it: its name-and-version reply, an identity
-# reply where one has been measured, its background colour. With no terminal,
-# and on Windows, where ltl does not yet put the console in raw mode, nothing
-# is asked and the background is dark.
+# The terminal that draws the output (docs/terminal-output.md § The
+# terminals). Its background is asked once, on first use, of a terminal on
+# standard input and output in the foreground, on every platform: the query
+# goes through Term::ReadKey, with virtual terminal input on Windows
+# (§ Commands and devices, § Input). Its name comes from the environment, and
+# from the terminal's own answers only the first time something reads a name
+# the environment did not give (features/749-terminal-colour-codes.md D3).
+# Each query sent is recorded for -V background.
 my %terminal_identity_reply = ( '1;95;0' => 'Apple_Terminal', '84;0;0' => 'tmux' );
-my %terminal;
+my ( $terminal_background, $terminal_background_reply, $terminal_name );
+my %terminal_query;    # background | name | identity -> { answered, elapsed_ms }
 
-sub detect_terminal {
-    return \%terminal if %terminal;
-    %terminal = ( name => 'unknown', background => 'dark' );
-    if    ( $ENV{WT_SESSION} )   { $terminal{name} = 'windows-terminal' }
-    elsif ( $^O eq 'MSWin32' )   { $terminal{name} = 'conhost' }
-    elsif ( $ENV{TERM_PROGRAM} ) { $terminal{name} = $ENV{TERM_PROGRAM} }
-    return \%terminal if $^O eq 'MSWin32' || !( -t STDIN && -t STDOUT );
-    open my $tty, '>', '/dev/tty' or return \%terminal;
-    $tty->autoflush(1);
-    my $old_settings = `stty -g 2>/dev/null`;
-    chomp $old_settings;
-    eval {
-        system( 'stty', '-icanon', '-echo', 'min', '0', 'time', '1' ) == 0 or die "stty failed\n";
-        if ( $terminal{name} eq 'unknown' ) {
-            if ( terminal_reply( $tty, "\e[>0q" ) =~ /\eP>\|([^\s\e]+)/ ) {
-                $terminal{name} = $1;
-            } elsif ( terminal_reply( $tty, "\e[>c" ) =~ /\e\[>([\d;]+)c/ && $terminal_identity_reply{$1} ) {
-                $terminal{name} = $terminal_identity_reply{$1};
-            }
-        }
-        # The background's luma (ITU-R BT.709); light above one half. A
-        # component is two or four hex digits.
-        if ( terminal_reply( $tty, "\e]11;?\a" ) =~ m{rgb:([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)}i ) {
-            my @c = map { hex($_) / ( length($_) == 4 ? 65535 : 255 ) } ( $1, $2, $3 );
-            $terminal{background} = 0.2126 * $c[0] + 0.7152 * $c[1] + 0.0722 * $c[2] > 0.5 ? 'light' : 'dark';
-        }
-    };
-    system( 'stty', $old_settings ) if $old_settings;
-    close $tty;
-    return \%terminal;
+# A terminal to ask: standard input and output are one, and the run holds its
+# foreground, so a run sent to the background is not stopped by reading it.
+sub terminal_attached {
+    return 0 unless -t STDIN && -t STDOUT;
+    return 1 if $^O eq 'MSWin32';
+    return POSIX::tcgetpgrp( fileno(STDIN) ) == getpgrp() ? 1 : 0;
 }
 
 # The terminal's answer to a query, read up to its answer to the primary
 # device attributes request sent after it: every terminal answers that one,
 # so a query it ignores costs no wait. Half a second at most.
-sub terminal_reply {
-    my ( $tty, $query ) = @_;
-    print {$tty} $query, "\e[c";
-    my ( $reply, $start ) = ( '', Time::HiRes::time() );
-    my $rin = '';
-    vec( $rin, fileno(STDIN), 1 ) = 1;
-    while ( Time::HiRes::time() - $start < 0.5 ) {
-        next unless select( my $rout = $rin, undef, undef, 0.01 );
-        my $char;
-        last unless sysread( STDIN, $char, 1 );
-        $reply .= $char;
+sub terminal_ask {
+    my ( $name, $query, $answer ) = @_;
+    my $start = Time::HiRes::time();
+    ReadMode('cbreak');
+    notice_windows_vt_input();
+    print STDOUT $query, "\e[c";
+    STDOUT->flush;
+    my $reply = '';
+    while ( ( my $left = 0.5 - ( Time::HiRes::time() - $start ) ) > 0 ) {
+        my $c = ReadKey($left);
+        last unless defined $c;
+        $reply .= $c;
         last if $reply =~ /\e\[\?[\d;]*c\z/;
     }
+    ReadMode('restore');
     $reply =~ s/\e\[\?[\d;]*c\z//;
+    $terminal_query{$name} = {
+        answered   => $reply =~ $answer ? 1 : 0,
+        elapsed_ms => int( ( Time::HiRes::time() - $start ) * 1000 + 0.5 ),
+    };
     return $reply;
 }
 
-# The background the notice surfaces draw for: as -lbg, -dbg or the heatmap's
-# detection settled it, otherwise the terminal's answer.
+# 'light' or 'dark' from the terminal's answer to the background colour query
+# (OSC 11), by its luma (ITU-R BT.709), light above one half; '' with no
+# answer or no terminal to ask. A component is two or four hex digits.
+sub terminal_background {
+    return $terminal_background if defined $terminal_background;
+    $terminal_background = '';
+    return $terminal_background unless terminal_attached();
+    my $colour = qr{\e\]11;rgb:([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)}i;
+    if ( terminal_ask( background => "\e]11;?\a", $colour ) =~ $colour ) {
+        $terminal_background_reply = "$1/$2/$3";
+        my @c = map { hex($_) / ( length($_) == 4 ? 65535 : 255 ) } ( $1, $2, $3 );
+        $terminal_background = 0.2126 * $c[0] + 0.7152 * $c[1] + 0.0722 * $c[2] > 0.5 ? 'light' : 'dark';
+    }
+    return $terminal_background;
+}
+
+# The terminal's name: WT_SESSION (Windows Terminal), Windows without it (the
+# classic console host), TERM_PROGRAM; otherwise, asked once, its
+# name-and-version reply (CSI > 0 q) or an identity reply (CSI > c) measured
+# to name it; 'unknown' when nothing names it.
+sub terminal_name {
+    return $terminal_name if defined $terminal_name;
+    $terminal_name = $ENV{WT_SESSION} ? 'windows-terminal' : $^O eq 'MSWin32' ? 'conhost' : $ENV{TERM_PROGRAM} // '';
+    if ( $terminal_name eq '' && terminal_attached() ) {
+        my $named = qr/\eP>\|([^\s\e]+)/;
+        my $identity = qr/\e\[>([\d;]+)c/;
+        if ( terminal_ask( name => "\e[>0q", $named ) =~ $named ) {
+            $terminal_name = $1;
+        } elsif ( terminal_ask( identity => "\e[>c", $identity ) =~ $identity && $terminal_identity_reply{$1} ) {
+            $terminal_name = $terminal_identity_reply{$1};
+        }
+    }
+    $terminal_name = 'unknown' if $terminal_name eq '';
+    return $terminal_name;
+}
+
+# A Windows console draws the output: Windows Terminal or the classic console
+# host, which only the environment names.
+sub terminal_windows_console {
+    return $ENV{WT_SESSION} || $^O eq 'MSWin32' ? 1 : 0;
+}
+
+# The background the output is drawn for, one setting for the run
+# (features/665-background-setting-global.md § 2): -dbg wins over -lbg, and
+# with neither the terminal's answer settles it; with no answer it is not
+# known, and drawn for as dark. Settled before the title and the informational
+# options, and again once every option is parsed, the terminal asked once.
+sub settle_background {
+    if ($dark_background_given) {
+        ( $light_background, $light_background_source ) = ( 0, '-dbg' );
+    } elsif ($light_background_given) {
+        ( $light_background, $light_background_source ) = ( 1, '-lbg' );
+    } elsif ( my $answer = terminal_background() ) {
+        ( $light_background, $light_background_source ) = ( $answer eq 'light' ? 1 : 0, 'auto-detect' );
+    } else {
+        ( $light_background, $light_background_source ) = ( 0, 'default' );
+    }
+    return;
+}
+
+# -V background (features/749-terminal-colour-codes.md § 13): what settled the
+# background, the colours written, and each query sent to the terminal.
+sub emit_background_verbose {
+    return unless section_requested('background');
+    my %settled_by = ( '-dbg' => '-dbg', '-lbg' => '-lbg', 'auto-detect' => 'terminal', 'default' => 'none' );
+    push @verbose_output, "=== background ===";
+    push @verbose_output, 'background: ' . ( $light_background_source eq 'default' ? '-' : $light_background ? 'light' : 'dark' );
+    push @verbose_output, "settled_by: $settled_by{$light_background_source}";
+    push @verbose_output, 'colours: today';
+    push @verbose_output, 'terminal: ' . ( terminal_attached() ? 'yes' : 'no' );
+    push @verbose_output, 'background_reply: ' . ( $terminal_background_reply // '-' );
+    for my $q (qw(background name identity)) {
+        my $r = $terminal_query{$q};
+        push @verbose_output, "query: $q " . ( $r ? "sent=yes answered=" . ( $r->{answered} ? 'yes' : 'no' ) . " elapsed_ms=$r->{elapsed_ms}" : 'sent=no answered=no elapsed_ms=-' );
+    }
+    push @verbose_output, "=== END background ===";
+    return;
+}
+
+# The background the notice surfaces draw for, as settle_background() settled
+# it: dark when it is not known.
 sub notice_background {
-    return $light_background ? 'light' : 'dark' if $light_background_source ne 'default';
-    return detect_terminal()->{background};
+    return $light_background ? 'light' : 'dark';
 }
 
 # The new style's codes for this run's background (docs/design-language.md
@@ -15420,7 +15478,7 @@ my %notice_style;
 sub notice_style {
     return \%notice_style if %notice_style;
     my $light   = notice_background() eq 'light';
-    my $windows = detect_terminal()->{name} =~ /^(?:windows-terminal|conhost)$/;
+    my $windows = terminal_windows_console();
     my %column  = map { $_->{name} => $_ } @column_colors;
     %notice_style = (
         frame => $light ? "\e[38;5;244m" : "\e[90m",
@@ -18019,6 +18077,22 @@ sub adapt_to_command_line_options {
         Getopt::Long::Configure('no_pass_through');
         apply_output_visibility( !$metrics_declared );
     }
+
+    # The background options are read here too, by their exact names, so the
+    # background is settled before the title and the informational options
+    # draw (features/749-terminal-colour-codes.md AC1); option parsing settles
+    # it again below, the terminal asked once.
+    {
+        my @argv_copy = @ARGV;
+        local $SIG{__WARN__} = sub {};
+        Getopt::Long::Configure( 'pass_through', 'no_auto_abbrev' );
+        Getopt::Long::GetOptionsFromArray( \@argv_copy,
+            'light-background|lbg' => \$light_background_given,
+            'dark-background|dbg'  => \$dark_background_given,
+        );
+        Getopt::Long::Configure( 'no_pass_through', 'auto_abbrev' );
+        settle_background();
+    }
     print_title() if $arg{title} && !section_hidden('title');
 
     # Informational options (--help, --explain, --version) print their output
@@ -18312,12 +18386,7 @@ sub adapt_to_command_line_options {
 
     # The background the output is drawn for, a global style setting: -dbg
     # wins over -lbg whichever comes first, whatever other options are given.
-    # With neither, the terminal may be asked once the readers are known.
-    if ($dark_background_given) {
-        ( $light_background, $light_background_source ) = ( 0, '-dbg' );
-    } elsif ($light_background_given) {
-        ( $light_background, $light_background_source ) = ( 1, '-lbg' );
-    }
+    settle_background();
 
     # Heatmap option processing. A value that names no metric is a file
     # argument (settle_optional_operand) and the heatmap shows duration; a
@@ -18652,14 +18721,6 @@ sub adapt_to_command_line_options {
             $heatmap_udm_config = $resolved->{config};
             $heatmap_metric_map{$heatmap_metric} = { column => undef };
         }
-    }
-
-    # The terminal is asked for its background only when no option settled
-    # it and something will read the answer: the heatmap's gradient, whose
-    # on/off is final here
-    if ( $light_background_source eq 'default' && $heatmap_enabled ) {
-        $light_background = detect_light_terminal_background();
-        $light_background_source = 'auto-detect';
     }
 
     # Bind user-defined histogram metrics to their configs; counting ones are skipped
@@ -26386,6 +26447,8 @@ sub pipeline_render {
     emit_format_registry_verbose();
 
     emit_read_path_verbose();
+
+    emit_background_verbose();
 
     emit_heatmap_palette_verbose();
 

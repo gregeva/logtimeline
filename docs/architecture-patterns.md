@@ -367,7 +367,7 @@ a `defined` test over a zeroed total reads "observed" when nothing was
 - `adapt_to_command_line_options` :: `$session_capture_demand = ( !$hide_session || $write_messages_to_csv ) ? 1 : 0;` and its user twin
 - `adapt_to_command_line_options` :: `$index_capture_demand = $no_index ? 0 : 1;`
 - `read_and_process_logs` :: `if ($index_capture_demand) {`
-- `adapt_to_command_line_options` :: `if ( $light_background_source eq 'default' && $heatmap_enabled ) {`: the terminal is asked for its background only when no option settled it and a reader is active, after the heatmap's on/off is final (`features/665-background-setting-global.md`). Not per-line; the same shape for a query with a side effect on the terminal.
+- `terminal_name` :: `if ( $terminal_name eq '' && terminal_attached() ) {`: the terminal's name is asked of the terminal only when a reader needs a name the environment did not give, and no reader does today (`features/749-terminal-colour-codes.md` D3). Not per-line; the same shape for a query with a side effect on the terminal.
 
 **Owning record.** `features/516-bytes-aggregate-demand-gate.md` D1 and D2;
 `features/616-gated-mean-derivation.md` D30 (a metric is processed only when a
@@ -724,7 +724,7 @@ which is the cost a flag exists to bound.
 - `adapt_to_command_line_options` :: `$message_cut_marked = $position eq 'right' ? 0 : 1;`: `-mt left` or `center`, where a cut key carries the ellipsis; read by the grouping passes, which keep it literal in the derived pattern (`keep_ellipsis_in_mask`) and group only keys carrying the same number of them (`cut_markers_match`) (`features/564-message-truncation-position.md`).
 - `adapt_to_command_line_options` :: `$memory_readings_active = section_requested('memory-usage') ? 1 : 0;`: each memory reading is counted and timed only while `-V memory-usage` is armed (`-mem debug` requests it); `get_memory_usage` and `get_kept_peak_memory` test the flag and nothing else (`features/memory-tracking-improvements.md` § -V memory-usage section contract).
 - `pipeline_detect` :: `$kept_peak_readable = resolve_kept_peak_reading();`: whether the peak the operating system keeps for the process can be read, settled once as the pipeline starts rather than with the options, since the notice that it cannot (macOS without `BSD::Resource`) is a runtime condition the options review must not put to the analyst; `read_run_peak_memory` tests it at each moment a peak is reported, and `measure_memory_structures` takes no reading between steps without `-mem` unless the peak is unreadable (`return unless $show_memory || !$kept_peak_readable;`) (`features/memory-tracking-improvements.md` § Issue #709, D1 and D2).
-- `adapt_to_command_line_options` :: `if ($dark_background_given) {`: the background the output is drawn for, a global style setting settled outside any feature's block, `-dbg` over `-lbg` (`features/665-background-setting-global.md`).
+- `settle_background` :: `if ($dark_background_given) {`: the background the output is drawn for, a global style setting settled outside any feature's block, `-dbg` over `-lbg`, and with neither the terminal's answer, asked of every run in a terminal since every colour reads it (`features/665-background-setting-global.md`, `features/749-terminal-colour-codes.md` AC1).
 
 **Owning record.** This entry.
 

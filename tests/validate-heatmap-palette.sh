@@ -21,7 +21,10 @@
 # explicitly forbids). The section reports the gradient array that
 # print_heatmap_row() will use, plus the provenance of the light_bg flag,
 # so this harness can guard the -lbg / -dbg / auto-detect / default
-# branches and the -dbg-wins-over-lbg precedence rule. The background is a
+# branches and the -dbg-wins-over-lbg precedence rule. auto-detect is the
+# terminal's answer and default a background not known
+# (features/749-terminal-colour-codes.md § 13); the terminal is asked in
+# tests/validate-background.sh, and every run here is piped. The background is a
 # global setting, so these hold with no heatmap drawn as with one (Issue #665).
 
 set -euo pipefail
@@ -219,9 +222,10 @@ scenario_no_heatmap() {
 # ---------------------------------------------------------------------------
 # The background setting is global (features/665-background-setting-global.md
 # acceptance criteria AC1 to AC4): -lbg and -dbg settle the same way whether
-# or not a heatmap is requested, and the terminal is queried only for a
-# heatmap that will be drawn. Each run has no heatmap, or one switched off at
-# option settlement, so the section reports heatmap_active: no.
+# or not a heatmap is requested. A run in a terminal asks it, a piped run does
+# not (features/749-terminal-colour-codes.md AC1). Each run has no heatmap,
+# or one switched off at option settlement, so the section reports
+# heatmap_active: no.
 # ---------------------------------------------------------------------------
 
 # Args: scenario_name, ltl_args, expected_light_bg ("no"|"yes"), expected_source
@@ -253,9 +257,9 @@ scenario_background() {
 
     assert_line "$out" \
         pattern     "^light_bg_source: ${exp_source}\$" \
-        asserts     "light_bg_source reports the provenance of the setting (${exp_source}) with no heatmap drawn; precedence: -dbg > -lbg > auto-detect > default, and auto-detect only when a reader of the setting is active" \
-        produced_by 'adapt_to_command_line_options() in ltl (background settlement; terminal query gated on a drawn heatmap)' \
-        contract    'features/665-background-setting-global.md section 2 - the terminal is queried only when something will read the result'
+        asserts     "light_bg_source reports the provenance of the setting (${exp_source}) with no heatmap drawn; precedence: -dbg > -lbg > auto-detect > default, auto-detect only when the terminal answered and default when the background is not known" \
+        produced_by 'settle_background() in ltl' \
+        contract    'features/665-background-setting-global.md section 2 (the four values); features/749-terminal-colour-codes.md section 13 (auto-detect is the terminal answer, default a background not known)'
 }
 
 # ---------------------------------------------------------------------------
@@ -316,7 +320,7 @@ scenario_palette() {
     assert_line "$out" \
         pattern     "^light_bg_source: ${exp_source}\$" \
         asserts     "light_bg_source reports the provenance of the light_bg decision (${exp_source}); precedence: -dbg > -lbg > auto-detect > default" \
-        produced_by 'adapt_to_command_line_options() in ltl - background settlement, and the terminal query gated on a drawn heatmap' \
+        produced_by 'settle_background() in ltl' \
         contract    'Issue #250 - \$light_background_source is the canonical provenance signal; the four enumerated values are the only valid emissions'
 
     assert_line "$out" \
@@ -604,7 +608,8 @@ echo ""
 scenario_background "no-heatmap-lbg" "-lbg" "yes" "-lbg"
 echo ""
 # A counting user-defined metric switches the heatmap off at option
-# settlement, so nothing reads the background and the terminal is not queried
+# settlement; piped and with no option, nothing is asked and the background is
+# not known
 scenario_background "no-query-heatmap-off" "-udm m::distinct:/(\w+)/ -hm m" "no" "default"
 echo ""
 
