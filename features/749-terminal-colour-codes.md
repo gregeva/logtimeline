@@ -2112,15 +2112,15 @@ closes #683 as resolved by this issue (D4).
     drawn by `ltl`, not the rewriter, and held to the set by the harness).
 - **Drop 5** (4b57fd02 on the issue branch, 4f4df5f6 on `release/0.20.0`,
   2026-11-04): the documents and the screenshots, AC12 and AC13.
-  - The `-lbg` and `-dbg` rows of `--help` and `docs/usage.md` name the
-    colour set for all output, whatever the terminal reports; the usage
-    prose says the terminal is asked on every platform, that a terminal
-    that does not answer gets the standard colours, and that a value over a
-    bar is black or white. `tests/validate-help-content.sh` passes (114).
-  - The heatmap explain text (`ltl` and `docs/explain/heatmap.md`) says the
-    gradient is 24-bit when the background is known;
-    `tests/validate-explain.sh` (728) and `tests/validate-doc-examples.sh`
-    (51, 10 skipped) pass.
+  - The `-lbg` and `-dbg` rows of `--help` and `docs/usage.md`, their usage
+    prose and examples, and the heatmap explain text's examples say what
+    each option does, for all output: colours suited to a light, or a dark,
+    terminal background (dcf53139). A first wording explained the colour
+    sets, the terminal query and the text over bars; the architect: "The
+    documentation is clearly about the usage of the tool. We are not
+    describing internal decisions or how things are rendered in the tool."
+    `tests/validate-help-content.sh` (114), `tests/validate-explain.sh`
+    (728) and `tests/validate-doc-examples.sh` (51, 10 skipped) pass.
   - Every entry of `process/screenshots.yaml` regenerated (11 entries, 13
     images): each draws the dark set its `-dbg` stands for, each was looked
     at, nothing identifying beyond the banner the images already carried.
