@@ -1739,8 +1739,9 @@ toward white.
     `--explain contribution-highlighting` (50 lines) likewise. In a 64-row
     window the same explain page printed directly, in the set.
   - **What it means:** neither today's colours nor the sets reach `--help` in
-    a Windows terminal. No record states what `--help` should look like
-    there, so this is an observation, raised with the architect.
+    a Windows terminal.
+  - **The architect, 2026-11-04:** not a bug, and not filed. "help is
+    monochrome anyway - that is a design choice."
 - **FATAL is drawn in ERROR's red, so its highlighted count reads as ERROR's.**
   - **Where:** the `levels` run's 11:30 legend shows `30` and `5645`
     unlabelled, on one red fill.
@@ -2290,7 +2291,8 @@ closes #683 as resolved by this issue (D4).
   `before` benchmark was taken there, and the harnesses run there and on
   Linux only. Restore the version and regenerate the screenshots at it
   (drop 5), take the `after` benchmark, then run the full suite.
-- Open with the architect (§ 14.5): whether to file `--help`'s missing
-  colour on Windows, and the notice browser's lost `q`.
+- Open with the architect (§ 14.5): whether to file the notice browser's
+  lost `q`. `--help` without colour on Windows is a design choice, not filed
+  (architect, 2026-11-04).
 - State outside the repository: none needed; the captures are remade by the
   instruments.
