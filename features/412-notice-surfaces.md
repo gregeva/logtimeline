@@ -1231,7 +1231,25 @@ browser setting it through the layered ask.
 
 ## Open items
 
-- None. Each producer's immediacy and visibility are set at its migration.
+- **Reopened (architect, 2026-11-04): on Windows, a `q` sent half a second
+  after Esc is lost in the browser.**
+  - **The criterion** (§ Acceptance criteria, Browser): "Esc back one layer,
+    Esc and c closing, q and x quitting".
+  - **The run:** measured in Windows Terminal on One Half Light, 34 rows,
+    while validating #749 (two 24-bit colour sets; its feature doc § 14.5),
+    with `--notice-fixture browser-many`:
+    1. Keys Down, 7, Up, Up, Enter open a notice's options over the browser.
+    2. Esc takes the browser back.
+    3. A `q` sent 0.5 s later leaves the browser open.
+  - **How often:** 3 of 3 tries, with #749's `ltl` and with the 0.20.0 base
+    alike. A `q` about 0.8 s after Esc quits. In one earlier try, the browser
+    had also moved to the tab before.
+  - **The harness:** `tests/validate-notices.sh`'s tmux scenarios send the
+    same keys with the same half-second gap.
+  - **Why here:** the browser has shipped in no release (drop 5, cfa8619c,
+    after v0.19.0), so the fix is delivered on this issue
+    (`docs/process/issues.md` § Issue conventions).
+- Each producer's immediacy and visibility are set at its migration.
 
 ## Acceptance criteria
 
