@@ -17,7 +17,8 @@ fills; the notice surfaces brought into the sets, analysed from the code
 #797c81 on dark and #747474 on light (§ 12.8); acceptance criteria
 written (§ Acceptance criteria); Windows in scope with macOS, `ltl` asking
 the terminal there too (D2); the terminal's name asked only when something
-reads it (D3); the notice surfaces drawn in the three conditions, their
+reads it (D3); a value over a bar black or white in every condition, resolving
+#683 (D4); the notice surfaces drawn in the three conditions, their
 light category colours chosen from the gradients and the dark set's notice
 colours validated (§ 12.9).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
@@ -150,6 +151,19 @@ up, for the architect to decide) is met by § 4 to § 12.
   - The background is asked on every run in a terminal. The name queries
     stay in `ltl`, sent the first time something reads a name the
     environment did not give.
+
+- **D4 (architect, 2026-11-04): a value over a bar is black or white,
+  whichever reads, whether the background is known or not; this issue
+  resolves #683 (a value drawn over a bar keeps a fixed foreground colour,
+  unreadable on dark bars).** The architect: "this issue fixes 683, but way
+  better and comprehensively, it should be closed out as resolved by this
+  issue once it ships."
+  - The fills are fixed 256-colour codes, the same in every condition, so
+    the text that reads over a fill does not depend on the background.
+  - What it changes in D1 amended: when the background is not known, `ltl`
+    keeps today's colours except the text over a fill.
+  - #683 is closed as resolved by this issue when it ships, at this issue's
+    close-out.
 
 ## 3. Records found by search
 
@@ -1569,9 +1583,11 @@ together they show every surface (§ 10).
         adds to a run in Terminal.app is measured and recorded here;
         Windows' is in `docs/terminal-output.md` (35 to 49 ms).
       - Assertable.
-- [ ] **AC2: background not known, today's colours byte for byte.**
+- [ ] **AC2: background not known, today's colours byte for byte, but for
+      the text over a fill (D4).**
       - Every run whose background is not known writes what the base commit
-        writes, faint on the notice surfaces included.
+        writes, faint on the notice surfaces included. The one exception is
+        the text over a fill, which AC5 sets.
       - Paths, the subs that write colour (research § 1.3, § 1.4):
         `print_bar_graph`, `print_heatmap_row`,
         `print_heatmap_footer_scale`, `render_histogram_row`,
@@ -1622,17 +1638,24 @@ together they show every surface (§ 10).
         validated sets, independent of `ltl`'s own, as
         `tests/validate-heatmap-palette.sh` mirrors the gradients.
       - Assertable.
-- [ ] **AC5: a value over a bar is black or white, whichever reads.**
+- [ ] **AC5: a value over a bar is black or white, whichever reads, in
+      every condition (D4).**
       - Text over a fill is written `38;5;16` or `38;5;231`, whichever has
-        the higher contrast with that fill.
+        the higher contrast with that fill. That holds with the dark set,
+        with the light set, and when the background is not known.
+      - #683's surfaces are all covered: the metric columns, among them the
+        user-defined metrics, users, sessions and duration; the legend's
+        highlighted and failure counts.
       - Where: the metric columns' bars, plain and highlighted; the legend's
         highlighted counts; the run summary's contribution bars; the latency
         column's CV cell.
       - Not covered: the histogram's percentile band keeps index 0, as the
         histogram keeps its codes (§ 12.6). The pause prompt's text stays
         the default foreground over the set's blue (§ 12.3).
-      - Validation: the `fills` run, with `-dbg` and with `-lbg`. For every
-        column, both fills' text is the one that reads better.
+      - Validation: the `fills` run with `-dbg`, with `-lbg` and piped with
+        neither. For every column, both fills' text is the one that reads
+        better. #683's reproduction (user-defined metrics over the blue and
+        dark red fills, `-hl -ho -bs 1d`) is run piped.
       - Assertable.
 - [ ] **AC6: each highlighted fill stands apart from its plain fill.**
       - The blue column's highlighted fill is 27 in the timeline and the run
@@ -1766,14 +1789,15 @@ on `749-24-bit-colour-sets` once runs before and after it show it behaves.
 |---|---|---|
 | 0 | Before code: the `before` benchmark on the base commit; `$version_number` stamped `0.20.0-749`; `decode_line` reads `38;2` and `48;2` as colours; `e-palette.py` gains § 12.8's greys, for AC4's comparison | none |
 | 1 | The background: asked on every run in a terminal, Windows included (Term::ReadKey with virtual terminal input); the name queries sent only when read (D3); `--help` and `--explain` settle it too; `-V` reports what settled it, the queries sent and the colours written | AC1, AC3; AC2 holds |
-| 2 | The sets: the validated sets in `ltl` as one table of roles, and three palettes (today's, dark, light) resolved once the background is settled. This drop covers: the timeline, the run summary, the message and thread-pool tables, the banner, help and explain, the progress lines and the pause prompt; black or white over a fill; blue's highlight 27; one grey for every line, the heatmap's and the histogram's included; bold in the set's emphasis colour; the summary's bar found for a 24-bit category | AC2, AC4 (the gradients and the notices aside), AC5, AC6, AC8, AC10, AC11 |
+| 2 | The sets: the validated sets in `ltl` as one table of roles, and three palettes (today's, dark, light) resolved once the background is settled. This drop covers: the timeline, the run summary, the message and thread-pool tables, the banner, help and explain, the progress lines and the pause prompt; black or white over a fill in every condition (D4); blue's highlight 27; one grey for every line, the heatmap's and the histogram's included; bold in the set's emphasis colour; the summary's bar found for a 24-bit category | AC2, AC4 (the gradients and the notices aside), AC5, AC6, AC8, AC10, AC11 |
 | 3 | The heatmap's gradients in 24-bit; `-V heatmap-palette` reports the steps written | AC7 |
 | 4 | The notice surfaces from the sets (§ 12.9); the dimmed layer keeps every colour | AC9 |
 | 5 | The documents (the `-lbg` and `-dbg` rows, `docs/terminal-output.md`, `docs/design-language.md`, the records of the Windows block) and every screenshot regenerated | AC12, AC13 |
 | 6 | On the Windows host: Windows Terminal on One Half Light and Campbell, and the classic console, with no option; the runs read as in § 11 | AC14 |
 
 Then the completion gate (the `after` benchmark, then the full suite), the
-PR and the close-out with its release-notes bullet.
+PR and the close-out with its release-notes bullet. The close-out also
+closes #683 as resolved by this issue (D4).
 
 ## Resuming
 
