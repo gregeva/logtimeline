@@ -1533,6 +1533,53 @@ the guidance tab was.
   are kept whole, and only a weight code standing alone is dropped. The pages
   were recaptured, and no bright background remains on any of them.
 
+## 13. The `-V background` section (AC3)
+
+The contract, written before the code from `tests/HARNESS-DESIGN.md`
+(§ Naming rules, § Content shape). The section is named for what it makes
+observable, the background the output is drawn for. It is emitted whenever it
+is requested and is asserted by `tests/validate-background.sh`.
+
+```
+=== background ===
+background: dark|light|-
+settled_by: -dbg|-lbg|terminal|none
+colours: dark|light|today
+terminal: yes|no
+background_reply: <the terminal's colour reply, as rgb:R/G/B>|-
+query: background sent=yes|no answered=yes|no elapsed_ms=<N>|-
+query: name sent=yes|no answered=yes|no elapsed_ms=<N>|-
+query: identity sent=yes|no answered=yes|no elapsed_ms=<N>|-
+=== END background ===
+```
+
+- `background`: the background the output is drawn for, `-` when it is not
+  known.
+- `settled_by`: what settled it. `-dbg` or `-lbg` is the option, `-dbg`
+  winning when both are given. `terminal` is the terminal's answer to the
+  colour query. `none` means it is not known: no terminal, or no answer.
+- `colours`: the colours written. `dark` or `light` is the validated set,
+  written when the background is known; `today` is `ltl`'s own codes, written
+  when it is not. Until drop 2 writes the sets, every run reports `today`.
+- `terminal`: `yes` when standard input and standard output are both a
+  terminal and the run is in its foreground, the condition for asking.
+- `background_reply`: the colour the terminal answered, as it wrote it after
+  `rgb:`, or `-`.
+- `query`: one line per query `ltl` can send, in this order: the background
+  colour (OSC 11), the name and version (CSI > 0 q), the identity (CSI > c).
+  `sent` says whether it was sent on this run, `answered` whether a reply came
+  before the answer to the device attributes request that follows it, and
+  `elapsed_ms` the time from sending to the end of the reply, in whole
+  milliseconds, `-` when not sent. D3 holds when no run sends `name` or
+  `identity`.
+
+`-V heatmap-palette` keeps `light_bg` and `light_bg_source` and their four
+values (`features/665-background-setting-global.md` § 2). `auto-detect` now
+means the terminal answered (`settled_by: terminal`) and `default` that the
+background is not known (`settled_by: none`). Before, `auto-detect` was
+written for every heatmap run with no option, whether or not a reply came
+(§ 8.2).
+
 ## Acceptance criteria
 
 Agreed by the architect on 2026-11-04: "I agree the acceptance criteria and
@@ -1616,7 +1663,7 @@ together they show every surface (§ 10).
       - Today `light_bg_source: auto-detect` is written whether or not a
         reply came (§ 8.2).
       - The section contract is written here before code, from
-        `tests/HARNESS-DESIGN.md`.
+        `tests/HARNESS-DESIGN.md`: § 13, `-V background`.
       - Validation: AC1's scenarios read it.
       - Assertable.
 
