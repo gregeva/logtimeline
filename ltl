@@ -62,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.20.0";
+my $version_number = "0.20.0-412";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -15890,15 +15890,23 @@ sub notice_windows_vt_input {
 
 # One key, decoded: 'up', 'down', 'left', 'right', 'enter', 'esc', 'tab',
 # 'shift-tab', 'pgup', 'pgdn', or the character; undef when the timeout passes.
+# Esc is told from a key's escape sequence by the character after it: one
+# that starts no sequence is the next key, pressed straight after Esc or
+# delivered with it, and is the next read's key.
+my $notice_next_key;
 sub notice_read_key {
     my ($timeout) = @_;
-    my $c = ReadKey( defined $timeout ? $timeout : 0 );
+    my $c = $notice_next_key // ReadKey( defined $timeout ? $timeout : 0 );
+    undef $notice_next_key;
     return undef unless defined $c;
     return 'enter' if $c eq "\n" || $c eq "\r";
     return 'tab'   if $c eq "\t";
     return $c unless $c eq "\e";
     my $n = ReadKey(0.05);
-    return 'esc' unless defined $n && ( $n eq '[' || $n eq 'O' );
+    unless ( defined $n && ( $n eq '[' || $n eq 'O' ) ) {
+        $notice_next_key = $n;
+        return 'esc';
+    }
     my $seq = '';
     while ( defined( my $d = ReadKey(0.05) ) ) {
         $seq .= $d;
