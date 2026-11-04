@@ -5,7 +5,8 @@ D1's rewrite of ltl's output for a known background, cell by cell, by the
 roles of a palette file design.py writes:
 - the histogram block (from its "Distribution" title to its percentile
   lines) keeps every code ltl writes, but for bright black (its gridlines),
-  which takes the set's grey;
+  which takes the set's grey, and the text over a fill (the highlighted
+  percentile row), which is black or white, whichever reads (feature doc D5);
 - in the heatmap's columns (right of the timeline's last separator, from the
   header to the scale footer), a cell drawn in a step of the heatmap's
   gradient takes the set's colour for that step (g<name>), and one in bright
@@ -146,8 +147,12 @@ def rewrite(text, pal, count):
     for r, c, g, st in cells:
         if hist(r, c):
             new = st
+            fill = num(st["bg"], "48")
             if "grey" in pal and bright_black(st["fg"]):
                 new = dict(st, fg=code("38", pal["grey"])); count["histogram grey"] += 1
+            elif fill is not None and fill >= 16 and not ro.graphic(g):
+                f = rgb(fill); t = 16 if cr((0, 0, 0), f) >= cr((255, 255, 255), f) else 231
+                new = dict(st, fg=code("38", t)); count["histogram text over a fill"] += 1
         elif heat(r, c):
             new = dict(st)
             ink = num(st["fg"], "38")

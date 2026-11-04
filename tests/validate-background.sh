@@ -199,11 +199,13 @@ assert_settled() {
         asserts     "terminal reports whether standard input and output are a terminal in the foreground (${terminal}), the condition for asking" \
         produced_by 'terminal_attached() in ltl' \
         contract    "$C_SECTION"
+    local colours=today
+    [[ "$bg" != '-' ]] && colours="$bg"
     assert_line "$SECTION" \
-        pattern     '^colours: today$' \
-        asserts     "colours reports ltl's own codes: no colour set is written yet" \
-        produced_by 'emit_background_verbose() in ltl' \
-        contract    "$C_SECTION"
+        pattern     "^colours: ${colours}\$" \
+        asserts     "colours reports the colours written (${colours}): the set for the background when it is known, ltl's own codes (today) when it is not" \
+        produced_by 'resolve_colour_set() in ltl' \
+        contract    "$C_SECTION; $DOC AC2, AC4"
 }
 
 # assert_query NAME SENT ANSWERED CONTRACT: one query line.

@@ -448,17 +448,23 @@ check_every_category_has_a_fill() {
         my ($table)  = $src =~ /(^my %colors = \(.*?^\);)/ms;
         my ($bars)   = $src =~ /(^my \@column_colors = \(.*?^\);)/ms;
         my ($resolve)= $src =~ /(^sub summary_bar_color \{.*?^\}$)/ms;
+        # The resolver reads the hue of a category from the codes ltl
+        # writes when the background is not known, kept beside the tables a
+        # colour set rewrites.
+        my ($today)  = $src =~ /(^my %colors_today = %colors;$)/m;
+        my ($cols_today) = $src =~ /(^my \@column_colors_today = .*;$)/m;
         my %part = ( "\@log_levels" => $levels, "%colors" => $table,
                      "\@column_colors" => $bars,
+                     "%colors_today" => $today, "\@column_colors_today" => $cols_today,
                      "summary_bar_color()" => $resolve );
         my @missing = sort grep { !defined $part{$_} } keys %part;
         if (@missing) {
             print "could not read out of ltl: @missing\n";
             exit 1;
         }
-        s/^my // for ($levels, $table, $bars);
-        our (@log_levels, %colors, @column_colors, %bar_entry_by_hue);
-        eval "$levels\n$table\n$bars\n$resolve; 1"
+        s/^my // for ($levels, $table, $bars, $today, $cols_today);
+        our (@log_levels, %colors, @column_colors, %colors_today, @column_colors_today, %bar_entry_by_hue);
+        eval "$levels\n$table\n$bars\n$today\n$cols_today\n$resolve; 1"
             or do { print "could not evaluate the colour tables: $@\n"; exit 1 };
 
         # Categories that reach the summary table, excluding the derived rate
@@ -474,12 +480,11 @@ check_every_category_has_a_fill() {
             }
             my $entry = summary_bar_color($category);
             unless ($entry) { push @without, "$category (no bar-table entry)"; next }
-            # The fill the renderer reads must invert: a background paired
-            # with the black foreground the timeline bars use.
+            # The fill the renderer reads must invert: a background, the
+            # text over it set black or white once the colours are resolved
+            # (asserted on the render by tests/validate-colour-sets.sh).
             push @without, "$category (fill carries no background)"
                 unless $entry->{highlighted_bg} =~ /48;5;\d+m/;
-            push @without, "$category (fill does not blacken the text)"
-                unless $entry->{highlighted_bg} =~ /38;5;0m/;
         }
         if (@without) {
             print "categories with no usable bar fill: @without\n";
@@ -587,7 +592,7 @@ echo "[$current_scenario]"
 assert_command \
     command     "check_every_category_has_a_fill '$LTL'" \
     label       'every category colour resolves to a bar fill that inverts' \
-    asserts     'The bar is drawn with the bar-colour table entry for the hue of the category colour, so a category that resolves to no entry would render with no bar at all — silently, and only for that category. The entry must invert: a background paired with a black foreground, which is what keeps the row readable on a dark terminal and on a light one, since the terminal supplies the surrounding foreground.' \
+    asserts     'The bar is drawn with the bar-colour table entry for the hue of the category colour, so a category that resolves to no entry would render with no bar at all — silently, and only for that category. The entry must invert: a background, with text over it black or white, whichever reads on it (features/749-terminal-colour-codes.md D4), which is what keeps the row readable on a dark terminal and on a light one.' \
     produced_by 'summary_bar_color() in ltl, resolving a category colour against @column_colors' \
     contract    'features/448-category-summary-share-and-bar.md § D2 — the bar uses the same bar mechanism and colour table as the timeline columns'
 

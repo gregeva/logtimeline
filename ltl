@@ -1973,34 +1973,63 @@ my %colors = (
 # Bright 8 Colors: Uses codes like \e[90m for bright black (grey), \e[91m for bright red, etc.
 # 256 Colors: Uses codes like \e[38;5;<color_code>m for foreground and \e[48;5;<color_code>m for background.
 # True Color (24-bit): Uses codes like \e[38;2;<r>;<g>;<b>m for foreground and \e[48;2;<r>;<g>;<b>m for background.
-# Dynamically create new keys with -HL for highlighted versions of each color
-foreach my $key (keys %colors) {
-    next if $key eq 'NC';
-    my $new_key = "$key-HL";
-    my $original_fg_color = $colors{$key};
-    $original_fg_color =~ s/^\e\[(.*?)m/$1/g;
-
-    my $bg_color_256;
-    my $has_background = 0;
-    if ($original_fg_color eq "0;31") {    # Red
-        $bg_color_256 = "196";            # 256-color code for Red
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;33") { # Yellow
-        $bg_color_256 = "226";            # 256-color code for Yellow
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;32") { # Green
-        $bg_color_256 = "46";             # 256-color code for Green
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;34") { # Blue
-        $bg_color_256 = "21";             # 256-color code for Blue
-        $has_background = 1;
-    } elsif ($original_fg_color eq "0;35") { # Magenta
-        $bg_color_256 = "201";            # 256-color code for Magenta
-        $has_background = 1;
+# The highlighted twin of each colour, "<key>-HL": the colour over the bright
+# fill of its hue for the five category hues that have one, otherwise the
+# colour alone. Its text is black or white, whichever reads on the fill
+# (features/749-terminal-colour-codes.md D4); a glyph drawn in the twin keeps
+# the colour (%highlight_glyph_colors). Built here from ltl's own codes, and
+# again from the set's when the background is known (resolve_colour_set).
+my %highlight_fill_of = ( '0;31' => 196, '0;33' => 226, '0;32' => 46, '0;34' => 21, '0;35' => 201 );
+my %highlight_glyph_colors;
+sub build_highlight_twins {
+    my ($today) = @_;
+    for my $key ( grep { $_ ne 'NC' && !/-HL$/ } keys %$today ) {
+        ( my $code = $today->{$key} ) =~ s/^\e\[(.*?)m/$1/g;
+        my $fill = $highlight_fill_of{$code};
+        $highlight_glyph_colors{"$key-HL"} = defined $fill ? $colors{$key} . colour_fill_sgr($fill) : "$colors{$key}\033[49m";
+        $colors{"$key-HL"} = defined $fill ? $colors{$key} . colour_fill_sgr($fill) . colour_fill_text_sgr($fill) : "$colors{$key}\033[49m";
     }
-
-    $colors{$new_key} = $has_background ? "$colors{$key}\033[48;5;${bg_color_256}m" : "$colors{$key}\033[49m";       # allows specifying background for some highlighted colors only
+    return;
 }
+
+# The two colour sets, one for a dark and one for a light background, by role,
+# as the architect validated them (features/749-terminal-colour-codes.md § 12:
+# palettes/t4.tsv on the issue branch, with § 12.8's grey). A value is a
+# 256-colour index or a 24-bit #rrggbb.
+#   s<i>   the sixteen scheme colours ltl writes as basic and bright codes, by
+#          index (30-37 and 90-97, and 38;5;i below 16); bright black, s8, is
+#          the grey
+#   f<N>   ltl's fixed 256-colour text codes the set moves (38;5;N); grey 244
+#          is the grey
+#   e      bold over the default foreground
+#   b<N>   a fill the set moves (48;5;N): blue's highlighted fill
+#   grey   every line and all secondary text (§ 12.8)
+my %colour_sets = (
+    dark => {
+        s1 => '#d57464', s2 => '#6caa71', s3 => '#c4ac62', s4 => '#719bb9', s5 => '#bf7dcf', s6 => '#7ccbcd', s7 => '#dee5eb',
+        s9 => '#e87461', s10 => '#79be7e', s11 => '#e5c872', s12 => '#67b5ed', s13 => '#d389e5', s14 => '#84dde0', s15 => '#e5eff5',
+        f34 => 34, f160 => '#f53629', f111 => 111, f44 => 44, f178 => 178, f135 => '#b776ff', f208 => 208, f213 => 213,
+        f43 => 43, f93 => '#9758fe', f30 => '#32a09f', f35 => 35, f29 => '#31a076', f166 => '#ed7327',
+        e => '#f0f0f0', b21 => 27, grey => '#797c81',
+    },
+    light => {
+        s1 => '#b45648', s2 => '#5a9860', s3 => '#a89046', s4 => '#4a799c', s5 => '#a057b1', s6 => '#4fadb0', s7 => '#3a4851',
+        s9 => '#c05140', s10 => '#67ab6d', s11 => '#c8ab55', s12 => '#2986c4', s13 => '#ac65be', s14 => '#5cc8cc', s15 => '#313c44',
+        f34 => '#029202', f160 => 160, f111 => '#6f96e4', f44 => '#03bbbb', f178 => '#b99709', f135 => '#9b48e8', f208 => '#db7302',
+        f213 => '#e36de4', f43 => '#05ba97', f93 => 93, f30 => '#078181', f35 => '#07934f', f29 => '#02845d', f166 => '#c05400',
+        e => '#313c44', b21 => 27, grey => '#747474',
+    },
+);
+# The set written: 'dark' or 'light' once the background is known, undef while
+# it is not, when ltl writes its own codes (resolve_colour_set).
+my $colour_set;
+
+# ltl's own codes, kept to resolve each set from (resolve_colour_set) and to
+# read a category's hue by (summary_bar_color).
+my %colors_today = %colors;
+build_highlight_twins( \%colors_today );
+my @column_colors_today = map { { %$_ } } @column_colors;
+my $histogram_gridline_sgr;
 
 ## SUBS ##
 
@@ -8416,8 +8445,9 @@ sub write_index_file {
 }
 
 sub get_title_string {
+    my ( $lead, $rule ) = map { colour_sgr($_) } ( "\033[0;37m", "\033[90m\033[109m" );
     return <<"END";
-\033[0;37m \033[90m\033[109m
+$lead $rule
 ──────────────────────────────────────────────────────────────────────────────────────────────
    ,:: ltl ::' log timeline [$version_number] --  by Greg Eva // geva\@ptc.com // gregeva\@gmail.com
 ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -8733,12 +8763,15 @@ sub help_ansi_enabled {
 }
 
 sub bs_bold {
-    my ($text) = @_;
+    my ( $text, $over_colour ) = @_;
     # ANSI bold (SGR 1) + reset bold (SGR 22) when the output context can
     # render it; plain text otherwise. The legacy backspace-overstrike
     # form (X\bX) was unreliable in modern terminals (Terminal.app,
-    # iTerm2) which often strip \b.
-    return help_ansi_enabled() ? "\033[1m" . $text . "\033[22m" : $text;
+    # iTerm2) which often strip \b. Over the default foreground, bold takes
+    # the set's emphasis colour; $over_colour keeps the colour in force.
+    return $text unless help_ansi_enabled();
+    my ( $on, $off ) = $over_colour ? ( '', '' ) : colour_emphasis();
+    return "\033[1m$on" . $text . "\033[22m$off";
 }
 
 sub bs_underline {
@@ -9138,7 +9171,9 @@ sub render_paragraph {
 # the source.
 sub render_pre {
     my ($block, $width) = @_;
-    my $text = $block->{text};
+    # An example drawn in colour is built when it is rendered, once the
+    # background, and with it the colours, is settled.
+    my $text = ref $block->{text} eq 'CODE' ? $block->{text}->() : $block->{text};
     $text .= "\n" unless $text =~ /\n\z/;
     return $text;
 }
@@ -9668,8 +9703,7 @@ my $explain_heatmap_compute = q{Cell positions span the full observed value rang
 # from @column_colors{yellow}->{gradient}: [58, 94, 136, 142, 178, 184, 220, 226].
 # Full-block cells use matching fg+bg (38;5;N;48;5;Nm) so adjacent cells
 # render seamlessly on macOS Terminal.
-my $explain_heatmap_example;
-{
+my $explain_heatmap_example = sub {
     # Yellow gradient (-hm duration) from the @column_colors yellow entry.
     # Real ltl renders heatmap cells with foreground color on a `█` block,
     # no background. All cells use the same character so there is no
@@ -9705,7 +9739,7 @@ my $explain_heatmap_example;
     # Percentile marker -- inline `|` in bright-black (ANSI 90, matches
     # real ltl's $colors{'bright-black'} convention) so it stands out
     # against the coloured cells.
-    my $marker = "\e[90m|\e[0m";
+    my $marker = colour_sgr("\e[90m") . "|\e[0m";
 
     # Declarative per-row shape. Each row carries a primary mode (and
     # optionally a secondary mode for bimodal cases). Cell intensities
@@ -9838,8 +9872,8 @@ my $explain_heatmap_example;
     }
     $out_ex .= $left_pad . (' ' x $time_label_w) . join('', @scale_row) . "\n";
 
-    $explain_heatmap_example = $out_ex;
-}
+    return $out_ex;
+};
 
 my $explain_heatmap_flags = <<'END';
     ltl -hm duration access.log                   # duration heatmap (yellow gradient)
@@ -9870,8 +9904,7 @@ my $explain_histogram_compute = q{The histogram uses log-spaced bins with HDR-hi
 # - Bottom border (└─...─┘)
 # - X-axis bucket boundary labels
 # - Percentile legend (P50/P95/P99/P99.9 colored in metric color)
-my $explain_histogram_example;
-{
+my $explain_histogram_example = sub {
     # Yellow gradient (duration metric) color: base yellow = 184.
     my $bar_color  = 184;
     my $tick_color = 184;
@@ -9963,7 +9996,7 @@ my $explain_histogram_example;
                 $line .= "\e[38;5;${bar_color}m▄\e[0m";
             } else {
                 # Empty cell: gridline on tick rows, blank otherwise.
-                $line .= $has_tick ? "\e[38;5;238m─\e[0m" : ' ';
+                $line .= $has_tick ? ( $colour_set ? colour_sgr("\e[90m") : "\e[38;5;238m" ) . "─\e[0m" : ' ';
             }
         }
         $line .= "$right_side$right_lbl\n";
@@ -10011,8 +10044,8 @@ my $explain_histogram_example;
     # per line is the user-tuned offset.
     my $indent = ' ' x 5;
     $hg_out =~ s/^/$indent/mg;
-    $explain_histogram_example = $hg_out;
-}
+    return $hg_out;
+};
 
 my $explain_histogram_flags = <<'END';
     ltl -hg duration access.log                   # duration histogram (single metric)
@@ -10043,8 +10076,7 @@ END
 # green tick on the bright-green highlight background where it also
 # contributed a line the highlight matched. Markers and colours are read
 # from %colors so the example cannot drift from the run.
-my $explain_cross_log_example;
-{
+my $explain_cross_log_example = sub {
     my $marker_none = "$colors{'red'}χ$colors{'NC'}";
     my $marker_hit  = "$colors{'green'}√$colors{'NC'}";
     my $marker_hl   = "$colors{'green-HL'}√$colors{'NC'}";
@@ -10070,8 +10102,8 @@ my $explain_cross_log_example;
         $out .= sprintf("     %s[%s%s] %-*s [%s1%s]%s\n",
                         $w, $r->[0], $w, $name_w, $r->[1], $p, $w, $nc);
     }
-    $explain_cross_log_example = $out;
-}
+    return $out;
+};
 
 # Shared builder for the timeline signals the technique pages render. Draws
 # the rows a run prints: the timestamp, the status legend, the message rate
@@ -10109,7 +10141,7 @@ sub explain_timeline_rows {
         # background the legend twin carries.
         my $hl = $r->[5] // 0;
         $hl = $filled if $hl > $filled;
-        my $bar = ($hl ? $colors{'green-HL'} . ('█' x $hl) . $colors{'NC'} : '')
+        my $bar = ($hl ? $highlight_glyph_colors{'green-HL'} . ('█' x $hl) . $colors{'NC'} : '')
                 . $colors{'green'} . ('█' x ($filled - $hl)) . $colors{'NC'};
         # The empty tail of the bar area is drawn only when columns follow
         # it: a run pads it to keep those columns aligned.
@@ -10142,8 +10174,7 @@ sub explain_timeline_rows {
 # error rate rises forty-fold while the message rate barely moves.
 
 # Window Narrowing: the aperture open over a day, then closed on one hour.
-my $explain_window_narrowing_example;
-{
+my $explain_window_narrowing_example = sub {
     my $out = "  Aperture open — a full day at the default bucket width:\n\n";
     $out .= explain_timeline_rows([
         [ '2026-05-07 00:00', [['yellow','4xx: 72'],['green','2xx: 71.9k']],  '0.6', '600',  10 ],
@@ -10159,14 +10190,13 @@ my $explain_window_narrowing_example;
         [ '2026-05-07 10:30', [['red','5xx: 4'],['yellow','4xx: 8'],['green','2xx: 6.1k']],   '2.4', '1.3k', 11 ],
         [ '2026-05-07 10:45', [['red','5xx: 8'],['yellow','4xx: 277'],['green','2xx: 17.3k']],'28.5','1.8k', 20 ],
     ]);
-    $explain_window_narrowing_example = $out;
-}
+    return $out;
+};
 
 # Resolution Zoom: one hour at three bucket widths. The counts fall as the
 # buckets narrow while the message rate holds — the pair that makes two
 # rungs of the ladder comparable.
-my $explain_resolution_zoom_example;
-{
+my $explain_resolution_zoom_example = sub {
     my $out = "  One hour at the 60-minute default — one row, one total:\n\n";
     $out .= explain_timeline_rows([
         [ '2026-05-07 10:00', [['red','5xx: 10'],['yellow','4xx: 282'],['green','2xx: 21.3k']], '4.9', '362', 13 ],
@@ -10183,13 +10213,12 @@ my $explain_resolution_zoom_example;
         [ '2026-05-07 10:50', [['yellow','4xx: 220'],['green','2xx: 3.5k']], '220', '3.7k', 19 ],
         [ '2026-05-07 10:51', [['yellow','4xx: 3'],['green','2xx: 1.6k']],   '3',   '1.7k', 8 ],
     ]);
-    $explain_resolution_zoom_example = $out;
-}
+    return $out;
+};
 
 # Traffic Load Profiling: a week folded onto one representative day, so the
 # rhythm shows rather than the calendar.
-my $explain_traffic_load_example;
-{
+my $explain_traffic_load_example = sub {
     my $out = "  A week of logs folded onto one representative day:\n\n";
     $out .= explain_timeline_rows([
         [ '00:00', [['green','2xx: 302k']],  '0.5', '598',  6  ],
@@ -10200,8 +10229,8 @@ my $explain_traffic_load_example;
         [ '16:00', [['green','2xx: 458k']],  '0.9', '907',  9  ],
         [ '20:00', [['green','2xx: 213k']],  '0.4', '422',  4  ],
     ]);
-    $explain_traffic_load_example = $out;
-}
+    return $out;
+};
 
 my $explain_window_narrowing_reading = q{The aperture decides what the timeline is a picture of. Open, it shows the whole file at the default bucket width and tells you where to look; closed around a moment, every row is one slice of that moment and the bars rescale to what remains. The move runs both ways, and which way you go depends on what you already have. Given a known error time, open the aperture around it — start an hour before and end an hour after — and read what preceded the error rather than the error itself: a rise in volume, a change in the status mix, a slow climb in duration. Given a spike you can already see, close the aperture onto it and drop everything else, so the rows that were one bar become a dozen. Neither direction is the beginning of the investigation more often than the other. What falsifies the reading: narrowing changes the population, so a rate that rises after the cut has not necessarily risen in the system — the quiet periods that were holding the average down have simply been dropped. Compare a narrowed run against the same figures before the cut, not against your expectation of what normal looks like. The bars, too, are scaled to the largest bucket in view, so the same traffic draws a full-width bar in a quiet window and a short one in a busy one.};
 
@@ -10239,7 +10268,7 @@ END
 # colour, exactly as a run draws it.
 sub explain_message_rows {
     my ($title, $rows) = @_;
-    my $out = " $colors{'cyan'}" . bs_bold(" $title ") . "$colors{'NC'}\n";
+    my $out = " $colors{'cyan'}" . bs_bold( " $title ", 1 ) . "$colors{'NC'}\n";
     $out .= " $colors{'cyan'}" . ('─' x 78) . "$colors{'NC'}\n";
     for my $r (@$rows) {
         my ($mark, $text, $occ, $p50, $total) = @$r;
@@ -10256,8 +10285,7 @@ sub explain_message_rows {
 # Contribution Highlighting: the highlighted run leads each bar, the
 # legend carries the highlighted twin, and the highlighted messages get a
 # table of their own beside the overall one.
-my $explain_contribution_example;
-{
+my $explain_contribution_example = sub {
     my $out = explain_timeline_rows([
         [ '2026-05-07 08:00', [['yellow','4xx: 14'],['green-HL','781'],['green','2xx: 4.2k']], '0.2', '600',  13, 3 ],
         [ '2026-05-07 10:00', [['yellow','4xx: 41'],['green-HL','1.9k'],['green','2xx: 9.1k']],'0.7', '1.2k', 20, 4 ],
@@ -10274,13 +10302,12 @@ my $explain_contribution_example;
         ['kelly-green', '[200] POST /api/v2/orders/submit',      '3.2k', '60ms', '30.1 sec'],
         ['kelly-green', '[200] POST /api/v2/device/properties',  '1.9k', '1ms',  '31 msec'],
     ]);
-    $explain_contribution_example = $out;
-}
+    return $out;
+};
 
 # API Isolation: the timeline containing only the matching lines, clear of
 # everything else. The scale is now that of the isolated call.
-my $explain_api_isolation_example;
-{
+my $explain_api_isolation_example = sub {
     my $out = "  The whole population — one call is 4% of it and invisible:\n\n";
     $out .= explain_timeline_rows([
         [ '2026-05-07 08:00', [['yellow','4xx: 14'],['green','2xx: 20.5k']], '0.2', '600',  13 ],
@@ -10293,13 +10320,12 @@ my $explain_api_isolation_example;
         [ '2026-05-07 10:00', [['yellow','4xx: 31'],['green','2xx: 1.5k']], '0.5', '43.4', 20 ],
         [ '2026-05-07 12:00', [['yellow','4xx: 3'],['green','2xx: 704']],   '0.1', '20.6', 9  ],
     ]);
-    $explain_api_isolation_example = $out;
-}
+    return $out;
+};
 
 # Attribute Isolation: one attribute value held, and the population cut to
 # it, marked within it, or with it removed.
-my $explain_attribute_isolation_example;
-{
+my $explain_attribute_isolation_example = sub {
     my $out = "  Highlighted — the one session inside the whole population:\n\n";
     $out .= explain_timeline_rows([
         [ '2026-05-07 10:00', [['green-HL','318'],['green','2xx: 9.1k']],  '0.4', '1.2k', 20, 1 ],
@@ -10312,14 +10338,13 @@ my $explain_attribute_isolation_example;
         [ '2026-05-07 10:30', [['green','2xx: 1.4k']], '0.2', '23.3', 20 ],
         [ '2026-05-07 11:00', [['green','2xx: 29']],   '0.0', '0.5',  1  ],
     ]);
-    $explain_attribute_isolation_example = $out;
-}
+    return $out;
+};
 
 # Rank then Isolate: the same population ranked two ways. Occurrences names
 # the volume contributors, total duration the time contributors, and they
 # are not the same rows.
-my $explain_rank_then_isolate_example;
-{
+my $explain_rank_then_isolate_example = sub {
     my $out = "  Ranked by occurrences — who is called most:\n\n";
     $out .= explain_message_rows('TOP OVERALL MESSAGES', [
         ['kelly-green', '[200] POST /api/v2/catalog/search',    '12.5k', '1ms',   '13.8 sec'],
@@ -10332,13 +10357,12 @@ my $explain_rank_then_isolate_example;
         ['kelly-green', '[200] POST /api/v2/orders/submit',      '155k', '58ms',   '2.4 hr'],
         ['kelly-green', '[200] POST /api/v2/catalog/search',    '12.5k', '1ms',   '13.8 sec'],
     ]);
-    $explain_rank_then_isolate_example = $out;
-}
+    return $out;
+};
 
 # Outcome Isolation: the failure highlight surfaces failing messages by
 # name, beside an overall table in which they never appear.
-my $explain_outcome_isolation_example;
-{
+my $explain_outcome_isolation_example = sub {
     my $out = explain_message_rows('TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)', [
         ['rosso-corsa', '[404] GET  /favicon.ico',              '57', '0ms', '6 msec'],
         ['rosso-corsa', '[500] POST /api/v2/report/generate',   '16', '1ms', '18 msec'],
@@ -10354,14 +10378,13 @@ my $explain_outcome_isolation_example;
     $out .= "  $colors{'yellow'}4xx Client error (HL)        334 (0.483%)$colors{'NC'}\n";
     $out .= "  $colors{'magenta'}3xx Redirection              589 (0.852%)$colors{'NC'}\n";
     $out .= "  $colors{'green'}2xx Success                 68180 (98.6%)$colors{'NC'}\n";
-    $explain_outcome_isolation_example = $out;
-}
+    return $out;
+};
 
 # Remainder Analysis: the same window before and after one dominant
 # contributor is dropped. The measured effect is on the duration column —
 # ten minutes a bucket becomes twenty seconds — and on every share.
-my $explain_remainder_example;
-{
+my $explain_remainder_example = sub {
     my $out = "  Before — one endpoint owns the time:\n\n";
     $out .= explain_timeline_rows([
         [ '2026-05-07 10:00', [['yellow','4xx: 15'],['green','2xx: 10.5k']],  '1.5', '1.1k', 10 ],
@@ -10380,13 +10403,12 @@ my $explain_remainder_example;
     ]);
     $out .= "    total duration per bucket: 20.4s  20.7s   24.3s   35.1s\n";
     $out .= "    3xx share of all lines:    1.33%\n";
-    $explain_remainder_example = $out;
-}
+    return $out;
+};
 
 # Attribute Surfacing: one consolidated row separating into a row per
 # attribute value once the attribute is kept in the grouping key.
-my $explain_attribute_surfacing_example;
-{
+my $explain_attribute_surfacing_example = sub {
     my $out = "  Consolidated — one row per endpoint:\n\n";
     $out .= explain_message_rows('TOP OVERALL MESSAGES', [
         ['kelly-green', '[200] POST /api/v2/device/properties', '785', '25ms', '33.9 sec'],
@@ -10399,8 +10421,8 @@ my $explain_attribute_surfacing_example;
         ['kelly-green', '[200] [session 1B20…] POST /api/v2/device/…', '378', '21ms', '12.2 sec'],
         ['kelly-green', '[200] [session 9902…] POST /api/v2/device/…', '347', '54ms', '23.2 sec'],
     ]);
-    $explain_attribute_surfacing_example = $out;
-}
+    return $out;
+};
 
 my $explain_contribution_reading = q{A highlight marks part of the population without removing any of it. Three surfaces carry the answer at once. The bars gain a leading run in the highlight colour, so the share a pattern contributes is visible bucket by bucket and you can see whether it is steady or concentrated in one stretch. The legend gains a twin entry carrying the highlighted count beside the family it came from, and the run summary carries the same pair with its percentage. And the matched messages get a table of their own beside the overall one, which is what makes the technique work on small contributors: a pattern that is a fraction of a percent of the traffic will never reach the overall table, but it is the whole of the highlighted one. This is the discovery move, and it is the safer one to make first. Nothing is removed, so every total, rate and share still describes the system; the highlighted figures sit inside them rather than replacing them. Isolation, which cuts the population down, is what you reach for once you know the pattern is worth isolating. What falsifies the reading: the highlight matches line content, so it can only mark what a line says. It cannot mark lines by the file they came from, so a highlight cannot separate a baseline corpus from a current one within a single run.};
 
@@ -10521,8 +10543,7 @@ my @explain_hg_scale = ([1,'1ms'],[13,'5ms'],[25,'24.5ms'],[38,'121.6ms'],[50,'6
 
 # Tail Excursion vs. Distribution Shift: two shapes side by side. A tight
 # body with a thin far tail, against a body that has moved bodily right.
-my $explain_tail_excursion_example;
-{
+my $explain_tail_excursion_example = sub {
     my @excursion = (0) x 64;
     $excursion[$_] = 8 for 6..9;
     $excursion[$_] = 6 for 10..12;
@@ -10546,14 +10567,13 @@ my $explain_tail_excursion_example;
         bars => \@shift, scale => \@explain_hg_scale,
         counts => ['0','2k','4k','6k','8k'],
         percentiles => ['P50: 96ms   P90: 210ms   P95: 265ms   P99: 402ms   P99.9: 580ms'] );
-    $explain_tail_excursion_example = $out;
-}
+    return $out;
+};
 
 # Bimodal Split: two peaks with a valley where the mean sits. Measured on
 # an hour of access log: a spike at a millisecond and a second peak two
 # decades away.
-my $explain_bimodal_split_example;
-{
+my $explain_bimodal_split_example = sub {
     my @bars = (0) x 64;
     $bars[$_] = 8 for 1..3;
     $bars[$_] = 1 for 8..14;
@@ -10565,13 +10585,12 @@ my $explain_bimodal_split_example;
         counts => ['0','7k','13k','20k','27k'],
         percentiles => ['P50: 2ms   P90: 70.3ms   P95: 278.7ms   P99: 1s   P99.9: 1s'] );
     $out .= "\n    The mean falls at 34ms — in the valley, where almost nothing is.\n";
-    $explain_bimodal_split_example = $out;
-}
+    return $out;
+};
 
 # Shape Comparison: the population's ladder and the highlighted subset's,
 # one under the other. Measured on an hour of access log under a highlight.
-my $explain_shape_comparison_example;
-{
+my $explain_shape_comparison_example = sub {
     my @bars = (0) x 64;
     $bars[$_] = 8 for 1..3;
     $bars[$_] = 1 for 8..14;
@@ -10585,13 +10604,12 @@ my $explain_shape_comparison_example;
             'P50: 2ms   P90: 70.3ms   P95: 278.7ms   P99: 1s   P99.9: 1s      (population)',
             '  P50: 1ms   P90: 1ms   P95: 1ms   P99: 1ms   P99.9: 2ms        (highlighted)',
         ] );
-    $explain_shape_comparison_example = $out;
-}
+    return $out;
+};
 
 # Timeout Clustering: a pile at a fixed value rather than a tail. Measured
 # on one endpoint over an hour: every percentile the same second.
-my $explain_timeout_clustering_example;
-{
+my $explain_timeout_clustering_example = sub {
     my @bars = (0) x 64;
     $bars[$_] = 8 for 0..13;
     $bars[$_] = 6 for 51..63;
@@ -10600,13 +10618,12 @@ my $explain_timeout_clustering_example;
         counts => ['0','360','720','1.1k','1.4k'],
         percentiles => ['P50: 1s   P75: 1s   P90: 1s   P95: 1s   P99: 1s   P99.9: 1s'] );
     $out .= "\n    1,950 requests, and the coefficient of variation is 0.\n";
-    $explain_timeout_clustering_example = $out;
-}
+    return $out;
+};
 
 # Period-over-Period Comparison: several periods folded onto one axis, and
 # the same fold over two corpora merged into one run.
-my $explain_period_over_period_example;
-{
+my $explain_period_over_period_example = sub {
     my $out = "  One week, folded — the peaks are this week's:\n\n";
     $out .= explain_timeline_rows([
         [ 'MON 08:00', [['green','2xx: 88k']],  '1.2', '1.4k', 14 ],
@@ -10623,14 +10640,13 @@ my $explain_period_over_period_example;
         [ 'THU 08:00', [['green','2xx: 540k']], '1.2', '1.4k', 15 ],
         [ 'FRI 08:00', [['green','2xx: 601k']], '1.4', '1.6k', 20 ],
     ]);
-    $explain_period_over_period_example = $out;
-}
+    return $out;
+};
 
 # Status Composition Over Time: the per-bucket composition read down the
 # column, and split by a highlight so one call's statuses sit beside the
 # population's. Measured on forty minutes of access log.
-my $explain_status_composition_example;
-{
+my $explain_status_composition_example = sub {
     my $out = "  Composition down the column, with one call highlighted:\n\n";
     $out .= explain_timeline_rows([
         [ '2026-05-07 10:20', [['yellow-HL','2'],['yellow','4xx: 12'],['green-HL','9.6k'],['green','2xx: 939']],  '1.8', '1.1k', 14, 12 ],
@@ -10638,8 +10654,8 @@ my $explain_status_composition_example;
         [ '2026-05-07 10:40', [['yellow-HL','37'],['yellow','4xx: 11'],['green-HL','13.9k'],['green','2xx: 913']], '5.7', '1.5k', 20, 18 ],
         [ '2026-05-07 10:50', [['yellow-HL','216'],['yellow','4xx: 21'],['green-HL','11.5k'],['green','2xx: 994']],'23.9','1.3k', 16, 15 ],
     ]);
-    $explain_status_composition_example = $out;
-}
+    return $out;
+};
 
 # Load Over Time: the thread-pool column and the duration column a run
 # draws after the occurrences bar, read at two bucket widths. Measured on
@@ -10651,8 +10667,7 @@ my $explain_status_composition_example;
 # held requests finish. Each cell's fill is the bucket's share of the
 # largest value the run drew: the day for the hourly rows, the half hour
 # around the stall for the one-minute rows.
-my $explain_load_over_time_example;
-{
+my $explain_load_over_time_example = sub {
     my $dur  = sub { [ 'yellow',  8, @_ ] };   # duration: value, filled cells
     my $pool = sub { [ 'magenta', 7, @_ ] };   # thread pool: value, filled cells
     my $out = "  A day at one-hour buckets — the pool's size, whatever the load:\n\n";
@@ -10671,14 +10686,13 @@ my $explain_load_over_time_example;
         [ '2026-01-21 21:55', [['5xx','5xx: 9'],['4xx','4xx: 2'],['3xx','3xx: 3'],['2xx','2xx: 773']],   '11', '787',  15, 0, [ $dur->('7.6h', 8), $pool->('159', 5) ] ],
         [ '2026-01-21 21:56', [['3xx','3xx: 4'],['2xx','2xx: 779']],                                     '0',  '783',  15, 0, [ $dur->('3.5h', 3), $pool->('194', 7) ] ],
     ]);
-    $explain_load_over_time_example = $out;
-}
+    return $out;
+};
 
 # Custom Metric Tracking: a value the log already reports, drawn as its own
 # column. The worked case is a round-trip time read from monitoring lines
 # whose payload is a run of name-and-value pairs.
-my $explain_custom_metric_example;
-{
+my $explain_custom_metric_example = sub {
     my $out = "  A monitoring line, and the value to be pulled out of it:\n\n";
     $out .= "     CONN_MON statistics: ... rto=224 rtt=21.289 rttvar=11.583 mss=1448 cwnd=10\n";
     $out .= "                                    " . $colors{'bright-yellow'} . "↑── this one" . $colors{'NC'} . "\n";
@@ -10691,8 +10705,8 @@ my $explain_custom_metric_example;
     ]);
     $out .= "\n" . ' ' x 5 . $colors{'bright-black'} . 'rtt, per bucket:' . $colors{'NC'}
           . '   ' . $colors{'bright-yellow'} . '20 ms   17.2 ms   17.3 ms   18.7 ms' . $colors{'NC'} . "\n";
-    $explain_custom_metric_example = $out;
-}
+    return $out;
+};
 
 my $explain_tail_excursion_reading = q{Two very different problems produce the same complaint, and the median cannot tell them apart. In a tail excursion the body of the distribution has not moved: most requests are as fast as they ever were, and a small population is suffering something extreme. In a distribution shift the whole body has moved right: nobody is having the old experience any more, and everybody is a little slower. The first is a small number of users having a terrible time; the second is every user having a slightly worse one, and they call for different fixes. The percentile ladder separates them once you read the whole of it rather than one rung. An excursion shows an unremarkable median and low percentiles with the ladder pulling far apart at the top — in the example the median is 2ms and the 99.9th is 2.8 seconds, three decades away. A shift shows every rung moved together and the spread between them ordinary — a median of 96ms with the 99.9th at 580ms is a body that has moved, not a tail that has grown. Tail-heaviness is the statistic that makes this rankable rather than something you look for one call at a time: rank the messages by it and the excursions come to the top, then isolate the winner and look at its shape. What falsifies the reading: the two are genuinely indistinguishable in the median and the ninetieth alone, so a reading taken from those two numbers is not this technique whatever it concludes. And tail-heaviness over a handful of observations is noise; check the occurrence count on the rows a ranking put at the top.};
 
@@ -15442,7 +15456,109 @@ sub settle_background {
     } else {
         ( $light_background, $light_background_source ) = ( 0, 'default' );
     }
+    resolve_colour_set();
     return;
+}
+
+# The colours for the background as settled (features/749-terminal-colour-codes.md
+# AC2 to AC11): the set for it when it is known, ltl's own codes when it is
+# not. %colors, their highlighted twins and @column_colors' codes are
+# rewritten from ltl's own (%colors_today, @column_colors_today); the text
+# over a fill is black or white, whichever reads on it, in every condition
+# (D4). Called whenever the background is settled.
+sub resolve_colour_set {
+    $colour_set = $light_background_source eq 'default' ? undef : $light_background ? 'light' : 'dark';
+    $colors{$_} = colour_sgr( $colors_today{$_} ) for keys %colors_today;
+    build_highlight_twins( \%colors_today );
+    for my $i ( 0 .. $#column_colors ) {
+        my ( $col, $today ) = ( $column_colors[$i], $column_colors_today[$i] );
+        $col->{fg} = colour_sgr( $today->{fg} );
+        for my $fill (qw(plain_bg highlighted_bg)) {
+            my ($n) = $today->{$fill} =~ /\e\[48;5;(\d+)m/;
+            $col->{$fill} = colour_fill_sgr($n) . colour_fill_text_sgr($n);
+        }
+    }
+    $histogram_gridline_sgr = colour_sgr("\e[38;5;${histogram_gridline_color}m");
+    return;
+}
+
+# A colour of the set as SGR parameters, for the foreground (38) or the
+# background (48): a 256-colour index or a 24-bit #rrggbb.
+sub colour_set_param {
+    my ( $layer, $v ) = @_;
+    return "$layer;5;$v" unless $v =~ /^#(..)(..)(..)$/;
+    return join ';', $layer, 2, hex $1, hex $2, hex $3;
+}
+
+# The set's colour for scheme colour $i (0-15), the grey for bright black;
+# undef when the set has none (black).
+sub colour_set_scheme {
+    my ($i) = @_;
+    return $colour_sets{$colour_set}{ $i == 8 ? 'grey' : "s$i" };
+}
+
+# An escape string with its colours as the set writes them: a scheme colour
+# (basic, bright, or an index below 16) takes the set's, a fixed 256-colour
+# text code or fill the set moves takes its value, grey 244 the grey; every
+# other parameter is kept. Unchanged while the background is not known.
+sub colour_sgr {
+    my ($s) = @_;
+    return $s unless $colour_set;
+    $s =~ s{\e\[([0-9;]*)m}{ "\e[" . colour_sgr_params($1) . 'm' }ge;
+    return $s;
+}
+
+sub colour_sgr_params {
+    my @in = split /;/, $_[0], -1;
+    my ( @out, $v );
+    my $set = $colour_sets{$colour_set};
+    while (@in) {
+        my $c = shift @in;
+        if ( ( $c eq '38' || $c eq '48' ) && @in >= 2 && $in[0] eq '5' ) {
+            my ( undef, $n ) = splice @in, 0, 2;
+            $v = $n < 16   ? colour_set_scheme($n)
+               : $c eq '48' ? $set->{"b$n"}
+               : $n == 244  ? $set->{grey}
+               :              $set->{"f$n"};
+            push @out, defined $v ? colour_set_param( $c, $v ) : "$c;5;$n";
+        } elsif ( $c =~ /^(?:3[0-7]|9[0-7])$/ && defined( $v = colour_set_scheme( $c < 90 ? $c - 30 : $c - 82 ) ) ) {
+            push @out, colour_set_param( 38, $v );
+        } elsif ( $c =~ /^(?:4[0-7]|10[0-7])$/ && defined( $v = colour_set_scheme( $c < 100 ? $c - 40 : $c - 92 ) ) ) {
+            push @out, colour_set_param( 48, $v );
+        } else {
+            push @out, $c;
+        }
+    }
+    return join ';', @out;
+}
+
+# A fill, 256-colour index $n, as the set writes it.
+sub colour_fill_sgr {
+    my ($n) = @_;
+    return colour_sgr("\e[48;5;${n}m");
+}
+
+# The text over fill $n (the index ltl writes): black or white, whichever
+# has the higher contrast with the fill the set writes (WCAG 2), in every
+# condition (D4).
+sub colour_fill_text_sgr {
+    my ($n) = @_;
+    my $v = $colour_set ? $colour_sets{$colour_set}{"b$n"} // $n : $n;
+    my @c = $v =~ /^#(..)(..)(..)$/ ? map { hex } ( $1, $2, $3 ) : notice_rgb_of_index($v);
+    my $l = 0;
+    my @w = ( 0.2126, 0.7152, 0.0722 );
+    for my $i ( 0 .. 2 ) {
+        my $x = $c[$i] / 255;
+        $l += $w[$i] * ( $x <= 0.04045 ? $x / 12.92 : ( ( $x + 0.055 ) / 1.055 )**2.4 );
+    }
+    return ( 1.05 / ( $l + 0.05 ) > ( $l + 0.05 ) / 0.05 ) ? "\e[38;5;231m" : "\e[38;5;16m";
+}
+
+# Bold over the default foreground: the set's emphasis colour with it, and
+# the code that ends it, or nothing while the background is not known.
+sub colour_emphasis {
+    return ( '', '' ) unless $colour_set;
+    return ( "\e[" . colour_set_param( 38, $colour_sets{$colour_set}{e} ) . 'm', "\e[39m" );
 }
 
 # -V background (features/749-terminal-colour-codes.md § 13): what settled the
@@ -15453,7 +15569,7 @@ sub emit_background_verbose {
     push @verbose_output, "=== background ===";
     push @verbose_output, 'background: ' . ( $light_background_source eq 'default' ? '-' : $light_background ? 'light' : 'dark' );
     push @verbose_output, "settled_by: $settled_by{$light_background_source}";
-    push @verbose_output, 'colours: today';
+    push @verbose_output, 'colours: ' . ( $colour_set // 'today' );
     push @verbose_output, 'terminal: ' . ( terminal_attached() ? 'yes' : 'no' );
     push @verbose_output, 'background_reply: ' . ( $terminal_background_reply // '-' );
     for my $q (qw(background name identity)) {
@@ -18981,7 +19097,7 @@ sub adapt_to_terminal_settings {
 sub pause_for_keypress {
     my ($prompt) = @_;                              # Get the optional prompt message
     $prompt = "Press any key to continue (or Q to quit)..." unless defined $prompt;
-    print "\033[0;44m$prompt\033[0m";
+    print colour_sgr("\033[0;44m") . "$prompt\033[0m";
 
     ReadMode 4;                                     # Turn off line buffering
     my $key = ReadKey(0);
@@ -18991,7 +19107,7 @@ sub pause_for_keypress {
         if ($key eq "q" || $key eq "Q") {
             print "\r";
             print " " x length( $prompt );
-            print "\r\033[0;35mExiting program.\033[0m\n";
+            print "\r" . colour_sgr("\033[0;35m") . "Exiting program.\033[0m\n";
             exit 0;
         } else {
             print "\r";
@@ -24349,7 +24465,7 @@ sub print_bar_graph {
                     # upper-cased token is the same 3 chars, so column alignment
                     # is unchanged.
                     if ($profile_week_fold && $bucket_time_display =~ /^([A-Z][a-z][a-z])(\s.*)$/) {
-                        print "\033[1m" . uc($1) . "$colors{'NC'}$2";
+                        print "\033[1m" . ( colour_emphasis() )[0] . uc($1) . "$colors{'NC'}$2";
                     } else {
                         print $bucket_time_display;
                     }
@@ -24370,7 +24486,7 @@ sub print_bar_graph {
                         if (exists $log_occurrences{$bucket}{$category_bucket}) {
                             my $scaled_occurrences = $log_occurrences{$bucket}{$category_bucket}{scaled_occurrences};
                             $scaled_occurrences = 0 if $scaled_occurrences < 0;
-                            my $color = $colors{$category_bucket} // $colors{'NC'};
+                            my $color = $highlight_glyph_colors{$category_bucket} // $colors{$category_bucket} // $colors{'NC'};
                             print "$color" . $blocks{$default_chart_block} x $scaled_occurrences . "$colors{'NC'}";
                             $scaled_occurrences_total += $scaled_occurrences;
                         }
@@ -24903,7 +25019,7 @@ sub render_histogram_row {
         if ($total_fill <= $row_bottom) {
             # Row is entirely empty - check for gridline
             if ($histogram_gridlines_enabled && $has_tick) {
-                $result .= "\e[38;5;${histogram_gridline_color}m─\e[0m";
+                $result .= "$histogram_gridline_sgr─\e[0m";
                 next;
             }
             $char = ' ';
@@ -25211,13 +25327,12 @@ sub render_histogram_legend {
         my $hl_padding = $left_margin + int(($bar_width - length($legend_line_hl)) / 2);
         $hl_padding = 0 if $hl_padding < 0;
 
-        # Black text (index 0) on every background: the band is a bright colour
-        # whatever the terminal, and every highlighted fill in @column_colors
-        # carries the same black, so this row reads like a highlighted timeline cell.
+        # The text is black or white, whichever reads on the band, as over every
+        # fill (features/749-terminal-colour-codes.md D4, D5), so this row reads
+        # like a highlighted timeline cell.
         # Add space padding before and after text for highlighter effect
-        my $fg_color = 0;
         my $hl_text_with_padding = " " . $legend_line_hl . " ";  # space before and after for highlighter effect
-        $result_hl = " " x ($hl_padding - 1) . "\e[48;5;${highlight_color}m\e[38;5;${fg_color}m" . $hl_text_with_padding . "\e[0m";
+        $result_hl = " " x ($hl_padding - 1) . "\e[48;5;${highlight_color}m" . colour_fill_text_sgr($highlight_color) . $hl_text_with_padding . "\e[0m";
         # Pad to single_width (account for reduced left padding and added highlighter padding)
         my $visual_len = ($hl_padding - 1) + length($hl_text_with_padding);
         $result_hl .= " " x ($single_width - $visual_len) if $visual_len < $single_width;
@@ -25392,16 +25507,20 @@ sub summary_bar_extent {
 # table means a category added later inherits the same fill the timeline's
 # bars use, with nothing to add anywhere. Returns undef for a category whose
 # colour has no bar entry, which draws no fill.
+# The hue is read from ltl's own codes (%colors_today, @column_colors_today),
+# which a colour set writes as 24-bit; the entry returned is the live one.
 my %bar_entry_by_hue;
 sub summary_bar_color {
     my ($category_bucket) = @_;
-    my $fg = $colors{$category_bucket} or return undef;
+    $colors{$category_bucket} or return undef;
+    my $fg = $colors_today{ $category_bucket =~ s/-HL$//r } or return undef;
 
     unless (%bar_entry_by_hue) {
-        for my $entry (@column_colors) {
-            next unless $entry->{fg} =~ /(?:^|\D)(?:38;5;\d+|[349][0-7])m/;
-            my ($hue) = $entry->{fg} =~ /(?:^|\D)[349](\d)m/ or next;
-            $bar_entry_by_hue{$hue} //= $entry;
+        for my $i ( 0 .. $#column_colors ) {
+            my $today = $column_colors_today[$i]{fg};
+            next unless $today =~ /(?:^|\D)(?:38;5;\d+|[349][0-7])m/;
+            my ($hue) = $today =~ /(?:^|\D)[349](\d)m/ or next;
+            $bar_entry_by_hue{$hue} //= $column_colors[$i];
         }
     }
 

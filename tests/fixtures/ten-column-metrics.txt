@@ -1,0 +1,27 @@
+2026-08-21 04:00:00,111 INFO  [worker-1] com.example.Monitor  - HL blue=228, magenta=153, red=165, orange=411, pink=3848, teal=2155, purple=2065, yellow=17793, green=3337, cyan=22084
+2026-08-21 04:03:00,647 INFO  [worker-3] com.example.Monitor  - blue=40, magenta=44, red=115, orange=152, pink=394, teal=3215, purple=2641, yellow=4885, green=13357, cyan=19620
+2026-08-21 04:06:00,619 INFO  [worker-1] com.example.Monitor  - blue=135, magenta=244, red=271, orange=599, pink=686, teal=3598, purple=9144, yellow=4264, green=9968, cyan=9689
+2026-08-21 04:09:00,225 WARN  [worker-1] com.example.Monitor  - HL blue=118, magenta=181, red=1028, orange=189, pink=705, teal=702, purple=5480, yellow=5923, green=20876, cyan=7838
+2026-08-21 04:12:00,599 INFO  [worker-2] com.example.Monitor  - blue=156, magenta=69, red=844, orange=490, pink=778, teal=5009, purple=3748, yellow=9775, green=5686, cyan=21486
+2026-08-21 04:15:00,150 ERROR [worker-2] com.example.Monitor  - blue=127, magenta=156, red=249, orange=328, pink=728, teal=2647, purple=4394, yellow=16195, green=2429, cyan=24110
+2026-08-21 04:18:00,064 INFO  [worker-3] com.example.Monitor  - HL blue=90, magenta=181, red=444, orange=441, pink=651, teal=1505, purple=3653, yellow=5810, green=27748, cyan=32317
+2026-08-21 04:21:00,442 INFO  [worker-1] com.example.Monitor  - blue=83, magenta=58, red=113, orange=699, pink=920, teal=1612, purple=4113, yellow=5691, green=10435, cyan=9255
+2026-08-21 04:24:00,261 WARN  [worker-1] com.example.Monitor  - blue=42, magenta=66, red=483, orange=280, pink=1306, teal=2464, purple=3407, yellow=16383, green=17688, cyan=15922
+2026-08-21 04:30:00,728 INFO  [worker-2] com.example.Monitor  - HL blue=164, magenta=52, red=71, orange=716, pink=1471, teal=4125, purple=5343, yellow=4524, green=13518, cyan=21229
+2026-08-21 04:33:00,505 INFO  [worker-2] com.example.Monitor  - blue=167, magenta=206, red=190, orange=310, pink=489, teal=1200, purple=8924, yellow=3015, green=11687, cyan=24187
+2026-08-21 04:36:00,392 INFO  [worker-1] com.example.Monitor  - blue=64, magenta=48, red=317, orange=188, pink=1556, teal=2144, purple=3108, yellow=5640, green=14609, cyan=18400
+2026-08-21 04:39:00,216 WARN  [worker-0] com.example.Monitor  - HL blue=54, magenta=73, red=88, orange=525, pink=1799, teal=4690, purple=6941, yellow=7013, green=7871, cyan=11481
+2026-08-21 04:42:00,037 INFO  [worker-0] com.example.Monitor  - blue=53, magenta=234, red=412, orange=538, pink=548, teal=2806, purple=2474, yellow=4818, green=12906, cyan=5183
+2026-08-21 04:45:00,583 ERROR [worker-0] com.example.Monitor  - blue=69, magenta=144, red=186, orange=282, pink=417, teal=2013, purple=5052, yellow=5505, green=4741, cyan=13537
+2026-08-21 04:48:00,305 INFO  [worker-3] com.example.Monitor  - HL blue=85, magenta=312, red=211, orange=851, pink=461, teal=1771, purple=1986, yellow=3550, green=46953, cyan=16679
+2026-08-21 04:51:00,313 INFO  [worker-0] com.example.Monitor  - blue=87, magenta=125, red=318, orange=941, pink=675, teal=2502, purple=6129, yellow=5042, green=50024, cyan=22390
+2026-08-21 04:54:00,286 WARN  [worker-0] com.example.Monitor  - blue=52, magenta=212, red=307, orange=589, pink=655, teal=1732, purple=3522, yellow=2357, green=7699, cyan=10163
+2026-08-21 05:00:00,554 INFO  [worker-3] com.example.Monitor  - HL blue=82, magenta=124, red=685, orange=651, pink=396, teal=3207, purple=2175, yellow=3660, green=17351, cyan=34844
+2026-08-21 05:03:00,024 INFO  [worker-3] com.example.Monitor  - blue=78, magenta=96, red=478, orange=907, pink=725, teal=3772, purple=2337, yellow=4487, green=8441, cyan=18166
+2026-08-21 05:06:00,134 INFO  [worker-2] com.example.Monitor  - blue=94, magenta=159, red=307, orange=690, pink=1559, teal=1622, purple=6606, yellow=4033, green=6323, cyan=6544
+2026-08-21 05:09:00,880 WARN  [worker-2] com.example.Monitor  - HL blue=26, magenta=158, red=222, orange=789, pink=725, teal=1292, purple=1584, yellow=2156, green=19686, cyan=8210
+2026-08-21 05:12:00,143 INFO  [worker-3] com.example.Monitor  - blue=81, magenta=584, red=818, orange=305, pink=1128, teal=1151, purple=3314, yellow=4005, green=46063, cyan=38290
+2026-08-21 05:15:00,614 ERROR [worker-2] com.example.Monitor  - blue=68, magenta=85, red=333, orange=772, pink=385, teal=1684, purple=4679, yellow=3748, green=4910, cyan=12255
+2026-08-21 05:18:00,286 INFO  [worker-0] com.example.Monitor  - HL blue=237, magenta=263, red=269, orange=174, pink=2300, teal=2302, purple=2599, yellow=4592, green=8997, cyan=12314
+2026-08-21 05:21:00,749 INFO  [worker-1] com.example.Monitor  - blue=68, magenta=334, red=436, orange=1189, pink=657, teal=1151, purple=4560, yellow=4132, green=6624, cyan=14675
+2026-08-21 05:24:00,155 WARN  [worker-3] com.example.Monitor  - blue=172, magenta=242, red=286, orange=1558, pink=2099, teal=3488, purple=3068, yellow=6338, green=6630, cyan=18909

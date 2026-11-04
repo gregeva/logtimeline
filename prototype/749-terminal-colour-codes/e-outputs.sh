@@ -151,8 +151,10 @@ for name in ("basic", "basic-light", "dark", "light"):
 for name, base in (("dark", "basic"), ("light", "basic-light")):
     hist, heat = ep.regions(texts[base])
     pal = ep.load(palette, name)
-    def greyed(st, bst):  # bright black taking the set's grey
-        return "grey" in pal and ep.bright_black(bst["fg"]) and st["fg"] == ep.code("38", pal["grey"]) and st["bg"] == bst["bg"]
+    def greyed(st, bst):  # bright black taking the set's grey, or text over a fill taking black or white
+        if st["bg"] != bst["bg"]: return False
+        if "grey" in pal and ep.bright_black(bst["fg"]) and st["fg"] == ep.code("38", pal["grey"]): return True
+        return ep.num(bst["bg"], "48") is not None and st["fg"] in (ep.code("38", 16), ep.code("38", 231))
     b = {(r, c): (g, st) for r, c, g, st in ro.parse(texts[base])}
     got = ro.parse(texts[name])
     bad = []
