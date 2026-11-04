@@ -1438,30 +1438,32 @@ together they show every surface (§ 10).
 
 **The background**
 
-- [ ] **AC1: what settles the background.** `-dbg` selects the dark set and
-      `-lbg` the light set, and `-dbg` wins over `-lbg` as today
-      (`features/665-background-setting-global.md` § 2). With neither, a run
-      with a terminal on standard input and output asks it once, on Windows
-      as on macOS and Linux (D2). A reply
-      with luma above one half selects the light set, any other reply the
-      dark set. With no reply, or no terminal, the background is not known.
-      `--help` and `--explain` follow the same rule. Today they are answered
-      before the options are settled.
-      - Paths: `adapt_to_command_line_options` (settlement; today it asks
-        only for the heatmap), `detect_terminal`, `terminal_reply`,
-        `notice_background`, the help and explain dispatch ahead of option
-        settlement.
-      - The Windows block in the code (D2):
-        - `detect_terminal` returns before asking when `$^O eq 'MSWin32'`.
-        - It sets the terminal's modes with `stty` and writes to
-          `/dev/tty`.
-        - `terminal_reply` waits with `select` on standard input.
-        - None of these work on Windows. `docs/terminal-output.md`
-          § Commands and devices sends terminal modes through Term::ReadKey,
-          and § Input reads an answer only with virtual terminal input set,
-          which `notice_windows_vt_input` already does for the ask.
-        - The comment above `detect_terminal` describes the block.
-      - Validation: the asking scenarios run `ltl` in a tmux pane. A pane
+- [ ] **AC1: what settles the background, on Windows, macOS and Linux
+      alike (D2).**
+      - `-dbg` selects the dark set and `-lbg` the light set, and `-dbg`
+        wins over `-lbg` as today
+        (`features/665-background-setting-global.md` § 2).
+      - With neither, a run with a terminal on standard input and output
+        asks it for its background once. That holds in Windows Terminal and
+        the classic console host as it does in Terminal.app and tmux.
+      - A reply with luma above one half selects the light set, any other
+        reply the dark set.
+      - With no reply, or no terminal, the background is not known.
+      - `--help` and `--explain` follow the same rule.
+      - Paths:
+        - `adapt_to_command_line_options`, `detect_terminal`,
+          `terminal_reply`, `notice_background`, and the help and explain
+          dispatch.
+        - On the base, `detect_terminal` returns before asking on Windows.
+          It asks through `stty`, `/dev/tty` and `select`, which Windows
+          does not have, and on other platforms it asks only for the heatmap.
+        - The help and explain dispatch answers before the options are
+          settled.
+        - Asking on Windows goes through Term::ReadKey with virtual terminal
+          input set (`docs/terminal-output.md` § Commands and devices,
+          § Input), as `notice_windows_vt_input` does for the ask.
+      - Validation: on Windows, AC14. Elsewhere, the asking scenarios run
+        `ltl` in a tmux pane. A pane
         styled `window-style bg=#fbfbfb` answers `rgb:fbfb/fbfb/fbfb`, one
         styled `bg=#292f3b` answers `rgb:2929/2f2f/3b3b`, and an unstyled
         pane does not answer (tmux 3.8, measured 2026-11-04 with
