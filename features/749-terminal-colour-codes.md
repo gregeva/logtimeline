@@ -15,7 +15,8 @@ validated by the architect (§ 12.6); the histogram inherits the columns'
 fills; the notice surfaces brought into the sets, analysed from the code
 (§ 12.7), their light secondary grey chosen; the sets' greys made neutral,
 #797c81 on dark and #747474 on light (§ 12.8); acceptance criteria
-written (§ Acceptance criteria).**
+written (§ Acceptance criteria); Windows in scope with macOS, `ltl` asking
+the terminal there too (D2).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -120,6 +121,15 @@ up, for the architect to decide) is met by § 4 to § 12.
   - Terminal.app before macOS 26, and tmux without its RGB setting, reduce
     24-bit codes to the nearest 256-colour code (research § 6), which draws
     the drift of § 12.1.
+
+- **D2 (architect, 2026-11-04): Windows and macOS are both in scope.**
+  `ltl` asks the terminal for its background on Windows as it does on macOS
+  and Linux. The architect: "Yes, Windows and macOS are both in scope for
+  this issue. Terminal detection may need to be updated if there are stale
+  decisions, or code that should no longer be there (noting that initialy we
+  kept things simple and just blocked certain things on Windows)." The code
+  and the records that block or describe the Windows block are listed under
+  AC1 (what settles the background) and AC13 (the documents).
 
 ## 3. Records found by search
 
@@ -1431,14 +1441,26 @@ together they show every surface (§ 10).
 - [ ] **AC1: what settles the background.** `-dbg` selects the dark set and
       `-lbg` the light set, and `-dbg` wins over `-lbg` as today
       (`features/665-background-setting-global.md` § 2). With neither, a run
-      with a terminal on standard input and output asks it once. A reply
+      with a terminal on standard input and output asks it once, on Windows
+      as on macOS and Linux (D2). A reply
       with luma above one half selects the light set, any other reply the
       dark set. With no reply, or no terminal, the background is not known.
       `--help` and `--explain` follow the same rule. Today they are answered
       before the options are settled.
       - Paths: `adapt_to_command_line_options` (settlement; today it asks
-        only for the heatmap), `detect_terminal`, `notice_background`, the
-        help and explain dispatch ahead of option settlement.
+        only for the heatmap), `detect_terminal`, `terminal_reply`,
+        `notice_background`, the help and explain dispatch ahead of option
+        settlement.
+      - The Windows block in the code (D2):
+        - `detect_terminal` returns before asking when `$^O eq 'MSWin32'`.
+        - It sets the terminal's modes with `stty` and writes to
+          `/dev/tty`.
+        - `terminal_reply` waits with `select` on standard input.
+        - None of these work on Windows. `docs/terminal-output.md`
+          § Commands and devices sends terminal modes through Term::ReadKey,
+          and § Input reads an answer only with virtual terminal input set,
+          which `notice_windows_vt_input` already does for the ask.
+        - The comment above `detect_terminal` describes the block.
       - Validation: the asking scenarios run `ltl` in a tmux pane. A pane
         styled `window-style bg=#fbfbfb` answers `rgb:fbfb/fbfb/fbfb`, one
         styled `bg=#292f3b` answers `rgb:2929/2f2f/3b3b`, and an unstyled
@@ -1596,12 +1618,28 @@ together they show every surface (§ 10).
       - `docs/terminal-output.md` § Colour and emphasis and § The terminals,
         and `docs/design-language.md` § The colour table, § Backgrounds and
         § The new style, state the sets and the three conditions.
+      - The records of the Windows block are trued up (D2):
+        - `docs/design-language.md` § Backgrounds: "Windows has no
+          detection: `-lbg` is given explicitly".
+        - `features/heatmap.md` § 8, the v0.8.2 fix that skipped detection
+          on Windows for its `stty` and `select`.
+        - `features/412-notice-surfaces.md`'s hand-forward to its drop 4.
+          The reply was to be read once raw mode was built, and drop 4
+          built it.
+        - `docs/terminal-output.md` § The terminals: tmux "do[es] not"
+          answer. tmux 3.8 answers when its pane has a background style
+          (AC1). "Dark when no reply comes" becomes "not known".
       - `tests/validate-help-content.sh` passes.
       - Assertable.
-- [ ] **AC14: the sets read on Windows Terminal.** The validated sets have
-      been read only on macOS (§ 11 read `s2-c4`). The § 10 runs are drawn in
-      Windows Terminal, One Half Light with `-lbg` and Campbell with `-dbg`,
-      and read as in § 11 (`wt-e-*.sh`).
+- [ ] **AC14: the sets on Windows (D2).** The validated sets have been read
+      only on macOS (§ 11 read `s2-c4`).
+      - Native `ltl` with no background option selects the light set in
+        Windows Terminal on One Half Light and the dark set on Campbell.
+        In the classic console host it selects the set its reply gives, or
+        today's colours when no reply comes. The time the query adds is
+        recorded.
+      - The § 10 runs are drawn in both schemes and read as in § 11
+        (`wt-e-*.sh`).
       - Unassertable by a harness: the harnesses do not run on Windows.
       - Validated by capture: a session on the Windows host, about the size
         of § 11's.
