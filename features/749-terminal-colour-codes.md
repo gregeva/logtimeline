@@ -14,7 +14,8 @@ histogram brought into scope (§ 12.5); the sets and the heatmap gradients
 validated by the architect (§ 12.6); the histogram inherits the columns'
 fills; the notice surfaces brought into the sets, analysed from the code
 (§ 12.7), their light secondary grey chosen; the sets' greys made neutral,
-#797c81 on dark and #747474 on light (§ 12.8).**
+#797c81 on dark and #747474 on light (§ 12.8); acceptance criteria
+written (§ Acceptance criteria).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -1412,6 +1413,203 @@ blue or a teal shade away from the accepted gray. So you must go with grey:
   the gridlines take the set's grey"), in place of index 8, the terminal's
   own bright black (slate in both Clear profiles).
 
+## Acceptance criteria
+
+Derived from § 1, D1 amended and the architect's decisions of § 12.4 to
+§ 12.8. **The background is known** when `-dbg` or `-lbg` is given, or when
+the terminal answers the colour query (OSC 11); otherwise it is not known.
+**The validated sets** are `palettes/t4.tsv` (issue branch) with § 12.8's
+greys: #797c81 on dark and #747474 on light wherever `t4` writes bright black
+(`s8`) or grey 244 (`f244`), and for the heatmap's scale line and percentile
+markers and the histogram's gridlines. The § 10 runs are the eight
+of `e-outputs.sh` (access-heatmap, access-latency, levels, udm, help,
+explain, error, progress-pause), `fills` and the ten `heat-<colour>` runs:
+together they show every surface (§ 10).
+
+**The background**
+
+- [ ] **AC1: what settles the background.** `-dbg` selects the dark set and
+      `-lbg` the light set, and `-dbg` wins over `-lbg` as today
+      (`features/665-background-setting-global.md` § 2). With neither, a run
+      with a terminal on standard input and output asks it once. A reply
+      with luma above one half selects the light set, any other reply the
+      dark set. With no reply, or no terminal, the background is not known.
+      `--help` and `--explain` follow the same rule. Today they are answered
+      before the options are settled.
+      - Paths: `adapt_to_command_line_options` (settlement; today it asks
+        only for the heatmap), `detect_terminal`, `notice_background`, the
+        help and explain dispatch ahead of option settlement.
+      - Validation: the asking scenarios run `ltl` in a tmux pane. A pane
+        styled `window-style bg=#fbfbfb` answers `rgb:fbfb/fbfb/fbfb`, one
+        styled `bg=#292f3b` answers `rgb:2929/2f2f/3b3b`, and an unstyled
+        pane does not answer (tmux 3.8, measured 2026-11-04 with
+        `osc11.pl`). The option scenarios run piped. The time the query
+        adds to a run in Terminal.app is measured and recorded here;
+        Windows' is in `docs/terminal-output.md` (35 to 49 ms).
+      - Assertable.
+- [ ] **AC2: background not known, today's colours byte for byte.**
+      - Every run whose background is not known writes what the base commit
+        writes, faint on the notice surfaces included.
+      - Paths, the subs that write colour (research § 1.3, § 1.4):
+        `print_bar_graph`, `print_heatmap_row`,
+        `print_heatmap_footer_scale`, `render_histogram_row`,
+        `render_histogram_legend`, `summary_category_row`,
+        `print_summary_table`, `print_run_options`, `print_message_summary`,
+        `print_threadpool_summary`, `get_title_string`, `bs_bold` and
+        `bs_underline`, `print_explain_topic` and its `explain_*` rows,
+        `print_usage_error`, `pause_for_keypress`, the progress lines, and
+        `notice_style` with every notice surface it draws.
+      - Validation:
+        - The § 10 runs, the `--notice-fixture` panel and ask sets, `--help`
+          and `--explain`, captured before and after. They run piped, and in
+          an unstyled tmux pane, and must be identical outside the timings.
+          This is a one-off comparison, not a harness scenario.
+        - The suite's harnesses, which run piped with no background option,
+          pass unchanged.
+      - Assertable.
+- [ ] **AC3: `-V` reports the background and the colours written.**
+      - It reports what settled the background: `-dbg`, `-lbg`, the
+        terminal's answer, or not known.
+      - It reports which colours were written: the dark set, the light set,
+        or today's.
+      - Today `light_bg_source: auto-detect` is written whether or not a
+        reply came (§ 8.2).
+      - The section contract is written here before code, from
+        `tests/HARNESS-DESIGN.md`.
+      - Validation: AC1's scenarios read it.
+      - Assertable.
+
+**The sets, where the background is known**
+
+- [ ] **AC4: every colour as validated, cell for cell.**
+      - For each § 10 run, `ltl -dbg` and `ltl -lbg` draw what `e-palette.py`
+        draws from the base commit's output of the same run with the
+        validated sets, for every cell: character, attributes, foreground and
+        background.
+      - The rewriter is the mechanism the architect validated the sets
+        through (§ 9.1, § 12.6), so this criterion cannot pass against a
+        substitute table.
+      - The rewriter first gains § 12.8: the heatmap's scale line and
+        markers, and the histogram's gridlines, take the grey.
+      - The notice categories and the dimmed layer wait on AC9.
+      - Paths: AC2's.
+      - Validation: a one-off comparison by `read-output.py`. A harness then
+        asserts one cell per role in each set, from a table copied from the
+        validated sets, independent of `ltl`'s own, as
+        `tests/validate-heatmap-palette.sh` mirrors the gradients.
+      - Assertable.
+- [ ] **AC5: a value over a bar is black or white, whichever reads.**
+      - Text over a fill is written `38;5;16` or `38;5;231`, whichever has
+        the higher contrast with that fill.
+      - Where: the metric columns' bars, plain and highlighted; the legend's
+        highlighted counts; the run summary's contribution bars; the latency
+        column's CV cell.
+      - Not covered: the histogram's percentile band keeps index 0, as the
+        histogram keeps its codes (§ 12.6). The pause prompt's text stays
+        the default foreground over the set's blue (§ 12.3).
+      - Validation: the `fills` run, with `-dbg` and with `-lbg`. For every
+        column, both fills' text is the one that reads better.
+      - Assertable.
+- [ ] **AC6: each highlighted fill stands apart from its plain fill.**
+      - The blue column's highlighted fill is 27 in the timeline and the run
+        summary, in both sets (§ 12.4); not known, it stays 21.
+      - The other nine pairs keep today's codes. The column colours stay ten,
+        and an eleventh column takes yellow, as today.
+      - Validation: the `fills` run's blue cells.
+      - Assertable.
+- [ ] **AC7: the heatmap's gradient is the column's own, from its faintest
+      step.**
+      - Each column's eight steps are § 12.6's 24-bit steps for the set.
+      - A highlighted cell's background stays the column's plain fill.
+      - `-V heatmap-palette` reports the steps written.
+      - The white gradient of `%heatmap_special_gradients` (a heatmap of a
+        user-defined metric bound to no column) has no row in the sets and
+        keeps today's steps.
+      - Paths: `print_heatmap_row`, `emit_heatmap_palette_verbose`.
+      - Validation: the ten `heat-<colour>` runs, with `-dbg` and with
+        `-lbg`. Every gradient cell's foreground is one of the column's
+        eight steps for the set.
+      - Assertable.
+- [ ] **AC8: one grey for every line and all secondary text.** The grey is
+      #797c81 on dark and #747474 on light (§ 12.8).
+      - Lines: the timeline's header and footer rules, column headings,
+        separators and options line (`print_bar_graph`, `print_run_options`,
+        `get_title_string`); the heatmap's scale line and percentile markers
+        (`print_heatmap_footer_scale`, `print_heatmap_row`); the histogram's
+        gridlines (`render_histogram_row`, `$histogram_gridline_color`). The
+        same holds in the explain examples (`explain_timeline_rows`,
+        `explain_histogram_shape`).
+      - Notices: the notice frame and secondary text (`notice_style`'s
+        `frame` and `dim`).
+      - Validation: the access-heatmap and udm runs, with `-dbg` and with
+        `-lbg`, one cell per path.
+      - Assertable.
+- [ ] **AC9: the notice surfaces in the three conditions.**
+      - On dark: frame and secondary text #797c81, text and the pick from
+        `t4` (`s7`, bold `s15`).
+      - On light: frame and secondary text #747474, text and the pick
+        `38;5;16`, the pick bold.
+      - Not known: today's style (AC2).
+      - The category colours and the layer dimmed under a pop-up are the
+        values § 12.7's validation in the notice browser settles. That
+        validation has not run yet. Open there: magenta 170 and blue 33 on
+        dark, which `t4` does not cover; the light category colour, which
+        follows the changed light gradients; and the light dimmed layer,
+        blended from xterm's colours rather than the set's (§ 7).
+      - Paths: `notice_style` and its consumers, `notice_dim_row` and
+        `notice_light_dimmed_sgr`.
+      - Validation: `tests/validate-notices.sh`, its light and dark
+        scenarios held to these values, and a tmux scenario in an answering
+        pane.
+      - Assertable once § 12.7 settles the values.
+- [ ] **AC10: bold over the default foreground takes the set's emphasis
+      colour.**
+      - Help and explain headings and bold table cells, the week fold, and
+        an error line written once the background is known: bold in `e`
+        (#f0f0f0 dark, #313c44 light).
+      - Bold is still written only where `help_ansi_enabled` allows it.
+      - Paths: `bs_bold` (`help_heading`, `render_table`), `print_bar_graph`
+        (week fold), `print_usage_error`.
+      - Validation: `FORCE_COLOR=1 ltl --help -dbg`, and the same with
+        `-lbg`: heading cells bold in `e`.
+      - Assertable.
+- [ ] **AC11: the run summary's contribution bar is drawn for every
+      category that draws one today, in both sets.**
+      - `summary_bar_color` finds the bar from the last digit of a `3N` or
+        `9N` code (§ 7). A category written in 24-bit would draw no bar.
+      - Paths: `summary_bar_color`, `summary_category_row`.
+      - Validation: `tests/validate-summary-contribution-bar.sh`, with
+        `-dbg` and with `-lbg`.
+      - Assertable.
+
+**Around the code**
+
+- [ ] **AC12: the screenshots show the sets.** Every entry of
+      `process/screenshots.yaml` is regenerated (its `-dbg` or `-lbg` stands
+      for the terminal, so it draws the set), and
+      `tests/validate-screenshot-capture.sh` passes. The renderer already
+      draws `38;2` as written (research § 1.6).
+      - Assertable.
+- [ ] **AC13: the documents state what `ltl` does.**
+      - The `-lbg` and `-dbg` rows of `--help` and `docs/usage.md` name the
+        colour set for all output, not the heatmap's gradients.
+      - `docs/terminal-output.md` § Colour and emphasis and § The terminals,
+        and `docs/design-language.md` § The colour table, § Backgrounds and
+        § The new style, state the sets and the three conditions.
+      - `tests/validate-help-content.sh` passes.
+      - Assertable.
+- [ ] **AC14: the sets read on Windows Terminal.** The validated sets have
+      been read only on macOS (§ 11 read `s2-c4`). The § 10 runs are drawn in
+      Windows Terminal, One Half Light with `-lbg` and Campbell with `-dbg`,
+      and read as in § 11 (`wt-e-*.sh`).
+      - Unassertable by a harness: the harnesses do not run on Windows.
+      - Validated by capture: a session on the Windows host, about the size
+        of § 11's.
+
+The harnesses' decoder (`decode_line` in `tests/lib/rendered-output.pl`)
+reads `38;2` and `48;2` as faint followed by parameters (research § 1.7). It
+learns them as a colour before AC4 to AC11 can be asserted.
+
 ## Resuming
 
 - Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
@@ -1435,8 +1633,9 @@ blue or a teal shade away from the accepted gray. So you must go with grey:
   Windows read the earlier candidate `s2-c4` (§ 11). The notice surfaces
   take the sets too, validated in the notice browser prototype (§ 12.7):
   analysed from the code, not yet designed or captured.
+- Acceptance criteria written (§ Acceptance criteria); AC9's notice
+  category colours and dimmed layer come from § 12.7's validation.
 - Next: the notice surfaces' design and validation (§ 12.7); then the
-  implementation, from § 1. Before code, this doc gains its acceptance
-  criteria, agreed with the architect.
+  implementation, from § 1, against § Acceptance criteria.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
