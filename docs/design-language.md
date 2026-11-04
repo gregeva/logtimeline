@@ -57,7 +57,9 @@ Three rules (architect, 2026-10-19):
 ### Rules, frames and section spacing
 
 - Rules and frames are drawn with the **light box set** of `%histogram_box_sets`
-  (`─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼`), in grey (`$colors{'bright-black'}`, SGR 90). The
+  (`─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼`), in grey (`$colors{'bright-black'}`: the colour
+  set's grey once the background is known, § Backgrounds; SGR 90 while it is
+  not). The
   timeline's header is closed by a full-width grey rule; the heatmap's scale row
   hangs from the header rule with `┴` at the column separator; the summary
   table is ruled above and below its header with `─`.
@@ -91,6 +93,14 @@ colour and gradient of the metric they draw (`features/column-layout-refactor.md
 § Color Scheme Requirements). A heatmap of a metric with no column colour uses
 the white gradient of `%heatmap_special_gradients`.
 
+Once the background is known (§ Backgrounds) every colour is written from the
+colour set for it, 24-bit (`%colour_sets`): each foreground the set's colour
+for its hue, each gradient the set's eight steps in the column's own hue,
+faintest first. The fills keep their 256-colour codes but blue's highlighted
+fill, 27, which stands apart from its plain fill. The text over every fill is
+black or white (256-colour 16 or 231), whichever reads on it, whether the
+background is known or not. The white gradient has no set and keeps its own.
+
 ### Classification and identity shades
 
 Named for the colour they are, shared by every surface that shows the outcome,
@@ -104,6 +114,11 @@ so one outcome reads in one colour wherever it appears (`%colors`):
 | amethyst | 135 | classification conflict: both criteria fired |
 | periwinkle | 111 | log-format identity: the legend's format numbers |
 
+Once the background is known, each is the colour set's for it: the codes that
+read at 4.5:1 on that background are kept, the others moved in lightness only
+(on dark, rosso-corsa #f53629 and amethyst #b776ff; on light, kelly-green
+#029202, periwinkle #6f96e4, gold #b99709 and amethyst #9b48e8).
+
 The consolidation marker on a summary row (`~`, or a bullet on an
 unconsolidated row) carries the row's classification as a colour: green when
 every line is a success, red when every line is a failure, violet for a
@@ -114,18 +129,31 @@ conflict, terracotta when mixed, and no mark when unclassified.
 - **Bold** and **underline** appear only in help and explain text, through
   `bs_bold()` and `bs_underline()`, which emit SGR 1/22 and SGR 4/24 when
   `help_ansi_enabled()` says so: `FORCE_COLOR` on, else `NO_COLOR` off, else
-  only when standard output is a terminal.
+  only when standard output is a terminal. Bold over the default foreground
+  takes the colour set's emphasis colour once the background is known
+  (#f0f0f0 on dark, #313c44 on light), the week fold's and an error line's
+  too.
 - **Dim** (SGR 2) is not used in the ltl look.
 - Headers in the timeline are grey; a week or workweek fold is bold and
   upper-cased.
 
 ### Backgrounds
 
-The dark background is the default. A light background is set by `-lbg`, or
-detected on an interactive Unix terminal by an OSC 11 query of the terminal's
-background colour (`detect_light_terminal_background`); `-dbg` forces dark and wins
-over `-lbg`. On a light background every colour takes its `gradient_light`
-steps. Windows has no detection: `-lbg` is given explicitly.
+The background is settled once for the run (`settle_background`), in three
+conditions:
+
+- **Dark**, by `-dbg`, or by the terminal's answer to an OSC 11 query of its
+  background colour: the dark colour set.
+- **Light**, by `-lbg`, or by that answer: the light colour set. `-dbg` wins
+  over `-lbg`.
+- **Not known**, when neither option is given and no terminal answers (a
+  redirected run, a terminal that does not reply): `ltl`'s standard colours,
+  the codes of this page, drawn for dark, which read on either background.
+
+The terminal is asked on every run in a terminal, on Windows as on macOS and
+Linux (`docs/terminal-output.md` § The terminals). The two colour sets were
+validated by the architect on Terminal.app's Clear Dark and Clear Light
+(`features/749-terminal-colour-codes.md` § 12).
 
 ### Numbers
 
@@ -146,11 +174,11 @@ below and shares everything else.
 | element | the new style |
 |---|---|
 | corners | rounded: `╭ ╮ ╰ ╯` on light lines `─ │` |
-| frame colour | the colour of the category the box carries; grey (SGR 90 dark, 256-colour 244 light) for a box with no category, such as the browser's outer frame |
+| frame colour | the colour of the category the box carries; grey for a box with no category, such as the browser's outer frame: the colour set's grey (#797c81 dark, #747474 light) once the background is known, SGR 90 while it is not |
 | headings | bold (SGR 1) |
-| secondary text | dim (SGR 2) on a dark background, 256-colour grey 244 on a light one (D10): evidence inside a notice, the countdown's bracket |
+| secondary text | in the colour set's grey once the background is known (#797c81 dark, #747474 light; D10); dim (SGR 2) while it is not: evidence inside a notice, the countdown's bracket |
 | highlight | reverse video for the selected row, button or tab; a coloured block marks only the selected tab, elsewhere a category is in its foreground colour |
-| the chosen thing | what the analyst picks (a choice, a key) stands out from the text: bold bright white on dark, bold black on light |
+| the chosen thing | what the analyst picks (a choice, a key) stands out from the text: bold bright white on dark (the set's #e5eff5 once the background is known), bold black on light |
 
 ---
 
@@ -163,8 +191,10 @@ ASCII marks are rejected. On a dark background each colour is a 256-colour
 code, the same on every terminal and scheme: orange and teal are the `fg` of
 `@column_colors`, the other four were chosen by the architect in the Windows
 round in place of the basic codes they had (`docs/terminal-output.md`
-§ Colour and emphasis). On a light background each is the darkest step of the
-colour's `gradient_light`.
+§ Colour and emphasis). With the dark colour set, figure caveat is #de66de and
+decision taken for you #3d97fe, moved in lightness toward 4.5:1
+(`features/749-terminal-colour-codes.md` § 12.9). On a light background each
+is the darkest step of the column's light gradient in the light colour set.
 
 | order | category | glyph | on Windows | colour | dark, 256-colour | how to read it |
 |---|---|---|---|---|---|---|
@@ -217,13 +247,16 @@ notice carry no hanging indent inside a box.
 
 ### Light background
 
-On a light background: each category's colour is the darkest step of its light
-gradient, frames and secondary text are 256-colour grey 244, text is
-256-colour black (16), the highlight is that black, bold, in reverse video.
+On a light background, which is always a known one: each category's colour is
+the darkest step of its column's light gradient in the light colour set,
+frames and secondary text are the set's grey #747474, text is 256-colour black
+(16), the highlight is that black, bold, in reverse video.
 Every component was reviewed once per form on a light terminal and accepted
-(architect, 2026-10-19); the black and the grey are 256-colour codes since the
-Windows round, where the basic black lost its emphasis and faint darkened
-(D10, `docs/terminal-output.md` § Colour and emphasis).
+(architect, 2026-10-19); the black is a 256-colour code since the Windows
+round, where the basic black lost its emphasis and faint darkened (D10,
+`docs/terminal-output.md` § Colour and emphasis); the grey and the category
+colours are the light colour set's, validated by the architect on 2026-11-04
+(`features/749-terminal-colour-codes.md` § 12.9).
 
 ---
 
@@ -233,6 +266,9 @@ Windows round, where the basic black lost its emphasis and faint darkened
   prototyping record; `prototype/412-notice-surfaces/findings.md` the rounds
   that settled the new style and the shared conventions.
 - `features/column-layout-refactor.md`: colour identity as a column property.
+- `features/749-terminal-colour-codes.md`: the two colour sets for a dark and a
+  light background, the three conditions, and the architect's validation of
+  each colour (§ 12).
 - `features/452-success-failure-percentage-columns.md`: the classification
   shades (its D14: named definitions, no column-colour index).
 - `features/heatmap.md`, `features/histogram-charts.md`: gradients, box sets

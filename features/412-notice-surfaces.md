@@ -516,7 +516,11 @@ fallback is drawn in the panel and no longer printed on standard error.
   Hand-forward to drop 4: on Windows `ltl` puts no console in raw mode yet,
   so nothing is asked there and the background is dark; the Windows Terminal
   reply (`docs/terminal-output.md` § The terminals) is read once drop 4
-  builds raw mode with the console's input mode.
+  builds raw mode with the console's input mode. Settled by #749 (two 24-bit
+  colour sets, D2, D3): the background is asked on every platform through
+  Term::ReadKey with virtual terminal input, the name only when something
+  reads it (`terminal_background()`, `terminal_name()` in place of
+  `detect_terminal()`).
 - **The panel is not a value of `--hide` or `--show`**: behavioural notices
   always print (`CLAUDE.md` § Before writing or changing code). `-V
   section-layout` reports it after `progress` through `@section_layout_order`.

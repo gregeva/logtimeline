@@ -41,14 +41,22 @@ these (the architect, 2026-10-20):
 | what | read from, in order | measured |
 |---|---|---|
 | the terminal | `WT_SESSION` (Windows Terminal); Windows without it (the classic console host); `TERM_PROGRAM`; the terminal's name-and-version reply (CSI > 0 q); its identity reply (CSI > c), where the reply has been measured to name it | macOS Terminal: `TERM_PROGRAM=Apple_Terminal` locally, absent over SSH; no name reply; identity `1;95;0` in both. tmux: name reply `tmux 3.6`, identity `84;0;0` |
-| the background | the terminal's colour reply (OSC 11): light when its luminance is above one half; dark when no reply comes | macOS Terminal answers locally and over SSH; Windows Terminal answers (luminance 0.05 on its default dark scheme, 0.98 on One Half Light); tmux and the classic console host do not, so they read dark |
+| the background | the terminal's colour reply (OSC 11): light when its luminance is above one half, dark otherwise; not known when no reply comes | macOS Terminal answers locally and over SSH (3 ms in a new window, 2026-11-04); Windows Terminal answers (luminance 0.05 on its default dark scheme, 0.98 on One Half Light); tmux 3.8 answers with its pane's background style (`window-style bg=#fbfbfb` answers `rgb:fbfb/fbfb/fbfb`) and not for an unstyled pane; the classic console host does not |
 
-With no terminal (a redirected run) nothing is asked: the background is dark
-and the terminal unknown. Each query is followed by the primary device
-attributes request, which every terminal answers, so a query a terminal
-ignores costs no wait: finding both took 49, 35 and 36 ms in a new window of
-Windows Terminal dark, Windows Terminal light and the classic console host
-(Claude's runs, 2026-10-20). Glyph widths are not measured at run time: a glyph
+The background is asked once, on every run whose standard input and output
+are a terminal and which holds the terminal's foreground, on Windows as on
+macOS and Linux: the query goes through Term::ReadKey, with virtual terminal
+input set on Windows (§ Commands and devices, § Input). `-lbg` and `-dbg`
+settle it without asking. With no terminal (a redirected run), or no reply,
+the background is not known, and `ltl` writes its standard colours
+(§ Colour and emphasis). The terminal is named from the environment; its
+name-and-version and identity replies are asked only when something reads a
+name the environment did not give, and nothing does today
+(`features/749-terminal-colour-codes.md` D3). Each query is followed by the
+primary device attributes request, which every terminal answers, so a query
+a terminal ignores costs no wait: finding both took 49, 35 and 36 ms in a new
+window of Windows Terminal dark, Windows Terminal light and the classic
+console host (Claude's runs, 2026-10-20). Glyph widths are not measured at run time: a glyph
 enters the design only once seen one cell wide (§ Glyphs and width). Inside
 tmux the replies describe tmux, not the terminal behind it.
 
@@ -123,11 +131,13 @@ Nothing measured here tells the two apart, so a Windows choice holds in both.
 sixteen basic colours (`30` to `37`, `90` to `97`, and their backgrounds): the
 basic colours are the terminal scheme's to repaint, and Windows Terminal
 changes them again under bold. Bold is applied only over a 256-colour or
-24-bit foreground. Faint (SGR 2) is used only where the background is known
-to be dark; on a light background secondary text is an explicit grey
-(`38;5;244`, D10 of `features/412-notice-surfaces.md`). A layer dimmed under
-a pop-up keeps its colours: faint over them on a dark background, each
-blended half way to white on a light one.
+24-bit foreground. Faint (SGR 2) is used only on a dark background: in the
+layer dimmed under a pop-up, and for secondary text while the background is
+not known, when `ltl`'s standard colours draw for dark. Otherwise secondary
+text is an explicit grey, the colour set's: #797c81 on dark, #747474 on light
+(D10 of `features/412-notice-surfaces.md` for light). A layer dimmed under a
+pop-up keeps its colours, each whole: faint over them on a dark background,
+each blended half way to white on a light one.
 
 **Measured** in Windows Terminal on its "One Half Light" scheme (foreground
 #383A42), the darkest pixel of a run of text:
@@ -161,11 +171,13 @@ as basic codes (`93`, `32`, `36`, `34`, `35`, `31`), and `%colors` writes
 basic codes throughout, while the other column colours and every background
 are 256-colour codes. How those basic foregrounds render across schemes, and
 under `bs_bold()` in help text, is measured in
-`features/749-terminal-colour-codes.md` § 5, § 6 and § 8. `ltl` is to write
-its colours from two 24-bit sets, one for a dark and one for a light
-background, wherever it knows the background, and keep these codes where it
-does not: #749 (two 24-bit colour sets, for a dark and a light background),
-in progress.
+`features/749-terminal-colour-codes.md` § 5, § 6 and § 8. `ltl` writes its
+colours from two 24-bit sets, one for a dark and one for a light background,
+wherever it knows the background (`-lbg`, `-dbg` or the terminal's answer),
+and keeps these codes where it does not. The text over a fill is black or
+white, whichever reads on it, in every condition. Record:
+`features/749-terminal-colour-codes.md` (two 24-bit colour sets, for a dark
+and a light background).
 
 ---
 
@@ -313,3 +325,6 @@ Windows round driven by script (`prototype/412-notice-surfaces/findings.md`
   console host against Windows Terminal.
 - `docs/toolchain-guidance.md` § Windows development host: why the harnesses
   do not run on Windows.
+- `features/749-terminal-colour-codes.md`: the two colour sets, how the
+  background is settled and asked on every platform, and what macOS
+  Terminal and Windows Terminal draw for each kind of code (§ 5, § 6).

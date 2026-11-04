@@ -671,6 +671,14 @@ Users can explicitly override with `-lbg` / `--light-background`:
 - Luma threshold of 0.5 determines light vs dark (using ITU-R BT.709 coefficients)
 - **Windows**: Auto-detection is skipped entirely (`return 0 if $^O eq 'MSWin32'`); users should use `-lbg` flag explicitly
 
+**Since #749** (two 24-bit colour sets, for a dark and a light background) the
+background is every colour's, not the heatmap's: `settle_background()` asks the
+terminal on every run in a terminal, Windows included, through Term::ReadKey
+with virtual terminal input (`terminal_background()`, in place of
+`detect_light_terminal_background()`, `stty` and `select`), and the heatmap
+draws the colour set's 24-bit gradient once the background is known
+(`features/749-terminal-colour-codes.md` AC1, AC7, D2).
+
 When light background is detected (or `-lbg` is set), use alternate color gradients that fade from light/pale shades to bright saturated colors, avoiding the dark grays (233, 234) that look bad on white backgrounds.
 
 **Light Background Color Gradients**:
@@ -711,6 +719,11 @@ my %heatmap_colors = (
 - Alternative approaches (Win32::Console, PowerShell `$Host.UI.RawUI.BackgroundColor`) are either insufficient or require running inside PowerShell
 
 **Fix**: Skip auto-detection entirely on Windows by checking `$^O eq 'MSWin32'` at the start of `detect_light_terminal_background()`. Windows users who need light background colors should use the `-lbg` flag explicitly.
+
+**Superseded by #749** (D2): the query goes through Term::ReadKey, with no
+`stty` or `select`, and is asked on Windows too; Windows Terminal answers it,
+and a console that does not leaves the background not known
+(`features/749-terminal-colour-codes.md` AC1).
 
 ```perl
 sub detect_light_terminal_background {
