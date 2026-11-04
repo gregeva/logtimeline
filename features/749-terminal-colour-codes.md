@@ -16,7 +16,8 @@ fills; the notice surfaces brought into the sets, analysed from the code
 (§ 12.7), their light secondary grey chosen; the sets' greys made neutral,
 #797c81 on dark and #747474 on light (§ 12.8); acceptance criteria
 written (§ Acceptance criteria); Windows in scope with macOS, `ltl` asking
-the terminal there too (D2).**
+the terminal there too (D2); the terminal's name asked only when something
+reads it (D3).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -130,6 +131,23 @@ up, for the architect to decide) is met by § 4 to § 12.
   kept things simple and just blocked certain things on Windows)." The code
   and the records that block or describe the Windows block are listed under
   AC1 (what settles the background) and AC13 (the documents).
+- **D3 (architect, 2026-11-04): the terminal's name is asked only when
+  something reads it.** The architect: "yes, ask the name only when
+  something reads it".
+  - When `WT_SESSION`, Windows and `TERM_PROGRAM` give nothing, mostly over
+    SSH, `detect_terminal` sends the name-and-version query (CSI > 0 q) and
+    the identity query (CSI > c). They are the fallback the architect asked
+    for on 2026-10-20 (`prototype/412-notice-surfaces/findings.md`
+    § Terminal detection).
+  - The only reader of the name is `notice_style`'s Windows glyph choice,
+    and the Windows names come from the environment, so nothing reads the
+    replies.
+  - Under AC1 every run in a terminal asks for its background. Without D3,
+    each of these runs would also send the two name queries, a round trip
+    each.
+  - The background is asked on every run in a terminal. The name queries
+    stay in `ltl`, sent the first time something reads a name the
+    environment did not give.
 
 ## 3. Records found by search
 
@@ -1446,6 +1464,8 @@ together they show every surface (§ 10).
       - With neither, a run with a terminal on standard input and output
         asks it for its background once. That holds in Windows Terminal and
         the classic console host as it does in Terminal.app and tmux.
+      - The terminal's name queries are sent only when something reads the
+        name (D3). No run of the base's surfaces sends them.
       - A reply with luma above one half selects the light set, any other
         reply the dark set.
       - With no reply, or no terminal, the background is not known.
@@ -1496,6 +1516,8 @@ together they show every surface (§ 10).
         terminal's answer, or not known.
       - It reports which colours were written: the dark set, the light set,
         or today's.
+      - It reports which queries were sent to the terminal, so AC1's
+        background query and D3's name queries can be checked.
       - Today `light_bg_source: auto-detect` is written whether or not a
         reply came (§ 8.2).
       - The section contract is written here before code, from
@@ -1630,7 +1652,8 @@ together they show every surface (§ 10).
           built it.
         - `docs/terminal-output.md` § The terminals: tmux "do[es] not"
           answer. tmux 3.8 answers when its pane has a background style
-          (AC1). "Dark when no reply comes" becomes "not known".
+          (AC1). "Dark when no reply comes" becomes "not known". The name
+          replies are asked only when something reads the name (D3).
       - `tests/validate-help-content.sh` passes.
       - Assertable.
 - [ ] **AC14: the sets on Windows (D2).** The validated sets have been read
