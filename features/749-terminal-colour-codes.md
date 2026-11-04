@@ -1576,7 +1576,7 @@ query: identity sent=yes|no answered=yes|no elapsed_ms=<N>|-
   colour query. `none` means it is not known: no terminal, or no answer.
 - `colours`: the colours written. `dark` or `light` is the validated set,
   written when the background is known; `today` is `ltl`'s own codes, written
-  when it is not. Until drop 2 writes the sets, every run reports `today`.
+  when it is not.
 - `terminal`: `yes` when standard input and standard output are both a
   terminal and the run is in its foreground, the condition for asking.
 - `background_reply`: the colour the terminal answered, as it wrote it after
@@ -1713,9 +1713,12 @@ together they show every surface (§ 10).
       - Where: the metric columns' bars, plain and highlighted; the legend's
         highlighted counts; the run summary's contribution bars; the latency
         column's CV cell.
-      - Not covered: the histogram's percentile band keeps index 0, as the
-        histogram keeps its codes (§ 12.6). The pause prompt's text stays
-        the default foreground over the set's blue (§ 12.3).
+      - The histogram's highlighted percentile row is covered too: its text
+        is black or white over its band, as over every fill (D5, which
+        supersedes #653's index 0). The rewriter writes it so, for AC4's
+        reference.
+      - Not covered: the pause prompt's text stays the default foreground
+        over the set's blue (§ 12.3).
       - Validation: the `fills` run with `-dbg`, with `-lbg` and piped with
         neither. For every column, both fills' text is the one that reads
         better. #683's reproduction (user-defined metrics over the blue and
@@ -1934,6 +1937,66 @@ closes #683 as resolved by this issue (D4).
   - Left to drop 2: `--help` and `--explain` settle the background before
     they draw, but print no `-V`, so that part of AC1 is validated by their
     colours (AC10, `--help` in an answering pane).
+- **Drop 2** (b2b1fc1d, 2026-11-04): the sets, AC2, AC4 (the gradients and the
+  notices aside), AC5, AC6, AC8, AC10, AC11.
+  - `%colour_sets`: the validated sets in `ltl` as one table of roles, copied
+    from `t4.tsv` with § 12.8's grey (`s<i>`, `f<N>`, `e`, `b21`, `grey`).
+    `resolve_colour_set()`, called whenever the background is settled,
+    rewrites `%colors`, their highlighted twins and `@column_colors`' codes
+    from `ltl`'s own (`%colors_today`, `@column_colors_today`): the set when
+    the background is known, `ltl`'s own codes when it is not. The text over
+    every fill is black or white, whichever has the higher contrast (WCAG 2)
+    with the fill the set writes, in every condition (D4).
+  - A highlighted twin splits in two: `%colors{"<key>-HL"}` for text (black
+    or white over the fill) and `%highlight_glyph_colors` for a bar glyph
+    drawn in it, which keeps the category's colour over the fill, as the
+    rewriter does.
+  - Literal sites through the set: the banner, the pause prompt and its exit
+    line, the histogram's gridlines (`$histogram_gridline_sgr`), bold over
+    the default foreground (`bs_bold`, the week fold, the error line) in `e`,
+    the explain examples' heatmap marker and histogram gridline. The 21
+    explain examples are built when rendered, after the background is
+    settled, where they were built at load.
+  - `summary_bar_color()` reads a category's hue from `ltl`'s own codes, so a
+    category written in 24-bit still draws its bar (AC11).
+  - The histogram's highlighted percentile row: black or white over its band
+    (D5, which supersedes #653's index 0); the rewriter learned the row, so
+    AC4's reference includes it.
+  - AC4: the eighteen § 10 runs (`fills`, the ten `heat-<colour>` runs,
+    access-heatmap, access-latency, levels, udm, help, explain, error) with
+    `-dbg` and `-lbg` against the rewriter's output of the base, cell by cell
+    (`read-output.py`), the heatmap's gradient cells and the notice surfaces
+    left out: identical but for the digits of the timing and memory rows,
+    and one cell (below). The progress lines take `s10` through `%colors`;
+    the pause prompt, seen in a tmux pane, writes the set's blue background
+    (#719bb9 dark, #4a799c light) and its exit line the set's magenta.
+  - AC2: the same runs, piped with no option, against the base: identical
+    but for the text over the fills, now black or white (D4), and the
+    version in the banner.
+  - AC5: #683's reproduction (two user-defined metrics, `-hl -ho -bs 1d`),
+    piped: on blue 20 and 21 and magenta 127 the text is white, on 201 and 34
+    black, where the base wrote black on all.
+  - AC10: the week fold under `--profile week` bold in #f0f0f0 (dark) and
+    #313c44 (light); `--help`'s bold cells likewise.
+  - AC8: the explain histogram's gridlines in the grey with `-dbg`, 238 when
+    the background is not known.
+  - AC1's informational part, left from drop 1: `--explain mean` in a tmux
+    pane styled light draws its bold in #313c44 and in one styled dark in
+    #f0f0f0, so the informational options settle the background from the
+    terminal's answer before they draw.
+  - New: `tests/validate-colour-sets.sh` (21 assertions, nine scenarios), one
+    cell per role in each condition against a table copied from the sets;
+    against drop 1's `ltl` it fails 17 of 21 (the four that pass are the
+    unknown condition's rule, bold, scale line and gridlines, unchanged).
+    Fixture `tests/fixtures/ten-column-metrics.txt`.
+  - Harnesses changed: `validate-background.sh` (`colours:` the set when
+    known), `validate-summary-contribution-bar.sh` (slices `ltl`'s own codes
+    the resolver reads; the fill's text is asserted on the render),
+    `validate-histogram-colours.sh` (the row's text black or white, D5).
+  - **Pre-existing, not caused by this work:** in the `fills` run with `-lbg`,
+    the highlighted share of one row's occurrences bar is 16 or 17 blocks
+    from one run to the next, the same input and the same `ltl`: the base
+    drew 16 twice and 17 twice in four runs, as does this drop.
 
 ## Resuming
 
@@ -1962,7 +2025,7 @@ closes #683 as resolved by this issue (D4).
 - Acceptance criteria written (§ Acceptance criteria).
 - Acceptance criteria and delivery plan agreed by the architect
   (2026-11-04). The implementation runs drop by drop on
-  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0 and 1 delivered
-  (§ Drops delivered); next, drop 2, the sets.
+  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0, 1 and 2 delivered
+  (§ Drops delivered); next, drop 3, the heatmap's gradients.
 - State outside the repository: none needed; the captures are remade by the
   instruments.

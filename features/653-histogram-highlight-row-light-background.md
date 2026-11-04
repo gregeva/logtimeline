@@ -138,6 +138,12 @@ palette has to be chosen from rendered candidates, and #665 has to be fixed firs
 Not the fixed cube black (16). The row then reads like every other highlighted
 fill, and the harness can assert that the row's text matches the timeline's.
 
+Superseded by #749 (two 24-bit colour sets, for a dark and a light
+background), D5: every fill's text is black or white, whichever reads on it
+(16 or 231), in every condition, so the row's text follows the same rule and
+still matches the timeline's (AC2). C1's index 0 is replaced by that rule
+(`features/749-terminal-colour-codes.md` D4, D5).
+
 ### D3 — the population row's text is out of scope
 
 Its 1.54:1 on white is recorded here and in the histogram record; the issue calls
