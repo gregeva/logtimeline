@@ -2281,6 +2281,47 @@ closes #683 as resolved by this issue (D4).
     (#768, filed); a `q` half a second after Esc in the notice browser is
     lost.
 
+## Completion gate (2026-11-04)
+
+On `749-24-bit-colour-sets` at f158409d (`$version_number` restored to
+`0.20.0`, the screenshots regenerated at it: the eight notice images change
+only in the banner's version). The diff touches executable lines of `ltl`:
+the `after` benchmark, then the full suite. What it could alter: every
+coloured output, how the background is settled and asked, and the
+`-V background` and `-V heatmap-palette` sections; reading, parsing and the
+statistics are untouched.
+
+**Benchmark**, `single-day-access-log-standard`, `-heatmap` and `-histogram`
+(the heatmap and histogram tests reach the gradients and gridlines), three
+runs each side, from worktrees side by side: medians (range).
+
+| Test | Metric | Before | After | Change |
+|---|---|---|---|---|
+| standard | total | 5.28 s (4.99 to 6.23) | 5.15 s (5.08 to 5.18) | within noise |
+| heatmap | total | 5.89 s (5.82 to 6.01) | 5.97 s (5.95 to 6.07) | within noise |
+| histogram | total | 7.18 s (7.15 to 7.28) | 7.26 s (7.13 to 7.29) | within noise |
+| standard | peak RSS | 107.33 MB | 107.97 MB | +0.60% |
+| heatmap | peak RSS | 88.10 MB | 88.33 MB | +0.26% |
+| histogram | peak RSS | 107.69 MB | 107.92 MB | +0.21% |
+| standard | `format_scan_subs` | 1,490,944 B (1,474,560 to 1,490,944) | 1,540,096 B (1,540,096 to 1,572,864) | +3.3% |
+| heatmap | `format_scan_subs` | 1,507,328 B (1,441,792 to 1,589,248) | 1,540,096 B (1,523,712 to 1,556,480) | +2.2% |
+| histogram | `format_scan_subs` | 1,458,176 B (1,441,792 to 1,474,560) | 1,540,096 B (1,523,712 to 1,556,480) | +5.6% |
+
+- **Time:** spent in `parse/read_files`, the read loop this change does not
+  touch; before and after ranges overlap in every test.
+- **Peak RSS, +0.2% to +0.6%:** the larger program. `ltl --version` peaks at
+  41,312 KB against 41,104 KB on the base (+208 KB, median of three), for
+  244 more lines; the tables the change adds are a few kilobytes.
+- **`format_scan_subs`, +2% to +6%, investigated:** it is the RSS growth
+  measured around compiling the generated scan subs (D62 of the format
+  registry), in whole pages. The same single sub is compiled
+  (`format_scan_subs_compiled 1`) in the same time (`detect/scan_sub_compile`
+  10 to 11 ms); on the ten-line fixture the figure moves by one 16 KB page.
+  The compiled code is unchanged; the heap it is compiled into is not, so the
+  measured growth moves. Nothing in this change's structures to optimize.
+- The six TSVs (`749-before`, `-before-2`, `-before-3`, `749-after`,
+  `-after-2`, `-after-3`) are deleted at close-out.
+
 ## Resuming
 
 - Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
