@@ -298,7 +298,7 @@ my %dark_256 = (
 );
 
 sub style_for {
-    my ( $name, $bg ) = @_;
+    my ( $name, $bg, %o ) = @_;
     $bg //= terminal()->{background};
     my $c = ltl_constants();
     my %fg;
@@ -317,6 +317,9 @@ sub style_for {
     # What the analyst picks (a choice, a key) stands out from the text.
     my $pick  = $bg eq 'light' ? "\e[1;38;5;16m"  : "\e[1;97m";
     my $dim   = $bg eq 'light' ? "\e[38;5;244m"   : "\e[2m";
+    # A secondary colour given (#rrggbb or a 256-colour index) replaces it on
+    # either background: the comparison of feature doc 749 § 12.7.
+    $dim = secondary_sgr( $o{secondary} ) if defined $o{secondary};
     if ( $name eq 'ltl' ) {
         return {
             name  => 'ltl',
@@ -349,6 +352,13 @@ sub style_for {
         dim   => $dim,
         reset => "\e[0m",
     };
+}
+
+sub secondary_sgr {
+    my ($c) = @_;
+    return "\e[38;5;${c}m" if $c =~ /^\d+$/;
+    $c =~ /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i or die "secondary: #rrggbb or 0-255, not $c\n";
+    return "\e[38;2;" . join( ';', map { hex } $1, $2, $3 ) . 'm';
 }
 
 # --- text --------------------------------------------------------------------

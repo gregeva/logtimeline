@@ -15,6 +15,7 @@
 #   perl show.pl browser [--input heavy] [--placement alt|inline] [--size ...]
 #                        [--rows N] [--seconds N]
 #   every component:     [--bg dark|light] [--width N] [--height N]
+#                        [--secondary #rrggbb|N]  the secondary text's colour
 #                        (the background found from the terminal when --bg is not given)
 #
 # A parameter not given takes the defaults table's value for the use.
@@ -34,10 +35,10 @@ my $component = shift(@ARGV) // '';
 $component =~ /^(panel|bullets|ask|browser|terminal)$/ or die "usage: show.pl panel|bullets|ask|browser|terminal [options]\n";
 my %opt;
 GetOptions( \%opt, 'input=s', 'bullet=s', 'headed', 'form=s', 'placement=s', 'size=s', 'quit=s', 'keybar=s', 'record', 'seconds=i',
-    'answer=s', 'rows=i', 'fixed-height', 'bg=s', 'width=i', 'height=i' ) or die "bad options\n";
+    'answer=s', 'rows=i', 'fixed-height', 'bg=s', 'width=i', 'height=i', 'secondary=s' ) or die "bad options\n";
 my ( $W, $H ) = terminal_size( width => $opt{width}, height => $opt{height} );
 set_answers_ahead( $opt{answer} );
-my $s      = style_for( 'new', $opt{bg} );
+my $s      = style_for( 'new', $opt{bg}, secondary => $opt{secondary} );
 my $inputs = do "$FindBin::Bin/notices/inputs.pl"   or die "notices/inputs.pl: $@ $!\n";
 my $bd     = do "$FindBin::Bin/notices/backdrop.pl" or die "notices/backdrop.pl: $@ $!\n";
 my $live   = interactive();
