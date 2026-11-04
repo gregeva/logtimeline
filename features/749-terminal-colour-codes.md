@@ -18,7 +18,8 @@ fills; the notice surfaces brought into the sets, analysed from the code
 written (§ Acceptance criteria); Windows in scope with macOS, `ltl` asking
 the terminal there too (D2); the terminal's name asked only when something
 reads it (D3); the notice surfaces drawn in the three conditions, their
-light category colours chosen from the gradients (§ 12.9).**
+light category colours chosen from the gradients and the dark set's notice
+colours validated (§ 12.9).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -1492,6 +1493,12 @@ option 3/4 selected as best. Page 4/4 option 3/4 selected as best."
 - Guidance reads 2.84:1 on Clear Light.
 - The light dimmed layer is as drawn on page 3.
 
+**The architect validated the dark set's notice colours**, the second
+condition in Clear Dark, recaptured after the finding below: "Yes, I confrim
+set 2". They are frame and secondary text #797c81, text #dee5eb and the
+pick bold #e5eff5. The categories keep today's colours, except figure caveat
+#de66de and decision taken #3d97fe.
+
 **Finding: the layer dimmed on dark loses the 24-bit colours.** The
 architect saw it on page 3, dark set: under the ask, the browser's FIGURE
 CAVEAT tab showed a bright green background, as if it were selected, though
@@ -1676,8 +1683,9 @@ together they show every surface (§ 10).
         and 24-bit alike, with only its weight removed. Today
         `notice_sgr_without_weight` drops a `2` selector and any component
         of 1, 2 or 22 (§ 12.9, finding).
-      - The dark category colours are those drawn in § 12.9: today's,
-        with figure caveat #de66de and decision taken #3d97fe.
+      - The dark category colours are today's, with figure caveat
+        #de66de and decision taken #3d97fe, validated by the architect
+        (§ 12.9).
       - Paths: `notice_style` and its consumers, `notice_dim_row` and
         `notice_light_dimmed_sgr`.
       - Validation: `tests/validate-notices.sh`, its light and dark
@@ -1771,7 +1779,8 @@ learns them as a colour before AC4 to AC11 can be asserted.
 - Not yet done: the validated sets (`t4`) have been read only on macOS;
   Windows read the earlier candidate `s2-c4` (§ 11).
 - The notice surfaces are drawn in the three conditions by `notice-sets.sh`
-  (§ 12.9); their light category colours are chosen from the gradients.
+  (§ 12.9): the light category colours are chosen from the gradients, and
+  the dark set's notice colours are validated.
 - Acceptance criteria written (§ Acceptance criteria).
 - Next: the delivery plan, then the implementation, from § 1, against
   § Acceptance criteria.
