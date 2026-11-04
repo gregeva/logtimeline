@@ -1599,6 +1599,60 @@ background is not known (`settled_by: none`). Before, `auto-detect` was
 written for every heatmap run with no option, whether or not a reply came
 (§ 8.2).
 
+## 14. Windows: handover brief for drop 6 (AC14)
+
+For a Claude session on the Windows development host, as § 6 and § 11 were.
+It validates on Windows what drops 1 to 5 built on macOS: AC14, and AC1's
+Windows part. Start from branch `749-24-bit-colour-sets` at its head (drop
+5, 4b57fd02 or later), the host's own `ltl`, from Git Bash.
+
+**Setup to record** (as § 11.1): the Windows build, the Windows Terminal
+version, the font face and size, the display scale, and `intenseTextStyle`
+and `adjustIndistinguishableColors` as written in the settings, or absent.
+
+**1. What settles the background, in each of three terminals.** In a new
+window of Windows Terminal on One Half Light, one on Campbell, and one of
+the classic console host (`conhost.exe cmd`), each with no option:
+
+```
+ltl --disable-progress -V background -bs 1440 -oe -n 1 -osum tests/fixtures/http-status-families.txt
+```
+
+- Record each window's `-V background` section whole.
+- Expected: One Half Light `background: light`, `settled_by: terminal`,
+  `colours: light`; Campbell `dark`, `terminal`, `dark`; the console host
+  the set its reply gives, or `background: -`, `settled_by: none`,
+  `colours: today` when no reply comes (§ 6 measured no reply). In every
+  window `query: name sent=no` and `query: identity sent=no` (D3).
+- The time the query adds: `elapsed_ms` of the background query, five runs
+  per window, median and range.
+- After each run, type a line at the prompt: it echoes and is read as a
+  line, so the console's mode was given back.
+- Then once with `-lbg` and once with `-dbg` in the Campbell window:
+  `settled_by` the option, and no query sent.
+
+**2. The runs, drawn by `ltl` itself.** The § 10 runs (`e-outputs.sh`'s
+eight, `fills` and the ten `heat-<colour>` runs), each run by `ltl` in a
+window of 190 columns on One Half Light and on Campbell with no option, so
+the terminal's answer selects the set. Capture page by page and read with
+`read-output.py` as § 11 did (`wt-e-measure.sh`, `wt-e-capture.ps1`,
+changed only so each window runs `ltl` in place of printing a prepared
+file). `ltl` draws its bars with `■` on Windows; keep it.
+
+**3. The notice surfaces.** In each scheme, with no option: the deferred
+panel (`--notice-fixture panel-categories`), the modal question
+(`--notice-fixture ask-modal`), and the browser with a notice's options
+layered over it (`--notice-fixture browser-many` in a window of 34 rows,
+keys Down, 7, Up, Up, Enter). Capture each. On Campbell the browser under
+the layered ask is faint with its colours whole (no cell gains a
+background); on One Half Light it is blended toward white.
+
+**4. Report**, into this section's results: § 11.3's tallies for the two
+schemes, background known; what Windows draws differently from macOS;
+anything that does not read. Commit the captures and readings under
+`results/windows-terminal/e-ltl/` on the issue branch. Choose nothing: the
+architect reads the results.
+
 ## Acceptance criteria
 
 Agreed by the architect on 2026-11-04: "I agree the acceptance criteria and
@@ -2056,6 +2110,32 @@ closes #683 as resolved by this issue (D4).
   - AC4's comparison rerun: nothing differs but timing digits and the
     pre-existing flicker, the notice surfaces still left out (they are
     drawn by `ltl`, not the rewriter, and held to the set by the harness).
+- **Drop 5** (4b57fd02 on the issue branch, 4f4df5f6 on `release/0.20.0`,
+  2026-11-04): the documents and the screenshots, AC12 and AC13.
+  - The `-lbg` and `-dbg` rows of `--help` and `docs/usage.md` name the
+    colour set for all output, whatever the terminal reports; the usage
+    prose says the terminal is asked on every platform, that a terminal
+    that does not answer gets the standard colours, and that a value over a
+    bar is black or white. `tests/validate-help-content.sh` passes (114).
+  - The heatmap explain text (`ltl` and `docs/explain/heatmap.md`) says the
+    gradient is 24-bit when the background is known;
+    `tests/validate-explain.sh` (728) and `tests/validate-doc-examples.sh`
+    (51, 10 skipped) pass.
+  - Every entry of `process/screenshots.yaml` regenerated (11 entries, 13
+    images): each draws the dark set its `-dbg` stands for, each was looked
+    at, nothing identifying beyond the banner the images already carried.
+    They show the issue's version (`0.20.0-749`); they are regenerated at
+    the restored version before the gate, as #412 did.
+  - On `release/0.20.0`, where a document that cannot change what `ltl` does
+    goes (`docs/process/workflow.md` § 4): `docs/terminal-output.md`
+    § The terminals (the background asked on every platform, tmux 3.8
+    answering a styled pane, "not known" in place of "dark when no reply",
+    the name asked only when read) and § Colour and emphasis (the sets, the
+    three conditions, faint only on a dark background); `docs/design-language.md`
+    (the rules' grey, the colour table, the shades, emphasis, § Backgrounds
+    in three conditions, the new style, the category sheet, the light
+    background); `features/heatmap.md` § 8 and `features/412-notice-surfaces.md`'s
+    Windows hand-forward, each pointing at D2 and D3.
 
 ## Resuming
 
@@ -2084,7 +2164,7 @@ closes #683 as resolved by this issue (D4).
 - Acceptance criteria written (§ Acceptance criteria).
 - Acceptance criteria and delivery plan agreed by the architect
   (2026-11-04). The implementation runs drop by drop on
-  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0 to 4 delivered
-  (§ Drops delivered); next, drop 5, the documents and the screenshots.
+  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0 to 5 delivered
+  (§ Drops delivered); next, drop 6 on the Windows host, its brief § 14.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
