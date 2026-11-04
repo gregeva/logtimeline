@@ -20,12 +20,12 @@ the terminal there too (D2); the terminal's name asked only when something
 reads it (D3); a value over a bar black or white in every condition, resolving
 #683 (D4); the notice surfaces drawn in the three conditions, their
 light category colours chosen from the gradients and the dark set's notice
-colours validated (§ 12.9).**
+colours validated (§ 12.9); the acceptance criteria and the delivery
+plan agreed by the architect, and the implementation started (2026-11-04).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
 `prototype/749-terminal-colour-codes/` on branch `749-24-bit-colour-sets`.
-Nothing in `ltl` has changed yet.
 
 - **Issue:** #749 (two 24-bit colour sets, for a dark and a light
   background).
@@ -1535,7 +1535,8 @@ the guidance tab was.
 
 ## Acceptance criteria
 
-Derived from § 1, D1 amended and the architect's decisions of § 12.4 to
+Agreed by the architect on 2026-11-04: "I agree the acceptance criteria and
+the delivery plan". Derived from § 1, D1 amended and the architect's decisions of § 12.4 to
 § 12.8. **The background is known** when `-dbg` or `-lbg` is given, or when
 the terminal answers the colour query (OSC 11); otherwise it is not known.
 **The validated sets** are `palettes/t4.tsv` (issue branch) with § 12.8's
@@ -1780,7 +1781,7 @@ The harnesses' decoder (`decode_line` in `tests/lib/rendered-output.pl`)
 reads `38;2` and `48;2` as faint followed by parameters (research § 1.7). It
 learns them as a colour before AC4 to AC11 can be asserted.
 
-## Delivery plan (proposed 2026-11-04)
+## Delivery plan (agreed by the architect, 2026-11-04)
 
 Each drop carries its own harness scenarios. A drop is committed and pushed
 on `749-24-bit-colour-sets` once runs before and after it show it behaves.
@@ -1824,7 +1825,8 @@ closes #683 as resolved by this issue (D4).
   (§ 12.9): the light category colours are chosen from the gradients, and
   the dark set's notice colours are validated.
 - Acceptance criteria written (§ Acceptance criteria).
-- Next: the delivery plan (§ Delivery plan, proposed), then the
-  implementation, from § 1, against § Acceptance criteria.
+- Acceptance criteria and delivery plan agreed by the architect
+  (2026-11-04). The implementation runs drop by drop on
+  `749-24-bit-colour-sets` (§ Delivery plan); next, drop 0.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
