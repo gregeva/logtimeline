@@ -1359,6 +1359,23 @@ sets' roles in the three conditions. The reader groups faint cells with
 plain cells of the same code (§ 11.5), and is taught to read them apart
 before faint is measured.
 
+**Secondary text: two explicit greys compared (2026-11-04).** The browser,
+the panel and an ask, drawn with each grey side by side
+(`notice-secondary.sh`, issue branch 60407bdd; `show.pl --secondary`):
+
+| background | held at 4.5:1 | today's look |
+|---|---|---|
+| Clear Dark | #93969b, 4.52:1: Clear Dark's faint default text moved in lightness only | #797c81, 3.21:1: Clear Dark's faint default text as drawn, written as a fixed colour |
+| Clear Light | #747474, 4.52:1: the light set's grey | 244 (#808080), 3.82:1 |
+
+- **Light, the architect:** "For Clear Light; I like the #747474."
+- **Dark, the architect:** "for Clear Dark, its sibling is too close to the
+  normal grey, causing the distinguished emphasis between the two
+  dissapear. The Option 2 #797c81 is ever so darker that the distinction
+  between grey and dark grey is clearer." He asked to see #797c81 in place
+  of #93969b in the validated set's run of `ltl`; the custom-metrics run is
+  the one that draws a notice panel.
+
 ## Resuming
 
 - Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
