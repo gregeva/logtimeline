@@ -12,7 +12,8 @@ the sets are 24-bit (§ 12); the tone-led sets accepted by the architect, the
 fill pairs checked on every column (§ 12.4); the heatmap and the
 histogram brought into scope (§ 12.5); the sets and the heatmap gradients
 validated by the architect (§ 12.6); the histogram inherits the columns'
-fills.**
+fills; the notice surfaces brought into the sets, analysed from the code
+(§ 12.7).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -1282,6 +1283,82 @@ highlight (`plain_bg_num`, `highlighted_bg_num`); blue's is 27, the
 highlight the set gives the timeline. Count's histogram highlight (51)
 still differs from the timeline's (36), as #666 records.
 
+### 12.7 The notice surfaces (the architect's scope, 2026-11-04)
+
+The architect (2026-11-04): "the new notices surfaces. They too will need
+the 3 color set treatment with their browser list surface prototype adapted
+to test and validate them. … it was purposeful design, but you'll need to
+start by analyzing them." The three are read here as the conditions every
+surface takes under D1 amended: the dark set, the light set, and today's
+colours when the background is not known.
+
+**What the records make deliberate.** `docs/design-language.md` § The new
+style: secondary text is "dim (SGR 2) on a dark background, 256-colour grey
+244 on a light one (D10)"; a box with no category is framed grey (SGR 90
+dark, 244 light). § Wording: the panel's title is "in the secondary text's
+colour, as its count is, never bright". `features/412-notice-surfaces.md`
+D10: a layer under a pop-up "keeps its colours, dimmed". Secondary text is
+designed to recede behind the text it qualifies.
+
+**Where `notice_style`'s secondary colour (`dim`) is written:** the
+evidence after `·` (`notice_rows`); a category's `(N)` and how-to-read text
+(`notice_heading`, the edge form in `notice_ask_surface`); the panel's and
+the browser's titles; the countdown (`notice_countdown`); the key bars;
+the unselected options' letters and the selected option's effect line
+(`notice_options_rows`); `chosen:` and "N options on offer"
+(`notice_browser`); the record an ask leaves (`notice_leave_record`).
+`notice_dim_row` draws the layer under a pop-up: faint over every code on
+dark, each colour half way to white on light.
+
+**Each role read against Clear Dark (#292f3b) and Clear Light (#fbfbfb),**
+from the code and the profiles' measured colours (`notice-roles.py` on the
+issue branch; no notice surface captured yet). Text floor 4.5:1, lines 3:1:
+
+| role | dark, today | dark, `t4` | light, today | light, `t4` |
+|---|---|---|---|---|
+| frame (90 / 244) | 1.93 | 2.71 | 3.82 | 4.52 (#747474) |
+| text (37 / 16) | 10.56 | 10.56 | 20.29 | 20.29 (16 is in no set row) |
+| pick, bold (97 / 16) | 11.51 | 11.51 | 20.29 | 20.29 |
+| secondary (faint / 244) | 3.21, faint default text (§ 5) | faint, unchanged | 3.82 | 4.52 (#747474) |
+| data anomaly, orange (208 / 166) | 5.57 | 5.57 | 3.67 | 4.50 |
+| figure caveat, magenta (170 / 93) | **4.16** | not in `t4` | 5.84 | 5.84 |
+| your options, cyan (44 / 30) | 7.48 | 7.48 | 4.21 | 4.54 |
+| decision taken for you, blue (33 / 27) | **3.78** | not in `t4` | 4.97 | 4.97 |
+| runtime condition, teal (43 / 29) | 7.25 | 7.25 | 4.38 | 4.55 |
+| guidance, green (40 / 35) | 6.85 | 6.85 | **2.78** | 3.83 |
+
+- **How far faint recedes is each terminal's choice, not `ltl`'s.** Faint
+  default text reads 3.21:1 on Clear Dark (§ 5), 2.63 to 3.41 on most of
+  Windows Terminal's dark schemes, 1.65 on Solarized Dark and 3.90 on Tango
+  Dark (§ 11.5). No set reaches it. On light, D10's explicit grey already
+  puts the step in `ltl`'s hands, and `t4` moves it to 4.52.
+- **Two dark category colours are written only by the notice surfaces,**
+  so `t4` does not cover them: magenta 170 (4.16) and blue 33 (3.78).
+- **Guidance green on light** reads 2.78 today; `t4`'s move, capped at the
+  profile's own step, reaches 3.83.
+- **The light category colour follows the light gradient.** By record it is
+  "the darkest step of the colour's `gradient_light`" (`docs/design-language.md`
+  § The category sheet). The validated gradients (§ 12.6) change those
+  steps, designed as cells: green's darkest reads 2.84, cyan's 4.21, teal's
+  4.38, where `t4`'s text rows give 3.83, 4.54 and 4.55 for the same codes.
+- **The dark frame** reads 1.93, and 2.71 with `t4`, under 3:1.
+- **Text and the pick read well on both.** The selected tab, button and row
+  are reverse video of the same colours and read as they do.
+- **Background unknown:** `notice_background` reads dark, so the dark style,
+  faint included, is written; on a light scheme the pick (bold 97) reads
+  1.00 to 1.16:1 (§ 11.5).
+- **The em-dash bullet's low reading on macOS** (§ 10.1) is its thin glyph's
+  antialiasing; its colour reads 7.48 and 7.24.
+
+**Validation, as directed:** the notice browser of
+`prototype/412-notice-surfaces` (`show.pl browser`, with its layered ask
+over the dimmed browser and the histograms in the detail) draws every role
+above. It takes its colours from its own copy of `notice_style`
+(`style_for` in `lib/NoticeProto.pm`), which is adapted to write the
+sets' roles in the three conditions. The reader groups faint cells with
+plain cells of the same code (§ 11.5), and is taught to read them apart
+before faint is measured.
+
 ## Resuming
 
 - Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
@@ -1299,8 +1376,11 @@ still differs from the timeline's (36), as #666 records.
 - The histogram takes the columns' fills and needs no work of its own
   (architect, § 12.6).
 - Not yet done: the validated sets (`t4`) have been read only on macOS;
-  Windows read the earlier candidate `s2-c4` (§ 11).
-- Next: the implementation, from § 1. Before code, this doc gains its
-  acceptance criteria, agreed with the architect.
+  Windows read the earlier candidate `s2-c4` (§ 11). The notice surfaces
+  take the sets too, validated in the notice browser prototype (§ 12.7):
+  analysed from the code, not yet designed or captured.
+- Next: the notice surfaces' design and validation (§ 12.7); then the
+  implementation, from § 1. Before code, this doc gains its acceptance
+  criteria, agreed with the architect.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
