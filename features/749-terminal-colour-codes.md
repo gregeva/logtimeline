@@ -2322,6 +2322,9 @@ runs each side, from worktrees side by side: medians (range).
 - The six TSVs (`749-before`, `-before-2`, `-before-3`, `749-after`,
   `-after-2`, `-after-3`) are deleted at close-out.
 
+**The full suite**, `tests/run-suite.sh`, on f158409d: 56 harnesses, 56
+passed, 0 failed, 5,653 assertions passed.
+
 ## Resuming
 
 - Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
