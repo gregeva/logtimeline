@@ -1589,7 +1589,10 @@ query: identity sent=yes|no answered=yes|no elapsed_ms=<N>|-
   milliseconds, `-` when not sent. D3 holds when no run sends `name` or
   `identity`.
 
-`-V heatmap-palette` keeps `light_bg` and `light_bg_source` and their four
+`-V heatmap-palette` adds `gradient_written: <eight steps>`, the steps
+`print_heatmap_row()` writes, faintest first: the set's 24-bit steps as
+`#rrggbb` when the background is known, otherwise `ltl`'s own indices (AC7).
+It keeps `light_bg` and `light_bg_source` and their four
 values (`features/665-background-setting-global.md` § 2). `auto-detect` now
 means the terminal answered (`settled_by: terminal`) and `default` that the
 background is not known (`settled_by: none`). Before, `auto-detect` was
@@ -1997,6 +2000,27 @@ closes #683 as resolved by this issue (D4).
     the highlighted share of one row's occurrences bar is 16 or 17 blocks
     from one run to the next, the same input and the same `ltl`: the base
     drew 16 twice and 17 twice in four runs, as does this drop.
+- **Drop 3** (ea685c9a, 2026-11-04): the heatmap's gradients, AC7.
+  - `%colour_sets` carries each column colour's eight steps for both sets
+    (`g<colour>`, § 12.6). `heatmap_gradient_params()` gives
+    `print_heatmap_row()` and the explain heatmap example the set's steps
+    when the background is known, `ltl`'s own gradient (light under `-lbg`)
+    when it is not. The white of a user-defined metric bound to no column
+    has no row in the sets and keeps `ltl`'s own. A highlighted cell keeps
+    its column's plain fill.
+  - `-V heatmap-palette` adds `gradient_written` (§ 13).
+  - AC4 and AC7: the comparison of drop 2 rerun with the heatmap's cells
+    included: every heatmap cell of the ten `heat-<colour>` runs and the
+    access-log heatmap, with `-dbg` and `-lbg`, matches the rewriter's;
+    nothing else differs but timing digits.
+  - Piped with no option, the access-log heatmap, a `heat-<colour>` run and
+    `--explain heatmap` write what drop 2 writes.
+  - Harnesses: `validate-heatmap-palette.sh` asserts `gradient_written`
+    against the sets' steps copied into it (nine scenarios, one new: not
+    known); `validate-colour-sets.sh` holds every heatmap cell to the
+    column's eight steps (fails on drops 1 and 2, whose cells are 256-colour
+    indices); `validate-screenshot-capture.sh` reads the steps written (202
+    cells, each drawn as written).
 
 ## Resuming
 
@@ -2025,7 +2049,7 @@ closes #683 as resolved by this issue (D4).
 - Acceptance criteria written (§ Acceptance criteria).
 - Acceptance criteria and delivery plan agreed by the architect
   (2026-11-04). The implementation runs drop by drop on
-  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0, 1 and 2 delivered
-  (§ Drops delivered); next, drop 3, the heatmap's gradients.
+  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0 to 3 delivered
+  (§ Drops delivered); next, drop 4, the notice surfaces.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
