@@ -36,6 +36,13 @@ for the run whatever other options are given (architect, 2026-10-13).
 | Flag resolution | Option-shaped behaviour is reduced at option settlement to a flag resolved once, independent of other options | `docs/architecture-patterns.md` § Run-scoped activation flags resolved once |
 | Command echo | `-lbg` and `-dbg` stand in for the terminal and are left out of the echoed command (unchanged here) | `%options_standing_in_for_terminal`; `features/598-screenshot-capture.md` D17 |
 
+Since #749 (two 24-bit colour sets, for a dark and a light background) every
+colour reads the background, so a run in a terminal asks it whatever the
+options but `-lbg` and `-dbg`, and `-V heatmap-palette`'s four values keep
+their order with `auto-detect` meaning the terminal answered and `default`
+that the background is not known (`features/749-terminal-colour-codes.md`
+§ 13, AC1).
+
 ## 3. Current state (read 2026-10-13, `release/0.19.0` at f98a9c9)
 
 **Reproduction** on `tests/fixtures/http-status-families.txt`, `-bs 1440 -oe

@@ -1869,6 +1869,55 @@ closes #683 as resolved by this issue (D4).
     only bright black moved: 18,411 cells of rules and headings, 2,220 in
     the heatmap, 515 in the histogram, in each set. `t4.tsv` with this row
     is AC4's reference.
+- **Drop 1** (dab00577, 2026-11-04): the background, AC1 and AC3.
+  - `settle_background()` settles it once: `-dbg`, then `-lbg`, then the
+    terminal's answer, otherwise not known. It runs before the title and the
+    informational options, which read the two options by their exact names,
+    and again once every option is parsed; the terminal is asked once.
+  - The query goes through Term::ReadKey (cbreak, then restore), with
+    virtual terminal input on Windows, in place of `stty`, `/dev/tty` and
+    `select`, and the Windows block is gone (D2). It is sent to a terminal on
+    standard input and output that holds the foreground, so a run sent to the
+    background is not stopped by reading it. A run whose input is piped
+    (`cat log | ltl -`) has no terminal on standard input and is not asked.
+  - The name queries are in `terminal_name()`, asked only when a reader needs
+    a name the environment did not give (D3). Nothing calls it: the notice
+    glyphs read the Windows console from the environment
+    (`terminal_windows_console()`), as before.
+  - `-V background` as § 13; `-V heatmap-palette`'s `auto-detect` is now the
+    terminal's answer and `default` a background not known.
+  - Validated: `tests/validate-background.sh`, 84 assertions over ten
+    scenarios. The option scenarios run piped; the terminal scenarios run in
+    tmux panes styled light (answer `fbfb/fbfb/fbfb`), dark
+    (`2929/2f2f/3b3b`) and unstyled (no answer, not known), and with `-lbg`
+    (nothing asked). The panes name no terminal in the environment, so a run
+    that read the name would ask: a build whose `settle_background()` reads
+    the name fails the four pane scenarios on `query: name`, and the base
+    fails all ten.
+  - The terminal's mode after a run that asked, and after `--explain` in a
+    styled pane: `icanon echo`, as before; no reply text on screen.
+  - Piped runs with no option (the access log with the heatmap and both
+    histograms, the latency run, the levels run, user-defined metrics with
+    a notice panel, `--help`, `--explain`, a usage error) write what the base
+    writes, byte for byte, outside the version, the timings and the memory.
+    The one difference is intended: a piped heatmap run's `light_bg_source`
+    is `default`, where the base wrote `auto-detect` with no answer.
+  - Harnesses that read what changed: `validate-heatmap-palette.sh` (120),
+    `validate-notices.sh` (188), `validate-verbose-content-shape.sh` (24
+    sections), `validate-scenario-selector.sh` (39).
+  - **The time the query adds in Terminal.app** (AC1), five runs each, no
+    option against `-dbg`, alternating, on the ten-line fixture:
+
+    | profile | answer | query (`elapsed_ms`) | whole run, no option | whole run, `-dbg` |
+    |---|---|---|---|---|
+    | Clear Dark | dark | 3 (3 to 3) | 217 ms (208 to 238) | 210 ms (208 to 238) |
+    | Clear Light | light | 3 (3 to 4) | 217 ms (211 to 223) | 208 ms (206 to 217) |
+
+    The query takes 3 ms; the whole-run medians differ by 7 and 9 ms, within
+    overlapping ranges. In tmux it took 2 to 6 ms.
+  - Left to drop 2: `--help` and `--explain` settle the background before
+    they draw, but print no `-V`, so that part of AC1 is validated by their
+    colours (AC10, `--help` in an answering pane).
 
 ## Resuming
 
@@ -1897,7 +1946,7 @@ closes #683 as resolved by this issue (D4).
 - Acceptance criteria written (§ Acceptance criteria).
 - Acceptance criteria and delivery plan agreed by the architect
   (2026-11-04). The implementation runs drop by drop on
-  `749-24-bit-colour-sets` (§ Delivery plan). Drop 0 delivered (§ Drops
-  delivered); next, drop 1, the background.
+  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0 and 1 delivered
+  (§ Drops delivered); next, drop 2, the sets.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
