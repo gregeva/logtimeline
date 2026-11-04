@@ -1757,6 +1757,24 @@ The harnesses' decoder (`decode_line` in `tests/lib/rendered-output.pl`)
 reads `38;2` and `48;2` as faint followed by parameters (research § 1.7). It
 learns them as a colour before AC4 to AC11 can be asserted.
 
+## Delivery plan (proposed 2026-11-04)
+
+Each drop carries its own harness scenarios. A drop is committed and pushed
+on `749-24-bit-colour-sets` once runs before and after it show it behaves.
+
+| Drop | What it delivers | Criteria |
+|---|---|---|
+| 0 | Before code: the `before` benchmark on the base commit; `$version_number` stamped `0.20.0-749`; `decode_line` reads `38;2` and `48;2` as colours; `e-palette.py` gains § 12.8's greys, for AC4's comparison | none |
+| 1 | The background: asked on every run in a terminal, Windows included (Term::ReadKey with virtual terminal input); the name queries sent only when read (D3); `--help` and `--explain` settle it too; `-V` reports what settled it, the queries sent and the colours written | AC1, AC3; AC2 holds |
+| 2 | The sets: the validated sets in `ltl` as one table of roles, and three palettes (today's, dark, light) resolved once the background is settled. This drop covers: the timeline, the run summary, the message and thread-pool tables, the banner, help and explain, the progress lines and the pause prompt; black or white over a fill; blue's highlight 27; one grey for every line, the heatmap's and the histogram's included; bold in the set's emphasis colour; the summary's bar found for a 24-bit category | AC2, AC4 (the gradients and the notices aside), AC5, AC6, AC8, AC10, AC11 |
+| 3 | The heatmap's gradients in 24-bit; `-V heatmap-palette` reports the steps written | AC7 |
+| 4 | The notice surfaces from the sets (§ 12.9); the dimmed layer keeps every colour | AC9 |
+| 5 | The documents (the `-lbg` and `-dbg` rows, `docs/terminal-output.md`, `docs/design-language.md`, the records of the Windows block) and every screenshot regenerated | AC12, AC13 |
+| 6 | On the Windows host: Windows Terminal on One Half Light and Campbell, and the classic console, with no option; the runs read as in § 11 | AC14 |
+
+Then the completion gate (the `after` benchmark, then the full suite), the
+PR and the close-out with its release-notes bullet.
+
 ## Resuming
 
 - Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
@@ -1782,7 +1800,7 @@ learns them as a colour before AC4 to AC11 can be asserted.
   (§ 12.9): the light category colours are chosen from the gradients, and
   the dark set's notice colours are validated.
 - Acceptance criteria written (§ Acceptance criteria).
-- Next: the delivery plan, then the implementation, from § 1, against
-  § Acceptance criteria.
+- Next: the delivery plan (§ Delivery plan, proposed), then the
+  implementation, from § 1, against § Acceptance criteria.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
