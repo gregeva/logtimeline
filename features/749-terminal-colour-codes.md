@@ -1762,6 +1762,9 @@ toward white.
   - **Not this issue's:** the base commit's `ltl` does the same (3 of 3).
   - `tests/validate-notices.sh`'s tmux scenarios send the same keys with the
     same gap.
+  - **The architect, 2026-11-04:** the browser has never shipped, so #412
+    (notice surfaces) is reopened and carries it, in
+    `features/412-notice-surfaces.md` § Open items.
 
 ## Acceptance criteria
 
@@ -2291,8 +2294,8 @@ closes #683 as resolved by this issue (D4).
   `before` benchmark was taken there, and the harnesses run there and on
   Linux only. Restore the version and regenerate the screenshots at it
   (drop 5), take the `after` benchmark, then run the full suite.
-- Open with the architect (§ 14.5): whether to file the notice browser's
-  lost `q`. `--help` without colour on Windows is a design choice, not filed
-  (architect, 2026-11-04).
+- Settled by the architect (§ 14.5, 2026-11-04):
+  - `--help` without colour on Windows is a design choice, not filed.
+  - The notice browser's lost `q` is #412's: it is reopened and carries it.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
