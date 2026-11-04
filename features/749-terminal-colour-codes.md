@@ -165,6 +165,22 @@ up, for the architect to decide) is met by § 4 to § 12.
   - #683 is closed as resolved by this issue when it ships, at this issue's
     close-out.
 
+- **D5 (architect, 2026-11-04): the validated sets supersede earlier
+  decisions about the colours of the surfaces they cover.** Raised in drop 2:
+  #653's D2 (the histogram's highlighted percentile row writes index 0, "the
+  black every highlighted timeline fill uses") no longer matches the
+  timeline, whose fills write black or white (D4). The architect: "in this
+  issue, we have established new sets of colors for dark background and light
+  background. In those sets, we already validated acceptable and appropriate
+  colors for this case, and they have been tested and accepted. That means
+  that old historical decisions, like the one you're pointing out, are going
+  to be overwritten. The reason is that they held that a particular time in
+  that simplistic case, and potentially for the third color set, which is the
+  fallback scenario, but for the new standard approaches using the 24-bit
+  color, we have far better options which take much more readability as well
+  as color precision and finesse into consideration than simply a single
+  color on a fill bar color."
+
 ## 3. Records found by search
 
 Searched with `./process/find-records.sh --issues` for `@column_colors`,
