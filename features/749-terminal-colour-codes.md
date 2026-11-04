@@ -1408,6 +1408,9 @@ blue or a teal shade away from the accepted gray. So you must go with grey:
   same grey, the architect: "I choose grey: #747474". It is the light
   notice surfaces' frame and secondary grey too (§ 12.7), so on each
   background one neutral grey draws every line and all secondary text.
+- **The histogram's gridlines take the set's grey** (the architect: "yes,
+  the gridlines take the set's grey"), in place of index 8, the terminal's
+  own bright black (slate in both Clear profiles).
 
 ## Resuming
 
@@ -1426,8 +1429,8 @@ blue or a teal shade away from the accepted gray. So you must go with grey:
 - The histogram takes the columns' fills and needs no work of its own
   (architect, § 12.6).
 - The sets' greys are #797c81 on dark and #747474 on light, and every
-  line, the heatmap's included, takes the grey of the header and footer
-  rules (architect, § 12.8).
+  line, the heatmap's and the histogram's gridlines included, takes the
+  grey of the header and footer rules (architect, § 12.8).
 - Not yet done: the validated sets (`t4`) have been read only on macOS;
   Windows read the earlier candidate `s2-c4` (§ 11). The notice surfaces
   take the sets too, validated in the notice browser prototype (§ 12.7):
