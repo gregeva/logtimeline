@@ -16,6 +16,8 @@
 #                        [--rows N] [--seconds N]
 #   every component:     [--bg dark|light] [--width N] [--height N]
 #                        [--secondary #rrggbb|N]  the secondary text's colour
+#                        [--set palette.tsv [--categories tone|gradient]]
+#                                                 the colour set's notice roles (749 notice-design.py)
 #                        (the background found from the terminal when --bg is not given)
 #
 # A parameter not given takes the defaults table's value for the use.
@@ -35,10 +37,10 @@ my $component = shift(@ARGV) // '';
 $component =~ /^(panel|bullets|ask|browser|terminal)$/ or die "usage: show.pl panel|bullets|ask|browser|terminal [options]\n";
 my %opt;
 GetOptions( \%opt, 'input=s', 'bullet=s', 'headed', 'form=s', 'placement=s', 'size=s', 'quit=s', 'keybar=s', 'record', 'seconds=i',
-    'answer=s', 'rows=i', 'fixed-height', 'bg=s', 'width=i', 'height=i', 'secondary=s' ) or die "bad options\n";
+    'answer=s', 'rows=i', 'fixed-height', 'bg=s', 'width=i', 'height=i', 'secondary=s', 'set=s', 'categories=s' ) or die "bad options\n";
 my ( $W, $H ) = terminal_size( width => $opt{width}, height => $opt{height} );
 set_answers_ahead( $opt{answer} );
-my $s      = style_for( 'new', $opt{bg}, secondary => $opt{secondary} );
+my $s      = style_for( 'new', $opt{bg}, secondary => $opt{secondary}, set => $opt{set}, categories => $opt{categories} );
 my $inputs = do "$FindBin::Bin/notices/inputs.pl"   or die "notices/inputs.pl: $@ $!\n";
 my $bd     = do "$FindBin::Bin/notices/backdrop.pl" or die "notices/backdrop.pl: $@ $!\n";
 my $live   = interactive();
@@ -57,6 +59,14 @@ if ( $component eq 'terminal' ) {
 
 my $input_name = $opt{input} // { panel => 'typical', bullets => 'typical', ask => 'memory', browser => 'heavy' }->{$component};
 my $in = $inputs->{$input_name} or die "no input '$input_name'\n";
+# With a colour set, a detail carrying ltl's histogram draws its gridlines
+# (index 8 as ltl writes them today) in the set's grey, as ltl will (feature
+# doc 749 § 12.8).
+if ( defined $opt{set} ) {
+    for my $n ( grep { ref $_->{detail} eq 'ARRAY' } @{ $in->{notices} || [] } ) {
+        $n->{detail} = [ map { s/\e\[38;5;8m/$s->{frame}/gr } @{ $n->{detail} } ];
+    }
+}
 
 # --- the run around the surface ----------------------------------------------
 

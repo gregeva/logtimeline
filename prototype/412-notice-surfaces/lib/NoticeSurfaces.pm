@@ -491,6 +491,10 @@ sub paint_differences {
 # cancel the faint. On a light one, where Windows Terminal draws faint darker,
 # every colour is blended half way to white and uncoloured text takes the
 # secondary grey (docs/terminal-output.md § Colour and emphasis).
+# The uncoloured text of a layer dimmed on a light background: 244 today, the
+# set's grey when show.pl --set gives one (feature doc 749 § 12.7).
+our $light_dim_grey = '38;5;244';
+
 sub dim_row {
     my ( $r, $bg ) = @_;
     if ( ( $bg // 'dark' ) ne 'light' ) {
@@ -498,7 +502,7 @@ sub dim_row {
         return "\e[2m$r\e[0m";
     }
     $r =~ s/\e\[([0-9;]*)m/light_dimmed_sgr($1)/ge;
-    return "\e[38;5;244m$r\e[0m";
+    return "\e[${light_dim_grey}m$r\e[0m";
 }
 
 sub sgr_without_weight {
@@ -531,8 +535,8 @@ sub light_dimmed_sgr {
     while (@p) {
         my $c = shift @p;
         $c = 0 if $c eq '';
-        if    ( $c == 0 )                                   { push @out, 0, '38;5;244' }
-        elsif ( $c == 39 )                                  { push @out, '38;5;244' }
+        if    ( $c == 0 )                                   { push @out, 0, $light_dim_grey }
+        elsif ( $c == 39 )                                  { push @out, $light_dim_grey }
         elsif ( $c == 1 || $c == 2 || $c == 22 )            { }
         elsif ( ( $c >= 30 && $c <= 37 ) )                  { push @out, '38;2;' . half_to_white( rgb_of_index( $c - 30 ) ) }
         elsif ( ( $c >= 90 && $c <= 97 ) )                  { push @out, '38;2;' . half_to_white( rgb_of_index( $c - 82 ) ) }

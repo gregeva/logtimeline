@@ -1,0 +1,14 @@
+# The notice surfaces' roles in the dark and light sets, by notice-design.py (feature doc § 12.7).
+# A value is a 256-colour index or #rrggbb; light_gradient is the light category candidate from t4's gradients.
+# key	dark	light	light_gradient
+frame	#797c81	#747474	#747474
+dim	#797c81	#747474	#747474
+dimtext	-	#747474	#747474
+text	#dee5eb	16	16
+pick	#e5eff5	16	16
+cat:data anomaly	208	#c05400	#ba5204
+cat:figure caveat	#de66de	93	#b300b3
+cat:your options	44	#078181	#008787
+cat:decision taken for you	#3d97fe	27	#215dfe
+cat:runtime condition	43	#02845d	#00875f
+cat:guidance	40	#07934f	#01af00
