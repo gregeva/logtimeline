@@ -1492,6 +1492,26 @@ option 3/4 selected as best. Page 4/4 option 3/4 selected as best."
 - Guidance reads 2.84:1 on Clear Light.
 - The light dimmed layer is as drawn on page 3.
 
+**Finding: the layer dimmed on dark loses the 24-bit colours.** The
+architect saw it on page 3, dark set: under the ask, the browser's FIGURE
+CAVEAT tab showed a bright green background, as if it were selected, though
+the guidance tab was.
+- The expected behaviour: `docs/terminal-output.md` § Colour and emphasis
+  says "A layer dimmed under a pop-up keeps its colours: faint over them on
+  a dark background".
+- The cause: to take the weight off each code, the prototype's
+  `sgr_without_weight` drops every parameter that is `1`, `2` or `22`. So
+  does `ltl`'s `notice_sgr_without_weight`, which is the same code.
+  - In `38;2;R;G;B` this drops the `2` that selects a 24-bit colour, and any
+    component of 1, 2 or 22.
+  - Figure caveat's `38;2;222;102;222` became `38;222;102;222`, in which
+    the terminal reads `102` as a bright green background.
+  - In `ltl` today the same code turns `38;5;22` and `38;5;2` into
+    `38;5`, losing the colour.
+- Fixed in the prototype (issue branch): an extended colour's parameters
+  are kept whole, and only a weight code standing alone is dropped. The pages
+  were recaptured, and no bright background remains on any of them.
+
 ## Acceptance criteria
 
 Derived from § 1, D1 amended and the architect's decisions of § 12.4 to
@@ -1652,6 +1672,10 @@ together they show every surface (§ 10).
       - The layer dimmed under a pop-up keeps today's mechanism. On light,
         its uncoloured text takes #747474 and each colour is blended from
         the set's own value (§ 12.9).
+      - On dark, the dimmed layer keeps every colour as written, 256-colour
+        and 24-bit alike, with only its weight removed. Today
+        `notice_sgr_without_weight` drops a `2` selector and any component
+        of 1, 2 or 22 (§ 12.9, finding).
       - The dark category colours are those drawn in § 12.9: today's,
         with figure caveat #de66de and decision taken #3d97fe.
       - Paths: `notice_style` and its consumers, `notice_dim_row` and
