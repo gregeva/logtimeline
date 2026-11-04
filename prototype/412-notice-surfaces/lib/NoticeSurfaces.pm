@@ -505,9 +505,21 @@ sub dim_row {
     return "\e[${light_dim_grey}m$r\e[0m";
 }
 
+# The parameters of an extended colour (38;5;N, 38;2;R;G;B and their
+# backgrounds) are kept whole: only a bold, faint or normal-weight code of
+# its own is dropped.
 sub sgr_without_weight {
-    my @p = grep { $_ ne '1' && $_ ne '2' && $_ ne '22' } split /;/, $_[0], -1;
-    return @p ? "\e[" . join( ';', @p ) . 'm' : '';
+    my @p = split /;/, $_[0], -1;
+    my @out;
+    while (@p) {
+        my $c = shift @p;
+        if ( ( $c eq '38' || $c eq '48' ) && @p && ( $p[0] eq '5' || $p[0] eq '2' ) ) {
+            push @out, $c, splice( @p, 0, $p[0] eq '5' ? 2 : 4 );
+            next;
+        }
+        push @out, $c unless $c eq '1' || $c eq '2' || $c eq '22';
+    }
+    return @out ? "\e[" . join( ';', @out ) . 'm' : '';
 }
 
 # The xterm values of the 256 colours, for blending a colour towards white.
