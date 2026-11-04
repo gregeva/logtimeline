@@ -292,13 +292,13 @@ if scenario_wanted "$current_scenario"; then
     ( cd "$REPO_DIR" && "$LTL" -ni -V heatmap-palette $args ) > "$TMP_DIR/heat.palette" 2> "$TMP_DIR/heat.palette.stderr" || true
     check_warnings "$TMP_DIR/heat.palette"
     active=$(sed -n 's/^gradient_active: //p' "$TMP_DIR/heat.palette")
-    gradient=$(sed -n "s/^gradient_$active: //p" "$TMP_DIR/heat.palette")
+    gradient=$(sed -n 's/^gradient_written: //p' "$TMP_DIR/heat.palette")
     read -r first last cf cs <<< "$(traced_crop "$out" 'sections=timeline')" || true
     assert_command \
         command     "[[ -n '$gradient' ]] && perl '$CELLS' heatmap '$TMP_DIR/h-timeline.svg' '$TMP_DIR/heat.ltl' $first $last $cf $cs 0,0,0,0 '$TMP_DIR/heat.ltl.stderr' '$gradient'" \
         reads       "$TMP_DIR/heat.ltl" \
-        label       "heatmap cells use only the $active gradient ($gradient) and every one is in the image" \
-        asserts     'Every heatmap cell ltl printed, located by the layout engine column offsets, carries a colour of the gradient -V heatmap-palette reports, and the image carries each of them' \
+        label       "heatmap cells use only the $active gradient written ($gradient) and every one is in the image" \
+        asserts     'Every heatmap cell ltl printed, located by the layout engine column offsets, carries one of the steps -V heatmap-palette reports written (gradient_written: 256-colour indices, or the sets 24-bit steps once the background is known), and the image carries each of them' \
         produced_by 'print_heatmap_row() in ltl; render_svg() in process/capture-screenshots.pl' \
         contract    "$CONTRACT criterion 2; features/heatmap.md"
 fi

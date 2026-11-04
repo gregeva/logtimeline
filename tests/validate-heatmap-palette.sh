@@ -84,6 +84,16 @@ GREEN_LIGHT='194,157,120,84,48,42,36,35'
 CYAN_DARK='23,30,37,44,51,80,86,123'
 CYAN_LIGHT='195,159,123,87,51,44,37,30'
 
+# The steps a heatmap writes when the background is known: the validated sets'
+# 24-bit gradients (features/749-terminal-colour-codes.md § 12.6, AC7; the g<colour>
+# rows of palettes/t4.tsv on the issue branch), copied here, not read from ltl.
+YELLOW_SET_DARK='#785502,#926701,#ac7b08,#c19202,#ceae05,#d6cc0e,#e7e70e,#ffff00'
+YELLOW_SET_LIGHT='#edee21,#e1e10e,#d7d501,#d5c506,#d0b609,#cba701,#c49909,#bd8b06'
+GREEN_SET_DARK='#026401,#047b03,#059204,#06aa05,#06c305,#05dd04,#01f701,#9aff93'
+GREEN_SET_LIGHT='#8cfe84,#1eff1a,#05f204,#03e402,#0bd609,#07c906,#06bc05,#01af00'
+CYAN_SET_DARK='#037171,#098585,#009a9a,#02afaf,#0fc5c4,#5cd6d5,#16f1f1,#8afffe'
+CYAN_SET_LIGHT='#11e4e4,#05d7d7,#0ec9c9,#0dbbbb,#0daeae,#0ca1a1,#0b9494,#008787'
+
 pass=0
 fail=0
 failures=()
@@ -282,6 +292,7 @@ scenario_palette() {
     local exp_active="$1"; shift
     local exp_dark="$1"; shift
     local exp_light="$1"; shift
+    local exp_written="$1"; shift
 
     current_scenario="$name"
     echo "[$current_scenario]"
@@ -340,6 +351,12 @@ scenario_palette() {
         asserts     "gradient_active reports which branch (${exp_active}) print_heatmap_row() will pick when rendering; load-bearing line for visual palette coverage" \
         produced_by 'emit_heatmap_palette_verbose() in ltl (\$light_background ? "light" : "dark")' \
         contract    'Issue #250 - gradient_active is the contract for which palette renders'
+
+    assert_line "$out" \
+        pattern     "^gradient_written: ${exp_written}\$" \
+        asserts     "gradient_written reports the eight steps print_heatmap_row() writes (${exp_written}): the set's 24-bit steps when the background is known, ltl's own indices when it is not" \
+        produced_by 'heatmap_gradient_params() in ltl, through emit_heatmap_palette_verbose()' \
+        contract    'features/749-terminal-colour-codes.md AC7, § 13'
 }
 
 # ---------------------------------------------------------------------------
@@ -589,6 +606,7 @@ scenario_register no-heatmap \
                   lbg-count \
                   precedence-lbg-then-dbg \
                   precedence-dbg-then-lbg \
+                  not-known-duration \
                   udm-all-zero \
                   udm-no-value \
                   udm-colour-by-position \
@@ -617,51 +635,67 @@ echo ""
 scenario_palette "dbg-duration" \
     "-hm duration -dbg" \
     "duration" "yellow" "no" "-dbg" "dark" \
-    "$YELLOW_DARK" "$YELLOW_LIGHT"
+    "$YELLOW_DARK" "$YELLOW_LIGHT" \
+    "$YELLOW_SET_DARK"
 echo ""
 
 scenario_palette "dbg-bytes" \
     "-hm bytes -dbg" \
     "bytes" "green" "no" "-dbg" "dark" \
-    "$GREEN_DARK" "$GREEN_LIGHT"
+    "$GREEN_DARK" "$GREEN_LIGHT" \
+    "$GREEN_SET_DARK"
 echo ""
 
 scenario_palette "dbg-count" \
     "-hm count -dbg" \
     "count" "cyan" "no" "-dbg" "dark" \
-    "$CYAN_DARK" "$CYAN_LIGHT"
+    "$CYAN_DARK" "$CYAN_LIGHT" \
+    "$CYAN_SET_DARK"
 echo ""
 
 # --- -lbg path: each of three metrics ---
 scenario_palette "lbg-duration" \
     "-hm duration -lbg" \
     "duration" "yellow" "yes" "-lbg" "light" \
-    "$YELLOW_DARK" "$YELLOW_LIGHT"
+    "$YELLOW_DARK" "$YELLOW_LIGHT" \
+    "$YELLOW_SET_LIGHT"
 echo ""
 
 scenario_palette "lbg-bytes" \
     "-hm bytes -lbg" \
     "bytes" "green" "yes" "-lbg" "light" \
-    "$GREEN_DARK" "$GREEN_LIGHT"
+    "$GREEN_DARK" "$GREEN_LIGHT" \
+    "$GREEN_SET_LIGHT"
 echo ""
 
 scenario_palette "lbg-count" \
     "-hm count -lbg" \
     "count" "cyan" "yes" "-lbg" "light" \
-    "$CYAN_DARK" "$CYAN_LIGHT"
+    "$CYAN_DARK" "$CYAN_LIGHT" \
+    "$CYAN_SET_LIGHT"
 echo ""
 
 # --- Precedence: -dbg wins over -lbg regardless of CLI order ---
 scenario_palette "precedence-lbg-then-dbg" \
     "-hm duration -lbg -dbg" \
     "duration" "yellow" "no" "-dbg" "dark" \
-    "$YELLOW_DARK" "$YELLOW_LIGHT"
+    "$YELLOW_DARK" "$YELLOW_LIGHT" \
+    "$YELLOW_SET_DARK"
+echo ""
+
+# --- Not known: piped, no option, ltl's own dark gradient ---
+scenario_palette "not-known-duration" \
+    "-hm duration" \
+    "duration" "yellow" "no" "default" "dark" \
+    "$YELLOW_DARK" "$YELLOW_LIGHT" \
+    "$YELLOW_DARK"
 echo ""
 
 scenario_palette "precedence-dbg-then-lbg" \
     "-hm duration -dbg -lbg" \
     "duration" "yellow" "no" "-dbg" "dark" \
-    "$YELLOW_DARK" "$YELLOW_LIGHT"
+    "$YELLOW_DARK" "$YELLOW_LIGHT" \
+    "$YELLOW_SET_DARK"
 echo ""
 
 scenario_udm_all_zero

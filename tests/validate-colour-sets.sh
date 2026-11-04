@@ -2,8 +2,8 @@
 # validate-colour-sets.sh — Validate the colours ltl writes for the background:
 # the dark set with -dbg, the light set with -lbg, and ltl's own codes when the
 # background is not known, the text over every fill black or white, whichever
-# reads (features/749-terminal-colour-codes.md AC2, AC4 to AC6, AC8, AC10,
-# AC11; D4).
+# reads (features/749-terminal-colour-codes.md AC2, AC4 to AC8, AC10, AC11;
+# D4).
 # Usage: ./tests/validate-colour-sets.sh [--scenario NAME]... [--list]
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md.
@@ -224,6 +224,31 @@ elsif ( $mode eq 'heatmap-lines' ) {
     $check->( 'the heatmap scale line and markers', join( ',', sort keys %fg ), $w->{grey} );
     printf "%d scale and %d marker cells in %s\n", scalar @scale, scalar @marker, join( ',', sort keys %fg );
 }
+elsif ( $mode eq 'heatmap-cells' ) {
+    # Every cell of the duration heatmap is drawn in one of the yellow
+    # column's eight steps for the condition: the sets' 24-bit gradients
+    # (palettes/t4.tsv, gyellow), ltl's own 256-colour gradient when the
+    # background is not known.
+    my %steps = (
+        dark    => [ map { "#$_" } qw(785502 926701 ac7b08 c19202 ceae05 d6cc0e e7e70e ffff00) ],
+        light   => [ map { "#$_" } qw(edee21 e1e10e d7d501 d5c506 d0b609 cba701 c49909 bd8b06) ],
+        unknown => [ 58, 94, 136, 142, 178, 184, 220, 226 ],
+    );
+    my %ok = map { ( /^#/ ? "rgb:$_" : "256:$_" ) => 1 } @{ $steps{$cond} };
+    my ( %seen, $n );
+    for my $l ( grep { $plain->($_) =~ /^ 2025-05-07/ } @lines ) {
+        my $row = decode_line($l);
+        my ($sep) = grep { $row->[$_]{ch} eq "\x{2502}" } reverse 0 .. $#$row;
+        die "no separator before the heatmap\n" unless defined $sep;
+        for my $c ( @$row[ $sep + 1 .. $#$row ] ) {
+            next unless $c->{ch} eq "\x{2588}";
+            $n++; $seen{ $c->{fg} }++;
+            push @bad, "a heatmap cell in $c->{fg}, not one of the eight steps" unless $ok{ $c->{fg} };
+        }
+    }
+    die "no heatmap cell\n" unless $n;
+    printf "%d heatmap cells in %d of the eight steps\n", $n, scalar keys %seen;
+}
 elsif ( $mode eq 'gridlines' ) {
     my $unknown_grid = $cond eq 'unknown' ? '256:8' : $w->{grey};
     my @grid;
@@ -378,6 +403,12 @@ scenario_lines() {
         asserts     "The lines around the heatmap take the grey of the header and footer rules" \
         produced_by 'print_heatmap_footer_scale() and print_heatmap_row() in ltl, through %colors' \
         contract    "$DOC AC8, § 12.8"
+    assert_command \
+        command     "'$PERL' '$CHECK' '$SCRIPT_DIR/lib/rendered-output.pl' heatmap-cells '$out' $cond" \
+        label       "every heatmap cell in one of the yellow column's eight steps for $what" \
+        asserts     "A heatmap draws in its column's own gradient: the set's eight 24-bit steps when the background is known, ltl's own 256-colour steps when it is not" \
+        produced_by 'heatmap_gradient_params() and print_heatmap_row() in ltl' \
+        contract    "$DOC AC7, § 12.6"
     assert_command \
         command     "'$PERL' '$CHECK' '$SCRIPT_DIR/lib/rendered-output.pl' gridlines '$out' $cond" \
         label       "the histogram's gridlines in the grey of $what" \

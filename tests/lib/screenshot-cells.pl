@@ -202,12 +202,12 @@ if ( $mode eq 'ticks' ) {
 }
 
 if ( $mode eq 'heatmap' ) {
-    # Cells of the heatmap column carry only colours of the gradient
-    # -V heatmap-palette reports.
+    # Cells of the heatmap column carry only the steps -V heatmap-palette
+    # reports written: 256-colour indices, or 24-bit #rrggbb.
     my ( $layout_file, $gradient ) = @rest;
     my $layout = parse_debug_layout($layout_file);
     my ($heatmap) = grep { $_->{id} eq 'heatmap' } @$layout or die "no heatmap column in the layout table\n";
-    my %allowed = map { ( "256:$_" => 1 ) } split /,/, $gradient;
+    my %allowed = map { ( /^#/ ? "rgb:$_" : "256:$_" ) => 1 } split /,/, $gradient;
     my $blocks = 0;
     for my $r ( 0 .. $rows - 1 ) {
         for my $abs ( $heatmap->{start} .. $heatmap->{start} + $heatmap->{width} - 1 ) {
