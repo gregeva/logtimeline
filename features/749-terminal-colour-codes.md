@@ -2,6 +2,12 @@
 
 ## Status
 
+**Done, 2026-11-04.** Merged into `release/0.20.0` by PR #769 (merge
+f1da1369, branch `749-24-bit-colour-sets` at f158409d); the completion gate
+passed on f158409d (§ Completion gate). #683 (a value drawn over a bar keeps a
+fixed foreground colour) closed as resolved by this issue (D4). The history
+of the work follows.
+
 **In progress, reframed by the architect on 2026-11-03 from research to
 implementation: two 24-bit colour sets, one for a dark and one for a light
 background, validated (§ 12). Research done, macOS and Windows Terminal
