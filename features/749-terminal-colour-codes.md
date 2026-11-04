@@ -21,7 +21,9 @@ reads it (D3); a value over a bar black or white in every condition, resolving
 #683 (D4); the notice surfaces drawn in the three conditions, their
 light category colours chosen from the gradients and the dark set's notice
 colours validated (§ 12.9); the acceptance criteria and the delivery
-plan agreed by the architect, and the implementation started (2026-11-04).**
+plan agreed by the architect, and the implementation started (2026-11-04);
+drops 0 to 6 delivered, the sets validated by the architect on Windows as
+`ltl` draws them (§ 14).**
 Contracts in § 2 confirmed by the architect on 2026-11-02. The research is
 `features/749-terminal-colour-codes-research.md`. The macOS (§ 5) and Windows
 Terminal (§ 6) measurements were made on 2026-11-02 with the instruments in
@@ -1653,6 +1655,113 @@ anything that does not read. Commit the captures and readings under
 `results/windows-terminal/e-ltl/` on the issue branch. Choose nothing: the
 architect reads the results.
 
+### 14.1 Results: setup
+
+Measured on 2026-11-04 by a Claude session on the Windows development host,
+from `749-24-bit-colour-sets` at dcf53139, with the host's own `ltl`
+(Strawberry Perl). Windows 11 Enterprise 25H2, build 26200.9711; Windows
+Terminal 1.24.12741.0 (ARM64); display 1920 by 1080 at 100% (96 DPI). The
+settings file sets no font face or size (Windows Terminal's default), and
+neither `intenseTextStyle` nor `adjustIndistinguishableColors` (absent). Each
+window took its scheme from `wt --colorScheme`, the settings file untouched,
+and every command was typed at a cmd prompt in a new window. Instruments:
+`prototype/749-terminal-colour-codes/` (README § Drop 6); captures and
+readings in its `results/windows-terminal/e-ltl/` (issue branch, a3fb197f).
+
+### 14.2 What settles the background
+
+The brief's run, five times in each terminal with no option:
+
+| Terminal | `background`, `settled_by`, `colours` | Reply | Query, `elapsed_ms`: median (range) |
+|---|---|---|---|
+| Windows Terminal, One Half Light | light, terminal, light | `fafa/fafa/fafa` | 27 (25 to 29) |
+| Windows Terminal, Campbell | dark, terminal, dark | `0c0c/0c0c/0c0c` | 27 (26 to 34) |
+| Classic console host (`conhost.exe cmd`) | `-`, none, today | none (`answered=no`) | 29 (25 to 31) |
+
+- **Every run:** `terminal: yes`, and `query: name sent=no` and
+  `query: identity sent=no` (D3).
+- **Options:** in the Campbell window `-lbg` gives light, `-lbg`, light, and
+  `-dbg` dark, `-dbg`, dark. Neither sends the query.
+- **The console host** answers the device attributes request that follows
+  the query, so its silence costs no wait.
+- **The console given back.** The console's input mode was 0x01f7 before the
+  first run and after every run, read on the same command line as `ltl`.
+  That is line input, echo and processed input, with virtual terminal input
+  (0x0200) cleared again. After each of the 17 runs, a line typed at the
+  prompt echoed and was read as a line.
+
+### 14.3 The runs, drawn by `ltl` itself
+
+**What was shown.** The architect judged the runs by sight, as on macOS
+("show me the same as what I already judged on macOS"), in place of § 11.3's
+tallies. Each scheme had one maximized Windows Terminal window, with a tab
+per run:
+- the ten `heat-<colour>` runs, and `fills`;
+- `access-heatmap`, `access-latency`, `levels` and `udm`;
+- the notice panel;
+- `explain` and the usage error.
+
+In each tab the run was typed with no option, so the terminal's answer
+selected the set. The font was made smaller first, so the whole output
+shows: a maximized window holds 50 rows at the default font, 64 two steps
+smaller and 81 four steps smaller, and the access-log run's 73 lines took
+four.
+
+**The architect, 2026-11-04.** On Campbell: "I reviewed all of the other
+tabs and they are all good". On One Half Light: "I validate the light
+background set and renderings." The one row he questioned is #768 (§ 14.5).
+The validated tabs are captured in `results/windows-terminal/e-ltl/validated/`:
+the ten `heat-<colour>` runs and `fills` in each scheme, the counterpart of
+§ 12.6's `validated-dark.png` and `validated-light.png`.
+
+### 14.4 The notice surfaces
+
+In both schemes with no option (`notices/`):
+- the deferred panel;
+- the modal question, while it asks and after Esc;
+- the browser with a notice's options layered over it (34 rows; keys Down,
+  7, Up, Up, Enter).
+
+On Campbell the browser under the layered options is faint, with its colours
+kept and no cell gaining a background. On One Half Light it is blended
+toward white.
+
+### 14.5 Observed on the way, none caused by this issue
+
+- **`--help`, and an `--explain` longer than the window, show no colour on
+  Windows.**
+  - **Cause:** on a terminal, `ltl` pages them through Windows' `more` and
+    strips every colour code first (`pipe_to_pager`: "legacy `more` shows
+    ANSI as literal text"), since #261 (`--help` statistics index and
+    `--explain` framework, v0.15.0).
+  - **What shows:** in a 51-row window, `--help` (288 lines) came as five
+    `more` screens in the default colour with no bold, and
+    `--explain contribution-highlighting` (50 lines) likewise. In a 64-row
+    window the same explain page printed directly, in the set.
+  - **What it means:** neither today's colours nor the sets reach `--help` in
+    a Windows terminal. No record states what `--help` should look like
+    there, so this is an observation, raised with the architect.
+- **FATAL is drawn in ERROR's red, so its highlighted count reads as ERROR's.**
+  - **Where:** the `levels` run's 11:30 legend shows `30` and `5645`
+    unlabelled, on one red fill.
+  - **Cause:** `features/447-message-control-character-normalisation.md` D6
+    gave FATAL `%colors`' "red, as ERROR — both are failures", with no
+    architect mark. `features/475-log-level-vocabulary-completion.md` D4,
+    marked an architect decision of 2026-09-12, gave CRITICAL, SEVERE, ALERT
+    and EMERGENCY "red, as `FATAL` and `ERROR`". D4's stated reason is that
+    `summary_bar_color()` needs a basic hue, which another hue would also
+    have met.
+  - **Filed** by the architect's direction as #768 (FATAL and the levels
+    above ERROR are drawn in ERROR's red), the colour to be settled there.
+    The 0.20.0 base draws the same row.
+- **In the notice browser, a `q` sent half a second after Esc is lost.**
+  - **What happens:** Esc closes the layered options, and the `q` sent 0.5 s
+    later left the browser open in 3 of 3 tries. Sent about 0.8 s later, it
+    quits.
+  - **Not this issue's:** the base commit's `ltl` does the same (3 of 3).
+  - `tests/validate-notices.sh`'s tmux scenarios send the same keys with the
+    same gap.
+
 ## Acceptance criteria
 
 Agreed by the architect on 2026-11-04: "I agree the acceptance criteria and
@@ -2136,6 +2245,18 @@ closes #683 as resolved by this issue (D4).
     in three conditions, the new style, the category sheet, the light
     background); `features/heatmap.md` § 8 and `features/412-notice-surfaces.md`'s
     Windows hand-forward, each pointing at D2 and D3.
+- **Drop 6** (a3fb197f on the issue branch, 2026-11-04): the sets on
+  Windows, AC14 (§ 14.1 to § 14.5).
+  - Windows Terminal selects the light set on One Half Light and the dark set
+    on Campbell from the terminal's answer, in 27 ms. The classic console
+    host does not answer, and the background is not known.
+  - The console's input mode is given back after every run, and the name
+    queries are never sent.
+  - The architect validated both sets as `ltl` draws them in both schemes.
+  - Found on the way, none caused by this issue: `--help` shows no colour in
+    a Windows terminal (`more`, since #261); FATAL is drawn in ERROR's red
+    (#768, filed); a `q` half a second after Esc in the notice browser is
+    lost.
 
 ## Resuming
 
@@ -2156,15 +2277,20 @@ closes #683 as resolved by this issue (D4).
 - The sets' greys are #797c81 on dark and #747474 on light, and every
   line, the heatmap's and the histogram's gridlines included, takes the
   grey of the header and footer rules (architect, § 12.8).
-- Not yet done: the validated sets (`t4`) have been read only on macOS;
-  Windows read the earlier candidate `s2-c4` (§ 11).
+- The validated sets are read on Windows too: `ltl` draws them there itself,
+  validated by the architect (§ 14).
 - The notice surfaces are drawn in the three conditions by `notice-sets.sh`
   (§ 12.9): the light category colours are chosen from the gradients, and
   the dark set's notice colours are validated.
 - Acceptance criteria written (§ Acceptance criteria).
 - Acceptance criteria and delivery plan agreed by the architect
   (2026-11-04). The implementation runs drop by drop on
-  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0 to 5 delivered
-  (§ Drops delivered); next, drop 6 on the Windows host, its brief § 14.
+  `749-24-bit-colour-sets` (§ Delivery plan). Drops 0 to 6 delivered
+  (§ Drops delivered). Next is the completion gate on the macOS host: the
+  `before` benchmark was taken there, and the harnesses run there and on
+  Linux only. Restore the version and regenerate the screenshots at it
+  (drop 5), take the `after` benchmark, then run the full suite.
+- Open with the architect (§ 14.5): whether to file `--help`'s missing
+  colour on Windows, and the notice browser's lost `q`.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
