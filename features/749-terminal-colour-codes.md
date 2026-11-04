@@ -1800,6 +1800,29 @@ Then the completion gate (the `after` benchmark, then the full suite), the
 PR and the close-out with its release-notes bullet. The close-out also
 closes #683 as resolved by this issue (D4).
 
+### Drops delivered
+
+- **Drop 0** (2de2db59, 2026-11-04).
+  - The `before` benchmark on the base (`ltl` as `release/0.20.0` but for
+    its version), from the issue's worktree: `single-day-access-log-standard`,
+    `-heatmap` and `-histogram`, label `749-before`. The heatmap and histogram
+    tests reach the gradients and gridlines drops 2 and 3 change.
+  - `$version_number` was already `0.20.0-749` on the branch.
+  - `decode_line` reads `38;2;r;g;b` and `48;2;r;g;b` as one colour,
+    `rgb:#rrggbb`. The base read `38;2;222;102;222` as faint over background
+    `ansi:102`. Over 256-colour and basic codes it decodes as the base did,
+    and `tests/validate-notices.sh` (188) and
+    `tests/validate-histogram-colours.sh` (21) pass. The screenshot check
+    (`tests/lib/screenshot-cells.pl`, `colours`) holds a 24-bit colour to the
+    value written, as it holds an index to xterm's.
+  - The rewriter writes § 12.8's greys: `tone.py` writes them as a `grey`
+    row of `t4.tsv`, and `e-palette.py` writes it for `s8`, `f244` and the
+    bright black of the heatmap's scale line and markers and the histogram's
+    gridlines. Against the validated rewrite, over the nineteen § 10 runs,
+    only bright black moved: 18,411 cells of rules and headings, 2,220 in
+    the heatmap, 515 in the histogram, in each set. `t4.tsv` with this row
+    is AC4's reference.
+
 ## Resuming
 
 - Done: research (§ 4); macOS (§ 5) and Windows Terminal (§ 6) measured
@@ -1827,6 +1850,7 @@ closes #683 as resolved by this issue (D4).
 - Acceptance criteria written (§ Acceptance criteria).
 - Acceptance criteria and delivery plan agreed by the architect
   (2026-11-04). The implementation runs drop by drop on
-  `749-24-bit-colour-sets` (§ Delivery plan); next, drop 0.
+  `749-24-bit-colour-sets` (§ Delivery plan). Drop 0 delivered (§ Drops
+  delivered); next, drop 1, the background.
 - State outside the repository: none needed; the captures are remade by the
   instruments.
