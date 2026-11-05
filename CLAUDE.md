@@ -130,16 +130,17 @@ about anything else, these still hold.
       on this machine (`workflow.md` § 3), and again at the release gate on the
       release branch, standard and generated read path (§ 5); never while
       working. Before the completion gate, the behaviour the change could have altered is named.
-- [ ] Subagents and workflow agents run Opus 5 at medium effort, set explicitly
-      on every call.
-- [ ] A refused command is decomposed and its parts retried before it is called
-      blocked (`workflow.md` § 5).
+- [ ] Subagents and workflow agents run Opus 5 at medium effort, set on every call.
+- [ ] A refused command is decomposed and its parts retried before it is called blocked (`workflow.md` § 5).
 
 ## Before writing a file, an issue body, a comment, or code
 
 - [ ] Which record holds this, and what an issue body may hold: `docs/process/issues.md`
       § Where things are recorded, § Filing a requirement. Issue bodies and comments
       go through `gh`, where no path-scoped rule fires.
+- [ ] The master documents of § Where to look are the reference for their domain:
+      work builds on them and updates, in the same change, each whose domain it
+      changes, each keeping its own domain only (`issues.md` § Where things are recorded).
 - [ ] A change is proven by the developer's own runs before and after, read
       from captured `-V`; a visual surface by looking at rendered output on
       real data (`docs/test-driven-development.md` § Testing while developing,
@@ -215,7 +216,6 @@ a host and building: `docs/development-environment.md`.
 perl -c ltl                                       # syntax check; the whole gate for a comment-only diff
 ./tests/validate-<name>.sh --list                 # scenario names; --scenario <a> --scenario <b> while iterating
 ./tests/run-suite.sh <scratch-dir>                # the full suite: completion gate only, after the benchmark
-./tests/cleanup-test-artifacts.sh                 # the only sanctioned cleanup
 ```
 
 ## Architecture

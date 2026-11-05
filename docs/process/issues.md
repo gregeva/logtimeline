@@ -8,6 +8,7 @@ lives. `CLAUDE.md` holds the checkpoints; this file holds the conventions.
 | Record | Lives in | Not in |
 |---|---|---|
 | Requirement (what and why) | issue body, in the architect's own terms | design, line numbers, plans |
+| The settled form of a domain: how a surface looks, how it behaves, what output does per platform, the mechanisms in code | that domain's master document (`CLAUDE.md` § Where to look), updated in the same change as the work that settles or alters it | a feature doc as its only copy |
 | Design, locked decisions (Dxx), acceptance criteria, findings, contracts, hand-forwards | the owning `features/*.md` | issue comments (they only point at the doc) |
 | A decision about an issue's disposition | the open issue's own thread, transcribed at the moment it is made | only the closing comment of some other PR or issue |
 | A deferral ("restorable from X") | a committed artifact that X actually contains, verified before the deferral is written | branch memory |
@@ -15,6 +16,20 @@ lives. `CLAUDE.md` holds the checkpoints; this file holds the conventions.
 | Internal mechanism (identifiers, issue numbers, jargon) | source comments, feature docs, issue and PR bodies | `--help`, `--explain`, `docs/usage.md`, `docs/explain/`, error messages, the wiki |
 | Anything about the tooling used to do the work (problem reports, tool feedback, transcripts, scratch) | the session scratchpad or `/tmp` | anywhere in the repository |
 | A working rule for the agent (a check, a procedure, a convention) | the owning process doc under `docs/process/`, a path-scoped rule under `.claude/rules/`, or a hook under `process/claude-hooks/`; `CLAUDE.md` carries the one-line direction and the pointer (`docs/architecture-patterns.md` § Instruction files) | `CLAUDE.md` as the only copy |
+
+**The master documents are the reference.** The documents `CLAUDE.md`
+§ Where to look names for a domain (`docs/design-language.md`,
+`docs/terminal-interaction.md`, `docs/terminal-output.md`,
+`docs/architecture-patterns.md` and the others there) are where work in that
+domain starts and what it builds on. Work that settles or alters what one of
+them holds updates it in the same change, only where the work relates directly
+to it: the feature doc keeps the decision and its validation, the master
+document the settled form a later change reads. Each master document holds its
+own domain only, so a subject stays findable in one place, and one change
+often updates several: a colour goes to `docs/design-language.md`, a position
+to `docs/terminal-interaction.md`, the mechanism that draws them to
+`docs/architecture-patterns.md`. An acceptance criterion for the documents
+names the content each one gains, not only that it is updated.
 
 Code is referenced by enclosing function name plus a distinctive snippet to grep
 for. Line numbers drift within a day and may appear only as hints.
