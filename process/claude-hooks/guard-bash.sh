@@ -3,7 +3,8 @@
 # Reads the tool call as JSON on stdin and enforces the mechanical rules from
 # CLAUDE.md that a command string can be checked against. Exit 2 blocks the call
 # and returns the message to Claude; a JSON "ask" decision hands the call to the
-# architect for an explicit yes.
+# architect for an explicit yes; a JSON additionalContext lets the call run and
+# puts a reminder in front of Claude.
 use strict;
 use warnings;
 use JSON::PP;
@@ -104,5 +105,17 @@ ask "run-benchmark.sh full/xl/all is a release-gate instrument (about 2.5 h), ne
     if $cmd =~ /(?:^|[;&|(]\s*|\b(?:nohup|time|sudo|caffeinate(?:\s+-\S+)*)\s+)(?:\.\/|\S*\/)?run-benchmark\.sh\s+(?:full|xl|all)\b/;
 ask "commit with --no-verify bypasses the pre-commit guard - confirm"
     if $cmd =~ /\bgit\s+commit\b[^;&|]*--no-verify\b/;
+
+# --- reading an issue is the start of checking a topic: a reminder, not a
+# block, that its records are found by search before anything is said about
+# it (CLAUDE.md § Before checking or investigating a topic)
+if ( $cmd =~ /\bgh\s+issue\s+view\b/ ) {
+    print encode_json({ hookSpecificOutput => { hookEventName => 'PreToolUse',
+        additionalContext => "[claude-hook] Reminder: before stating anything about this issue's topic, find its records by search: "
+            . "./process/find-records.sh --issues <terms>, the terms being every option (short and long form), sub and user-visible message "
+            . "the topic touches; each record listed is read or dismissed with its reason. An issue's links and the first record found "
+            . "tell a piece of the story, never the whole (CLAUDE.md, Before checking or investigating a topic; docs/process/investigation.md)." } });
+    exit 0;
+}
 
 exit 0;

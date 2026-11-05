@@ -109,11 +109,11 @@ about anything else, these still hold.
       inputs; a claim about a structure's size or cost comes from a measurement
       (`tests/baseline/README.md` § Reading memory from a benchmark record).
 
-## Before planning, scoping, or stating a design view
+## Before checking or investigating a topic, planning, scoping, or stating a view
 
-- [ ] The owning records are found by search, never taken from the issue's
-      links: `./process/find-records.sh --issues <terms>`, each record read or
-      dismissed with its reason (`docs/process/investigation.md`).
+- [ ] Every check or investigation of a topic starts from its records found by
+      search (`./process/find-records.sh --issues <terms>`), never from an issue's
+      links or the first record found; each is read or dismissed (`docs/process/investigation.md`).
 - [ ] A divergence is a finding only with the primary record line that defines
       the expected behaviour quoted; without one it is an observation, raised
       as a question (`investigation.md` § A divergence is a finding only with its record line).
