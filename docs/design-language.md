@@ -77,29 +77,133 @@ Three rules (architect, 2026-10-19):
 ### The colour table
 
 `@column_colors` holds ten named colours, each with a foreground, a plain and a
-highlighted background, and two eight-step 256-colour gradients, one per
-background:
+highlighted fill, and an eight-step gradient. Each is drawn in one of the three
+conditions of § Backgrounds: while the background is not known, in `ltl`'s own
+codes; once it is known, from the colour set for it (`%colour_sets`), 24-bit
+where the set moves a colour. The sets are the architect's, validated on
+2026-11-03 and 2026-11-04 (`features/749-terminal-colour-codes.md` § 12).
 
-| name | foreground | use |
+Duration, bytes and count take the first three. The other seven go, in order,
+to the columns added after them: sessions, users, each thread pool, then each
+user-defined metric. Colour identity is a property of the column definition in
+`@column_layout`, never looked up by position at render time; a heatmap and a
+histogram take the colour and gradient of the metric they draw
+(`features/column-layout-refactor.md` § Color Scheme Requirements).
+
+**Foregrounds**, the column's values and headings:
+
+| name | use | not known | dark | light |
+|---|---|---|---|---|
+| yellow | duration | SGR 93 | #e5c872 | #c8ab55 |
+| green | bytes | SGR 32 | #6caa71 | #5a9860 |
+| cyan | count | SGR 36 | #7ccbcd | #4fadb0 |
+| blue | | SGR 34 | #719bb9 | #4a799c |
+| magenta | | SGR 35 | #bf7dcf | #a057b1 |
+| red | | SGR 31 | #d57464 | #b45648 |
+| orange | | 256-colour 208 | 208 | #db7302 |
+| pink | | 256-colour 213 | 213 | #e36de4 |
+| teal | | 256-colour 43 | 43 | #05ba97 |
+| purple | | 256-colour 93 | #9758fe | 93 |
+
+**Fills**, the bars: 256-colour codes in every condition, but blue's
+highlighted fill, which is 27 once the background is known, so that it stands
+apart from its plain fill. The text over every fill is black or white
+(256-colour 16 or 231), whichever reads on it, in every condition.
+
+| name | plain fill | highlighted fill |
 |---|---|---|
-| yellow | SGR 93 | duration |
-| green | SGR 32 | bytes |
-| cyan | SGR 36 | count |
-| blue, magenta, red, orange, pink, teal, purple | SGR 34, 35, 31, 256-colour 208, 213, 43, 93 | the next user-defined metric columns, by position among them |
+| yellow | 184 | 226 |
+| green | 34 | 46 |
+| cyan | 30 | 36 |
+| blue | 20 | 21; 27 once the background is known |
+| magenta | 127 | 201 |
+| red | 124 | 196 |
+| orange | 166 | 208 |
+| pink | 169 | 213 |
+| teal | 29 | 43 |
+| purple | 55 | 93 |
 
-Colour identity is a property of the column definition in `@column_layout`,
-never looked up by position at render time; a heatmap and a histogram take the
-colour and gradient of the metric they draw (`features/column-layout-refactor.md`
-§ Color Scheme Requirements). A heatmap of a metric with no column colour uses
-the white gradient of `%heatmap_special_gradients`.
+The histogram's highlighted part does not follow this table for three colours:
+it reads a second number of the colour's entry (`highlighted_bg_num`), 51 for
+cyan, 27 for blue in every condition and 207 for magenta (#666, the
+histogram's count highlight differs from the timeline's).
 
-Once the background is known (§ Backgrounds) every colour is written from the
-colour set for it, 24-bit (`%colour_sets`): each foreground the set's colour
-for its hue, each gradient the set's eight steps in the column's own hue,
-faintest first. The fills keep their 256-colour codes but blue's highlighted
-fill, 27, which stands apart from its plain fill. The text over every fill is
-black or white (256-colour 16 or 231), whichever reads on it, whether the
-background is known or not. The white gradient has no set and keeps its own.
+**Gradients**, the heatmap's eight steps, faintest first. While the background
+is not known, the 256-colour steps; once it is known, the set's, each step in
+the column's own hue:
+
+| name | not known | dark | light |
+|---|---|---|---|
+| yellow | 58, 94, 136, 142, 178, 184, 220, 226 | #785502, #926701, #ac7b08, #c19202, #ceae05, #d6cc0e, #e7e70e, #ffff00 | #edee21, #e1e10e, #d7d501, #d5c506, #d0b609, #cba701, #c49909, #bd8b06 |
+| green | 22, 28, 34, 40, 46, 82, 118, 154 | #026401, #047b03, #059204, #06aa05, #06c305, #05dd04, #01f701, #9aff93 | #8cfe84, #1eff1a, #05f204, #03e402, #0bd609, #07c906, #06bc05, #01af00 |
+| cyan | 23, 30, 37, 44, 51, 80, 86, 123 | #037171, #098585, #009a9a, #02afaf, #0fc5c4, #5cd6d5, #16f1f1, #8afffe | #11e4e4, #05d7d7, #0ec9c9, #0dbbbb, #0daeae, #0ca1a1, #0b9494, #008787 |
+| blue | 17, 18, 19, 20, 21, 27, 33, 39 | #0003bc, #0029cc, #0032ee, #0d49fe, #2964fe, #437bfe, #5c8ffe, #76a1fe | #a0bffe, #8eb3fe, #7ca6ff, #6b99fe, #588cfe, #467dfe, #346efe, #215dfe |
+| magenta | 53, 89, 125, 127, 163, 165, 201, 207 | #7b027b, #8f048f, #a500a5, #ba04ba, #d005d0, #e706e7, #fe08fe, #ff61fc | #ffa7fb, #ff89fb, #ff65fc, #ff2afe, #ee07ee, #da05da, #c700c7, #b300b3 |
+| red | 52, 88, 124, 160, 196, 197, 203, 209 | #8e0302, #a60201, #be0503, #d70503, #f10302, #ff382a, #ff6554, #ff8574 | #fda799, #ff8c7c, #ff6e5d, #ff4838, #f90101, #df0603, #c70100, #af0000 |
+| orange | 94, 130, 166, 172, 208, 209, 214, 215 | #a44804, #b75105, #cb5a04, #df6301, #f36d04, #ff7d2f, #fe9660, #ffac82 | #feab81, #fe9964, #fe8642, #fc7103, #ec6900, #db6100, #cb5900, #ba5204 |
+| pink | 132, 133, 169, 170, 206, 207, 213, 219 | #ac5f90, #c162a0, #da61b2, #e371bc, #ff6ccf, #ff88d5, #fea0db, #feb6e2 | #ffa2dc, #ff8cd6, #fe75d0, #fe57ca, #ff24c6, #f106ba, #e002ac, #b24e90 |
+| teal | 23, 29, 30, 36, 37, 43, 44, 50 | #06704f, #00845d, #01986b, #00ac7a, #03c189, #08d699, #08eca9, #46ffbc | #2ffeb9, #12edab, #03dc9d, #0eca91, #09b984, #0aa877, #08976b, #00875f |
+| purple | 54, 55, 56, 92, 93, 129, 134, 171 | #5801a2, #6602bb, #7500d6, #8502f0, #912aff, #9a4fff, #9c7bda, #ae80ff | #c9b2fd, #bb99fe, #ad7ffe, #a061fe, #943bfe, #7a49c4, #7201d0, #5f00af |
+
+A heatmap of a metric with no column colour uses the white gradient of
+`%heatmap_special_gradients`, which has no set and keeps its own codes.
+
+### The colour sets beyond the columns
+
+Every other colour `ltl` writes is drawn from the same sets once the
+background is known.
+
+**The sixteen scheme colours**, which `ltl` writes as basic and bright codes
+(`30` to `37`, `90` to `97`, and `38;5;0` to `38;5;15`): the categories of
+`%colors`, the rules and headings, the legend. Black is the scheme's own in
+every condition; bright black is the one grey that draws every line and all
+secondary text.
+
+| index | colour | dark | light |
+|---|---|---|---|
+| 0 | black | the scheme's | the scheme's |
+| 1 | red | #d57464 | #b45648 |
+| 2 | green | #6caa71 | #5a9860 |
+| 3 | yellow | #c4ac62 | #a89046 |
+| 4 | blue | #719bb9 | #4a799c |
+| 5 | magenta | #bf7dcf | #a057b1 |
+| 6 | cyan | #7ccbcd | #4fadb0 |
+| 7 | white | #dee5eb | #3a4851 |
+| 8 | bright black, the grey | #797c81 | #747474 |
+| 9 | bright red | #e87461 | #c05140 |
+| 10 | bright green | #79be7e | #67ab6d |
+| 11 | bright yellow | #e5c872 | #c8ab55 |
+| 12 | bright blue | #67b5ed | #2986c4 |
+| 13 | bright magenta | #d389e5 | #ac65be |
+| 14 | bright cyan | #84dde0 | #5cc8cc |
+| 15 | bright white | #e5eff5 | #313c44 |
+
+**`ltl`'s fixed 256-colour text codes**: the code is kept where it reads at
+4.5:1 on that background, moved in lightness only where it does not. The
+column foregrounds above and the shades below are drawn from this table; 33
+and 170 are two notice categories' colours on dark (§ The new style), on light
+the darkest step of their column's light gradient.
+
+| 256-colour | dark | light |
+|---|---|---|
+| 29 | #31a076 | #02845d |
+| 30 | #32a09f | #078181 |
+| 33 | #3d97fe | 33 |
+| 34 | 34 | #029202 |
+| 35 | 35 | #07934f |
+| 43 | 43 | #05ba97 |
+| 44 | 44 | #03bbbb |
+| 93 | #9758fe | 93 |
+| 111 | 111 | #6f96e4 |
+| 135 | #b776ff | #9b48e8 |
+| 160 | #f53629 | 160 |
+| 166 | #ed7327 | #c05400 |
+| 170 | #de66de | 170 |
+| 178 | 178 | #b99709 |
+| 208 | 208 | #db7302 |
+| 213 | 213 | #e36de4 |
+
+Bold over the default foreground takes the set's emphasis colour (§ Emphasis).
 
 ### Classification and identity shades
 
