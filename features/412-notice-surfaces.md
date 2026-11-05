@@ -789,6 +789,60 @@ Disposition (architect, 2026-10-22): accepted. The cost is the framework's
 fixed 2.1 MB of compiled code, magnified by the allocator at multi-GB peaks,
 with no extra data held per line, per key or per file.
 
+### Reopened: a key pressed straight after Esc was lost (2026-11-04)
+
+**The criterion** (§ Acceptance criteria, Browser): "Esc back one layer, Esc
+and c closing, q and x quitting".
+
+**What was reported** (§ Open items): in Windows Terminal, with the browser of
+`--notice-fixture browser-many` and a notice's options layered over it, Esc
+then a `q` sent 0.5 s later left the browser open, in 3 of 3 tries; a `q`
+about 0.8 s after Esc quit.
+
+**Reproduced on macOS** in a tmux pane of 120 by 34, with the same fixture,
+options and keys, when Esc and `q` reach `ltl` together (one `send-keys`
+call): the options layer closes, the `q` is lost, and the browser stays open
+with the run waiting.
+
+**Cause.** `notice_read_key()` tells a lone Esc from a key's escape sequence
+(an arrow is ESC `[` A) by reading the character after the Esc within 50 ms.
+When that character was neither `[` nor `O`, the reader returned Esc and
+dropped it. A key that reached the reader with the Esc, or within 50 ms of
+it, was lost. The prototype's key reader (`read_key()` in
+`prototype/412-notice-surfaces/lib/NoticeProto.pm`) has the same lines.
+
+**On Windows**, the capture made 0.5 s after the Esc
+(`prototype/749-terminal-colour-codes/results/windows-terminal/e-ltl/notices/`,
+`*-browser-esc.png`, in both schemes) still shows the options layer. So `ltl`
+had not yet acted on the Esc when the `q` came, and read the `q` as the
+character after it. Why the Esc is acted on that late on Windows is not
+established here; the candidates are the terminal's delivery of a lone Esc and
+Term::ReadKey's timed console read (`Win32PeekChar`). macOS acts on a lone Esc
+within the 50 ms.
+
+**The fix.** `notice_read_key()` keeps that character as the next key: the
+next call returns it before reading the terminal. Every surface reads its keys
+through this sub, so the ask, its options list, the layered list and the
+browser all take it.
+
+**Proven** on macOS, `ltl` at the base (bde5c335) against this branch, the
+same runs, each with `-V notices`, in a tmux pane of 120 by 34:
+
+| keys | base | fix |
+|---|---|---|
+| options layered over the browser; Esc and `q` together | the layer closes, `q` lost, the browser stays open, the run waits | the layer closes, then `q` quits: `-V notices` written, the run stopped, the terminal given back |
+| the same; Esc, then `q` 0.5 s later | quits | quits |
+| the same; Esc and Esc together | the layer closes, the second Esc lost, the browser stays open | the layer closes, then the browser closes and the run goes on |
+| the same; Esc alone, then `c` 1 s later | the layer closes; `c` closes the browser | the same |
+| the browser; Right, Shift-Tab, Down | the tabs and the selection move | the same, every screen identical |
+| the modal question; Esc and `q` together | Esc takes the default (`how=esc`), the run goes on | the same |
+| the options list of the modal; Down, then Esc and `q` together | Esc takes the default option (`how=esc`), the run goes on | the same |
+
+The unchanged cases are identical, the `-V notices` section included, apart
+from the run's own time and memory lines. No run printed a runtime warning.
+In the last two rows the Esc closes the only surface, so nothing reads the
+kept `q` and the run goes on as before.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
@@ -1232,7 +1286,8 @@ browser setting it through the layered ask.
 ## Open items
 
 - **Reopened (architect, 2026-11-04): on Windows, a `q` sent half a second
-  after Esc is lost in the browser.**
+  after Esc is lost in the browser.** Cause and fix: § Reopened: a key
+  pressed straight after Esc was lost.
   - **The criterion** (§ Acceptance criteria, Browser): "Esc back one layer,
     Esc and c closing, q and x quitting".
   - **The run:** measured in Windows Terminal on One Half Light, 34 rows,
