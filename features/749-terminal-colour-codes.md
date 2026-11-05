@@ -215,8 +215,8 @@ percentile row's text is "black (index 0)" on every background),
 `docs/architecture-patterns.md` § Run-scoped activation flags resolved once
 (the background flag). Issues: #683 (a value drawn over a bar keeps a fixed
 foreground colour, unreadable on dark bars), open, which § 5.5 measures;
-#666 (the histogram's count highlight 51 differs from the timeline's 36),
-open, which § 7 extends.
+#666 (the histogram's highlighted colour differs from the bar chart's
+highlighted fill), open, which § 7 extends.
 
 **Dismissed:**
 
@@ -573,8 +573,9 @@ called a defect.
 - **Highlight numbers and strings.** For cyan, blue and magenta the
   histogram's `highlighted_bg_num` (51, 27, 207) differs from the
   `highlighted_bg` string the timeline writes (36, 21, 201). #666 (the
-  histogram's count highlight 51 differs from the timeline's 36) covers cyan
-  only.
+  histogram's highlighted colour differs from the bar chart's highlighted
+  fill) covered cyan only when this was written; the architect widened it
+  to all three on 2026-11-05.
 - **`-HL` twins.** The twin loop gives a highlight background only to
   `0;31`-`0;35`; `AUDIT`/`CREATE` (`0;36`) and every bright key get `49`.
 - **A move's knock-on.** `summary_bar_color` finds a category's bar colour
