@@ -123,10 +123,9 @@ apart from its plain fill. The text over every fill is black or white
 | teal | 29 | 43 |
 | purple | 55 | 93 |
 
-The histogram's highlighted part does not follow this table for three colours:
-it reads a second number of the colour's entry (`highlighted_bg_num`), 51 for
-cyan, 27 for blue in every condition and 207 for magenta (#666, the
-histogram's count highlight differs from the timeline's).
+The histogram draws in the same fills as the bar chart: its bars in the plain
+fill and its highlighted part in the highlighted fill of its metric's colour,
+in every condition.
 
 **Gradients**, the heatmap's eight steps, faintest first. While the background
 is not known, the 256-colour steps; once it is known, the set's, each step in
